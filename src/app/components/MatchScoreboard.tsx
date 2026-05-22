@@ -100,7 +100,7 @@ export function MatchScoreboard() {
           {/* Header */}
           <div className="mb-8">
             <button
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/matches')}
               className="flex items-center gap-2 text-gray-400 hover:text-white mb-4 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
