@@ -14,7 +14,7 @@ export function Header() {
             </div>
 
             <nav className="hidden md:flex items-center gap-6">
-              <a href="/match" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
+              <a href="/matches" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
                 <Calendar className="w-4 h-4" />
                 <span className="text-sm">Matches</span>
               </a>
