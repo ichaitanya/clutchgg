@@ -104,7 +104,7 @@ export function MatchScoreboard() {
               className="flex items-center gap-2 text-gray-400 hover:text-white mb-4 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
-              Back to Home
+              Back
             </button>
 
           <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-6">
