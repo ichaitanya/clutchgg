@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Shield, Plus, Trash2, Edit3, Save, X, ChevronDown,
+  Shield, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronRight,
   Tv, Calendar, Clock, Users, Trophy, AlertCircle,
   CheckCircle, Eye, EyeOff, Swords, BarChart2, Globe,
-  Lock, LogOut, KeyRound, User, TrendingUp
+  Lock, LogOut, KeyRound, User, TrendingUp, Zap
 } from 'lucide-react';
+import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -195,6 +196,7 @@ interface AdminData {
   standings: StandingTeam[];
   news: NewsItem[];
   players: TopPlayer[];
+  tournaments: Tournament[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -229,6 +231,7 @@ const defaultData: AdminData = {
     { id: uid(), rank: 3, name: 'aspas', team: 'LOUD', rating: 1.35, kills: 261, deaths: 198 },
     { id: uid(), rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
   ],
+  tournaments: [],
 };
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -685,7 +688,7 @@ function SideTab({ icon: Icon, label, active, count, onClick }: {
 
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
-type Tab = 'matches' | 'standings' | 'news' | 'players';
+type Tab = 'matches' | 'standings' | 'news' | 'players' | 'tournaments';
 
 export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
@@ -715,6 +718,9 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   const [addingMatch, setAddingMatch] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
+  const [creatingTournament, setCreatingTournament] = useState(false);
+  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
+
   // Load from localStorage on mount
   useEffect(() => {
     try {
@@ -723,6 +729,8 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
         const parsed = JSON.parse(stored);
         // Migrate old data that lacks players key
         if (!parsed.players) parsed.players = defaultData.players;
+        // Migrate old data that lacks tournaments key
+        if (!parsed.tournaments) parsed.tournaments = [];
         setData(parsed);
       }
     } catch {}
@@ -803,6 +811,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
         <aside className="w-56 bg-[#0d0f16] border-r border-[#1e2130] flex flex-col p-4 gap-1 flex-shrink-0">
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Content</p>
           <SideTab icon={Swords} label="Matches" active={tab === 'matches'} count={data.matches.length} onClick={() => setTab('matches')} />
+          <SideTab icon={Trophy} label="Tournaments" active={tab === 'tournaments'} count={data.tournaments.length} onClick={() => setTab('tournaments')} />
           <SideTab icon={BarChart2} label="Standings" active={tab === 'standings'} count={data.standings.length} onClick={() => setTab('standings')} />
           <SideTab icon={Trophy} label="News" active={tab === 'news'} count={data.news.length} onClick={() => setTab('news')} />
           <SideTab icon={TrendingUp} label="Top Players" active={tab === 'players'} count={(data.players || []).length} onClick={() => setTab('players')} />
@@ -928,7 +937,125 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
             </div>
           )}
 
-          {/* ── STANDINGS TAB ── */}
+          {/* ── TOURNAMENTS TAB ── */}
+          {tab === 'tournaments' && (
+            <div className="max-w-4xl space-y-5">
+              {!creatingTournament && !editingTournament ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-white font-bold text-lg">Tournaments</h2>
+                      <p className="text-gray-500 text-sm">Create and manage tournaments</p>
+                    </div>
+                    <button
+                      onClick={() => setCreatingTournament(true)}
+                      className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
+                    >
+                      <Plus className="w-4 h-4" /> Create Tournament
+                    </button>
+                  </div>
+
+                  {/* Tournaments List */}
+                  <div className="space-y-3">
+                    {data.tournaments.length === 0 ? (
+                      <div className="text-center py-16 text-gray-600">
+                        <Trophy className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                        <p className="text-sm">No tournaments yet. Create one above.</p>
+                      </div>
+                    ) : (
+                      data.tournaments.map(tournament => (
+                        <div
+                          key={tournament.id}
+                          className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-4 hover:border-[#3a3d4a] transition-all"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-white font-bold text-base mb-1">
+                                {tournament.name}
+                              </h3>
+                              <p className="text-gray-400 text-sm mb-3">{tournament.overview}</p>
+                              <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <Users className="w-3 h-3" />
+                                  {tournament.teams.length} team{tournament.teams.length !== 1 ? 's' : ''}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  {tournament.teams.reduce((sum, t) => sum + t.players.length, 0)} player{tournament.teams.reduce((sum, t) => sum + t.players.length, 0) !== 1 ? 's' : ''}
+                                </span>
+                              </div>
+                              {tournament.teams.length > 0 && (
+                                <div className="mt-3 space-y-1">
+                                  {tournament.teams.map(team => (
+                                    <div
+                                      key={team.id}
+                                      className="text-xs text-gray-500 flex items-center gap-2"
+                                    >
+                                      {team.logo && (
+                                        <div className="w-4 h-4 rounded overflow-hidden">
+                                          <img
+                                            src={team.logo}
+                                            alt={team.name}
+                                            className="w-full h-full object-cover"
+                                          />
+                                        </div>
+                                      )}
+                                      <span>{team.name}</span>
+                                      <span className="text-gray-700">—</span>
+                                      <span>{team.players.length} players</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                onClick={() => setEditingTournament(tournament)}
+                                className="p-2 rounded-lg text-gray-600 hover:text-[#ff4655] hover:bg-[#1e2130] transition-all"
+                              >
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  save({ ...data, tournaments: data.tournaments.filter(t => t.id !== tournament.id) });
+                                }}
+                                className="p-2 rounded-lg text-gray-600 hover:text-[#ff4655] hover:bg-[#1e2130] transition-all"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : creatingTournament ? (
+                <CreateTournamentScreen
+                  onComplete={(tournament) => {
+                    save({ ...data, tournaments: [...data.tournaments, tournament] });
+                    setCreatingTournament(false);
+                  }}
+                />
+              ) : editingTournament ? (
+                <CreateTournamentScreen
+                  initialTournament={editingTournament}
+                  isEditing={true}
+                  onComplete={(updatedTournament) => {
+                    save({
+                      ...data,
+                      tournaments: data.tournaments.map(t =>
+                        t.id === updatedTournament.id ? updatedTournament : t
+                      ),
+                    });
+                    setEditingTournament(null);
+                  }}
+                />
+              ) : null}
+            </div>
+          )}
+
+
           {tab === 'standings' && (
             <div className="max-w-3xl space-y-5">
               <div className="flex items-center justify-between">
