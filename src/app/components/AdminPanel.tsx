@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Shield, Plus, Trash2, Edit3, Save, X, ChevronDown,
   Tv, Calendar, Clock, Users, Trophy, AlertCircle,
@@ -64,7 +65,7 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
               <div className="w-14 h-14 bg-[#ff4655]/10 border border-[#ff4655]/20 rounded-2xl flex items-center justify-center mb-4">
                 <Shield className="w-7 h-7 text-[#ff4655]" />
               </div>
-              <h1 className="text-white font-bold text-xl tracking-tight">VCT Admin Panel</h1>
+              <h1 className="text-white font-bold text-xl tracking-tight">Clutchgg Admin Panel</h1>
               <p className="text-gray-500 text-sm mt-1">Sign in to manage content</p>
             </div>
 
@@ -266,7 +267,7 @@ function StatusBadge({ status }: { status: MatchStatus }) {
 const emptyMatch = (): Match => ({
   id: uid(), team1: '', team2: '', score1: 0, score2: 0,
   map: '', viewers: '', status: 'upcoming',
-  tournament: 'VCT Masters', date: '', time: '', visible: true,
+  tournament: 'Valorant Tournament', date: '', time: '', visible: true,
 });
 
 function MatchForm({ match, onSave, onCancel }: {
@@ -395,7 +396,7 @@ function MatchForm({ match, onSave, onCancel }: {
         <label className="block text-xs text-gray-400 mb-1.5 font-medium">Tournament / Stage</label>
         <input
           className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-          value={form.tournament} onChange={e => set('tournament', e.target.value)} placeholder="e.g. VCT Masters - Playoffs"
+          value={form.tournament} onChange={e => set('tournament', e.target.value)} placeholder="e.g. Valorant Tournament - Playoffs"
         />
       </div>
 
@@ -690,6 +691,7 @@ export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
   onDataChange?: (data: AdminData) => void;
 }) {
+  const navigate = useNavigate();
   const [authed, setAuthed] = useState(() => sessionStorage.getItem(AUTH_KEY) === '1');
   if (!authed) {
     return <AdminLogin onSuccess={() => setAuthed(true)} />;
@@ -697,6 +699,7 @@ export function AdminPanel({ onClose, onDataChange }: {
   return <AdminPanelInner onClose={onClose} onDataChange={onDataChange} onLogout={() => {
     sessionStorage.removeItem(AUTH_KEY);
     setAuthed(false);
+    navigate('/');
   }} />;
 }
 
@@ -705,6 +708,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   onDataChange?: (data: AdminData) => void;
   onLogout: () => void;
 }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('matches');
   const [data, setData] = useState<AdminData>(defaultData);
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
@@ -765,7 +769,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
             <Shield className="w-4 h-4 text-[#ff4655]" />
           </div>
           <div>
-            <h1 className="text-white font-bold text-base leading-none">VCT Admin Panel</h1>
+            <h1 className="text-white font-bold text-base leading-none">Clutchgg Admin Panel</h1>
             <p className="text-gray-500 text-xs mt-0.5">Match &amp; content management</p>
           </div>
         </div>
@@ -779,7 +783,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
             <span className="text-xs text-gray-400">Live preview synced</span>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => navigate('/')}
             className="flex items-center gap-2 text-sm text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] hover:border-gray-500 px-3 py-1.5 rounded-lg transition-all"
           >
             <Globe className="w-3.5 h-3.5" /> Back to site

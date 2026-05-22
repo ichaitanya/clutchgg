@@ -1,4 +1,5 @@
 import { Eye } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface LiveMatchProps {
   team1: string;
@@ -8,11 +9,22 @@ interface LiveMatchProps {
   map: string;
   viewers: string;
   isLive?: boolean;
+  matchId?: string;
 }
 
-export function LiveMatch({ team1, team2, score1, score2, map, viewers, isLive = true }: LiveMatchProps) {
+export function LiveMatch({ team1, team2, score1, score2, map, viewers, isLive = true, matchId }: LiveMatchProps) {
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    if (matchId) {
+      navigate(`/match/${matchId}`);
+    }
+  };
   return (
-    <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/50 transition-colors">
+    <div 
+      onClick={handleClick}
+      className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/50 transition-colors cursor-pointer"
+    >
       {isLive && (
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">

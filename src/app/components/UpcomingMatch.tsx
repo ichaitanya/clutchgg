@@ -1,4 +1,5 @@
 import { Calendar, Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface UpcomingMatchProps {
   team1: string;
@@ -6,11 +7,23 @@ interface UpcomingMatchProps {
   tournament: string;
   date: string;
   time: string;
+  matchId?: string;
 }
 
-export function UpcomingMatch({ team1, team2, tournament, date, time }: UpcomingMatchProps) {
+export function UpcomingMatch({ team1, team2, tournament, date, time, matchId }: UpcomingMatchProps) {
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    if (matchId) {
+      navigate(`/match/${matchId}`);
+    }
+  };
+
   return (
-    <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/30 transition-colors cursor-pointer">
+    <div 
+      onClick={handleClick}
+      className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/30 transition-colors cursor-pointer"
+    >
       <div className="flex items-center justify-between mb-4">
         <div className="flex-1 flex items-center justify-between">
           <div className="flex items-center gap-3">

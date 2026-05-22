@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { LiveMatch } from './components/LiveMatch';
@@ -6,13 +7,14 @@ import { UpcomingMatch } from './components/UpcomingMatch';
 import { Standings } from './components/Standings';
 import { NewsCard } from './components/NewsCard';
 import { AdminPanel } from './components/AdminPanel';
-import { TrendingUp, Settings } from 'lucide-react';
+import { MatchScoreboard } from './components/MatchScoreboard';
+import { MatchesPage } from './components/MatchesPage';
+import { TrendingUp } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 
 const STORAGE_KEY = 'vct_admin_data';
 
-export default function App() {
-  const [showAdmin, setShowAdmin] = useState(false);
+function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
   useEffect(() => {
@@ -36,25 +38,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0d0f16]">
-      {showAdmin && (
-        <AdminPanel
-          onClose={() => setShowAdmin(false)}
-          onDataChange={handleDataChange}
-        />
-      )}
-
       <Header />
-
-      {/* Admin toggle button */}
-      <div className="fixed bottom-6 left-6 z-40">
-        <button
-          onClick={() => setShowAdmin(true)}
-          className="flex items-center gap-2 bg-[#1e2130] hover:bg-[#2a2d3a] border border-[#2a2d3a] hover:border-[#ff4655]/40 text-gray-400 hover:text-[#ff4655] text-sm font-medium px-4 py-2.5 rounded-xl transition-all shadow-xl"
-        >
-          <Settings className="w-4 h-4" />
-          Admin Panel
-        </button>
-      </div>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         <HeroSection />
@@ -78,12 +62,13 @@ export default function App() {
                       team1={m.team1} team2={m.team2}
                       score1={m.score1} score2={m.score2}
                       map={m.map} viewers={m.viewers}
+                      matchId={m.id}
                     />
                   ))
                 ) : !adminData ? (
                   <>
-                    <LiveMatch team1="Paper Rex" team2="Fnatic" score1={11} score2={8} map="Bind - Round 19/24" viewers="125K" />
-                    <LiveMatch team1="Loud" team2="Evil Geniuses" score1={9} score2={6} map="Haven - Round 15/24" viewers="98K" />
+                    <LiveMatch team1="Paper Rex" team2="Fnatic" score1={11} score2={8} map="Bind - Round 19/24" viewers="125K" matchId="1" />
+                    <LiveMatch team1="Loud" team2="Evil Geniuses" score1={9} score2={6} map="Haven - Round 15/24" viewers="98K" matchId="2" />
                   </>
                 ) : (
                   <div className="col-span-2 text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
@@ -110,13 +95,14 @@ export default function App() {
                       team1={m.team1} team2={m.team2}
                       tournament={m.tournament}
                       date={m.date} time={m.time}
+                      matchId={m.id}
                     />
                   ))
                 ) : !adminData ? (
                   <>
-                    <UpcomingMatch team1="Team Liquid" team2="DRX" tournament="VCT Masters - Playoffs" date="May 20" time="14:00 PST" />
-                    <UpcomingMatch team1="100 Thieves" team2="Sentinels" tournament="VCT Masters - Playoffs" date="May 20" time="17:00 PST" />
-                    <UpcomingMatch team1="NRG" team2="Cloud9" tournament="VCT Masters - Playoffs" date="May 21" time="12:00 PST" />
+                    <UpcomingMatch team1="Team Liquid" team2="DRX" tournament="VCT Masters - Playoffs" date="May 20" time="14:00 PST" matchId="3" />
+                    <UpcomingMatch team1="100 Thieves" team2="Sentinels" tournament="VCT Masters - Playoffs" date="May 20" time="17:00 PST" matchId="4" />
+                    <UpcomingMatch team1="NRG" team2="Cloud9" tournament="VCT Masters - Playoffs" date="May 21" time="12:00 PST" matchId="5" />
                   </>
                 ) : (
                   <div className="text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
@@ -205,40 +191,64 @@ export default function App() {
               <Standings />
             )}
 
-            {/* Top Players (always static) */}
-            <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-4">
-                <TrendingUp className="w-5 h-5 text-[#ff4655]" />
-                <h3 className="text-white font-semibold">Top Players</h3>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { name: "Mercury", team: "F5", rating: 1.42, kd: "275/189" },
-                  { name: "Mercury", team: "F5", rating: 1.38, kd: "268/195" },
-                  { name: "Tswagg", team: "F5", rating: 1.35, kd: "261/198" },
-                  { name: "KunduOP", team: "F5", rating: 0.81, kd: "69/96" },
-                ].map((player, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 rounded hover:bg-[#151821] transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                        {index + 1}
-                      </div>
-                      <div>
-                        <div className="text-white text-sm font-semibold">{player.name}</div>
-                        <div className="text-gray-400 text-xs">{player.team}</div>
+             {/* Top Players — driven by admin data if available */}
+                        <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-4">
+                            <TrendingUp className="w-5 h-5 text-[#ff4655]" />
+                            <h3 className="text-white font-semibold">Top Players</h3>
+                          </div>
+                          <div className="space-y-3">
+                            {(adminData?.players && adminData.players.length > 0
+                              ? [...adminData.players].sort((a, b) => a.rank - b.rank)
+                              : [
+                                  { id: '1', rank: 1, name: 'jinggg', team: 'PRX', rating: 1.42, kills: 275, deaths: 189 },
+                                  { id: '2', rank: 2, name: 'Derke', team: 'FNC', rating: 1.38, kills: 268, deaths: 195 },
+                                  { id: '3', rank: 3, name: 'aspas', team: 'LOUD', rating: 1.35, kills: 261, deaths: 198 },
+                                  { id: '4', rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
+                                ]
+                            ).map((player, index) => (
+                              <div key={player.id} className="flex items-center justify-between p-2 rounded hover:bg-[#151821] transition-colors">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                                    {player.rank}
+                                  </div>
+                                  <div>
+                                    <div className="text-white text-sm font-semibold">{player.name}</div>
+                                    <div className="text-gray-400 text-xs">{player.team}</div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-[#ff4655] text-sm font-bold">{player.rating.toFixed(2)}</div>
+                                  <div className="text-gray-400 text-xs">{player.kills}/{player.deaths}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-[#ff4655] text-sm font-bold">{player.rating}</div>
-                      <div className="text-gray-400 text-xs">{player.kd}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
+                  </main>
+                </div>
+  );
+}
+
+function AdminPage() {
+  return (
+    <div className="min-h-screen bg-[#0d0f16]">
+      <AdminPanel onClose={() => {}} onDataChange={() => {}} />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/matches" element={<MatchesPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/match/:matchId" element={<MatchScoreboard />} />
+      </Routes>
+    </Router>
   );
 }
