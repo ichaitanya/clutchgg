@@ -1,10 +1,7 @@
-// Challonge API Service
-// Documentation: https://api.challonge.com/v2.1
+// Challonge API Service (via Vercel Proxy)
+// All requests go through /api/challonge to avoid CORS issues
 
-const API_BASE = 'https://api.challonge.com/v2.1';
-
-// These credentials should be moved to environment variables in production
-const API_KEY = '7eb30334967856353356f5bef299f68176c9432a0ddf45f3';
+const PROXY_BASE = '/api/challonge';
 
 interface ChallongeTournament {
   id: string;
@@ -21,13 +18,6 @@ interface ChallongeParticipant {
   seed?: number;
 }
 
-const headers = {
-  'Content-Type': 'application/vnd.api+json',
-  'Accept': 'application/json',
-  'Authorization-Type': 'v1',
-  'Authorization': API_KEY,
-};
-
 /**
  * Create a new tournament on Challonge
  */
@@ -38,29 +28,30 @@ export async function createChallongeTournament(
   try {
     const uniqueUrl = `${tournamentName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
 
-    const response = await fetch(`${API_BASE}/tournaments`, {
+    const response = await fetch(PROXY_BASE, {
       method: 'POST',
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        tournament: {
-          name: tournamentName,
-          url: uniqueUrl,
-          tournament_type: tournamentType,
-          description: 'Tournament created from Clutchgg Admin Panel',
-          open_signup: false,
-          hold_third_place_match: false,
-          pts_for_match_win: 1,
-          pts_for_match_tie: 0,
-          pts_for_game_win: 0,
-          pts_for_game_tie: 0,
-          pts_for_game_loss: 0,
-        },
+        action: 'create_tournament',
+        name: tournamentName,
+        url: uniqueUrl,
+        tournament_type: tournamentType,
+        description: 'Tournament created from Clutchgg Admin Panel',
+        open_signup: false,
+        hold_third_place_match: false,
+        pts_for_match_win: 1,
+        pts_for_match_tie: 0,
+        pts_for_game_win: 0,
+        pts_for_game_tie: 0,
+        pts_for_game_loss: 0,
       }),
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(`Failed to create tournament: ${error.errors?.[0]?.detail || response.statusText}`);
+      throw new Error(`Failed to create tournament: ${error.error || response.statusText}`);
     }
 
     const data = await response.json();
@@ -80,24 +71,23 @@ export async function addParticipant(
   seedNumber?: number
 ): Promise<ChallongeParticipant> {
   try {
-    const response = await fetch(
-      `${API_BASE}/tournaments/${tournamentId}/participants`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          participant: {
-            name: teamName,
-            email: `${teamName.replace(/\s+/g, '')}${Date.now()}@clutchgg.local`,
-            seed: seedNumber,
-          },
-        }),
-      }
-    );
+    const response = await fetch(PROXY_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'add_participant',
+        tournamentId,
+        name: teamName,
+        email: `${teamName.replace(/\s+/g, '')}${Date.now()}@clutchgg.local`,
+        seed: seedNumber,
+      }),
+    });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(`Failed to add participant: ${error.errors?.[0]?.detail || response.statusText}`);
+      throw new Error(`Failed to add participant: ${error.error || response.statusText}`);
     }
 
     const data = await response.json();
@@ -121,20 +111,21 @@ export async function bulkAddParticipants(
       email: `${team.replace(/\s+/g, '')}${Date.now()}_${index}@clutchgg.local`,
     }));
 
-    const response = await fetch(
-      `${API_BASE}/tournaments/${tournamentId}/participants/bulk`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          participants,
-        }),
-      }
-    );
+    const response = await fetch(PROXY_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'bulk_add_participants',
+        tournamentId,
+        participants,
+      }),
+    });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(`Failed to add participants: ${error.errors?.[0]?.detail || response.statusText}`);
+      throw new Error(`Failed to add participants: ${error.error || response.statusText}`);
     }
 
     const data = await response.json();
@@ -150,18 +141,20 @@ export async function bulkAddParticipants(
  */
 export async function startTournament(tournamentId: string): Promise<ChallongeTournament> {
   try {
-    const response = await fetch(
-      `${API_BASE}/tournaments/${tournamentId}/start`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({}),
-      }
-    );
+    const response = await fetch(PROXY_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'start_tournament',
+        tournamentId,
+      }),
+    });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(`Failed to start tournament: ${error.errors?.[0]?.detail || response.statusText}`);
+      throw new Error(`Failed to start tournament: ${error.error || response.statusText}`);
     }
 
     const data = await response.json();
@@ -184,13 +177,16 @@ export function getBracketUrl(tournamentUrl: string): string {
  */
 export async function getTournamentMatches(tournamentId: string) {
   try {
-    const response = await fetch(
-      `${API_BASE}/tournaments/${tournamentId}/matches`,
-      {
-        method: 'GET',
-        headers,
-      }
-    );
+    const response = await fetch(PROXY_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'get_matches',
+        tournamentId,
+      }),
+    });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch matches: ${response.statusText}`);
