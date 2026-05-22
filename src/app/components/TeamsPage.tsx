@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { ChevronLeft, Users, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { Tournament, TeamInTournament, TournamentPlayer } from './TournamentCreation';
@@ -47,10 +47,12 @@ export function TeamsPage() {
     return allTeams.find(t => t.id === selectedTeamId);
   }, [selectedTeamId, allTeams]);
 
-  // Initialize selected team
-  if (allTeams.length > 0 && !selectedTeamId) {
-    setSelectedTeamId(allTeams[0].id);
-  }
+  // Initialize selected team when first team is available
+  useEffect(() => {
+    if (allTeams.length > 0 && !selectedTeamId && viewMode === 'teams') {
+      setSelectedTeamId(allTeams[0].id);
+    }
+  }, [allTeams.length]);
 
   return (
     <div className="min-h-screen bg-[#0d0f16] pb-24">
@@ -129,6 +131,15 @@ export function TeamsPage() {
         ) : selectedTeam ? (
           // Players Details View
           <div className="space-y-6">
+            {/* Back Button */}
+            <button
+              onClick={() => setViewMode('teams')}
+              className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-4"
+            >
+              <ChevronLeft className="w-5 h-5" />
+              <span>Back to Teams</span>
+            </button>
+
             <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6">
               <div className="flex items-start gap-4 mb-6">
                 {selectedTeam.logo && (
