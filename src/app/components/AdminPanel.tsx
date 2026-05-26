@@ -7,6 +7,7 @@ import {
   Lock, LogOut, KeyRound, User, TrendingUp, Zap
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
+import { TournamentManager } from './TournamentManager';
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -206,31 +207,10 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const STORAGE_KEY = 'vct_admin_data';
 
 const defaultData: AdminData = {
-  matches: [
-    { id: uid(), team1: 'Paper Rex', team2: 'Fnatic', score1: 11, score2: 8, map: 'Bind - Round 19/24', viewers: '125K', status: 'live', tournament: 'VCT Masters - Group Stage', date: '', time: '', visible: true },
-    { id: uid(), team1: 'Loud', team2: 'Evil Geniuses', score1: 9, score2: 6, map: 'Haven - Round 15/24', viewers: '98K', status: 'live', tournament: 'VCT Masters - Group Stage', date: '', time: '', visible: true },
-    { id: uid(), team1: 'Team Liquid', team2: 'DRX', score1: 0, score2: 0, map: '', viewers: '', status: 'upcoming', tournament: 'VCT Masters - Playoffs', date: 'May 20', time: '14:00 PST', visible: true },
-    { id: uid(), team1: '100 Thieves', team2: 'Sentinels', score1: 0, score2: 0, map: '', viewers: '', status: 'upcoming', tournament: 'VCT Masters - Playoffs', date: 'May 20', time: '17:00 PST', visible: true },
-    { id: uid(), team1: 'NRG', team2: 'Cloud9', score1: 0, score2: 0, map: '', viewers: '', status: 'upcoming', tournament: 'VCT Masters - Playoffs', date: 'May 21', time: '12:00 PST', visible: true },
-  ],
-  standings: [
-    { id: uid(), rank: 1, name: 'Paper Rex', wins: 8, losses: 2 },
-    { id: uid(), rank: 2, name: 'Fnatic', wins: 7, losses: 3 },
-    { id: uid(), rank: 3, name: 'Loud', wins: 7, losses: 3 },
-    { id: uid(), rank: 4, name: 'Evil Geniuses', wins: 6, losses: 4 },
-    { id: uid(), rank: 5, name: 'Team Liquid', wins: 5, losses: 5 },
-    { id: uid(), rank: 6, name: 'DRX', wins: 4, losses: 6 },
-  ],
-  news: [
-    { id: uid(), title: 'Paper Rex dominate in opening match with flawless attacking rounds', category: 'MATCH RECAP', timeAgo: '2 hours ago', imageUrl: 'https://images.unsplash.com/photo-1558008258-7ff8888b42b0?w=400', visible: true },
-    { id: uid(), title: 'Masters playoffs bracket revealed: Top seeds face tough competition', category: 'TOURNAMENT', timeAgo: '5 hours ago', imageUrl: 'https://images.unsplash.com/photo-1548686304-5c3be888a00b?w=400', visible: true },
-  ],
-  players: [
-    { id: uid(), rank: 1, name: 'jinggg', team: 'PRX', rating: 1.42, kills: 275, deaths: 189 },
-    { id: uid(), rank: 2, name: 'Derke', team: 'FNC', rating: 1.38, kills: 268, deaths: 195 },
-    { id: uid(), rank: 3, name: 'aspas', team: 'LOUD', rating: 1.35, kills: 261, deaths: 198 },
-    { id: uid(), rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
-  ],
+  matches: [],
+  standings: [],
+  news: [],
+  players: [],
   tournaments: [],
 };
 
@@ -718,9 +698,6 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   const [addingMatch, setAddingMatch] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
-  const [creatingTournament, setCreatingTournament] = useState(false);
-  const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
-
   // Load from localStorage on mount
   useEffect(() => {
     try {
@@ -939,122 +916,15 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
 
           {/* ── TOURNAMENTS TAB ── */}
           {tab === 'tournaments' && (
-            <div className="max-w-4xl space-y-5">
-              {!creatingTournament && !editingTournament ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-white font-bold text-lg">Tournaments</h2>
-                      <p className="text-gray-500 text-sm">Create and manage tournaments</p>
-                    </div>
-                    <button
-                      onClick={() => setCreatingTournament(true)}
-                      className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
-                    >
-                      <Plus className="w-4 h-4" /> Create Tournament
-                    </button>
-                  </div>
-
-                  {/* Tournaments List */}
-                  <div className="space-y-3">
-                    {data.tournaments.length === 0 ? (
-                      <div className="text-center py-16 text-gray-600">
-                        <Trophy className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                        <p className="text-sm">No tournaments yet. Create one above.</p>
-                      </div>
-                    ) : (
-                      data.tournaments.map(tournament => (
-                        <div
-                          key={tournament.id}
-                          className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-4 hover:border-[#3a3d4a] transition-all"
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-white font-bold text-base mb-1">
-                                {tournament.name}
-                              </h3>
-                              <p className="text-gray-400 text-sm mb-3">{tournament.overview}</p>
-                              <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
-                                <span className="flex items-center gap-1">
-                                  <Users className="w-3 h-3" />
-                                  {tournament.teams.length} team{tournament.teams.length !== 1 ? 's' : ''}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <User className="w-3 h-3" />
-                                  {tournament.teams.reduce((sum, t) => sum + t.players.length, 0)} player{tournament.teams.reduce((sum, t) => sum + t.players.length, 0) !== 1 ? 's' : ''}
-                                </span>
-                              </div>
-                              {tournament.teams.length > 0 && (
-                                <div className="mt-3 space-y-1">
-                                  {tournament.teams.map(team => (
-                                    <div
-                                      key={team.id}
-                                      className="text-xs text-gray-500 flex items-center gap-2"
-                                    >
-                                      {team.logo && (
-                                        <div className="w-4 h-4 rounded overflow-hidden">
-                                          <img
-                                            src={team.logo}
-                                            alt={team.name}
-                                            className="w-full h-full object-cover"
-                                          />
-                                        </div>
-                                      )}
-                                      <span>{team.name}</span>
-                                      <span className="text-gray-700">—</span>
-                                      <span>{team.players.length} players</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <button
-                                onClick={() => setEditingTournament(tournament)}
-                                className="p-2 rounded-lg text-gray-600 hover:text-[#ff4655] hover:bg-[#1e2130] transition-all"
-                              >
-                                <ChevronRight className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  save({ ...data, tournaments: data.tournaments.filter(t => t.id !== tournament.id) });
-                                }}
-                                className="p-2 rounded-lg text-gray-600 hover:text-[#ff4655] hover:bg-[#1e2130] transition-all"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </>
-              ) : creatingTournament ? (
-                <CreateTournamentScreen
-                  onComplete={(tournament) => {
-                    save({ ...data, tournaments: [...data.tournaments, tournament] });
-                    setCreatingTournament(false);
-                  }}
-                />
-              ) : editingTournament ? (
-                <CreateTournamentScreen
-                  initialTournament={editingTournament}
-                  isEditing={true}
-                  onComplete={(updatedTournament) => {
-                    save({
-                      ...data,
-                      tournaments: data.tournaments.map(t =>
-                        t.id === updatedTournament.id ? updatedTournament : t
-                      ),
-                    });
-                    setEditingTournament(null);
-                  }}
-                />
-              ) : null}
+            <div className="max-w-6xl">
+              <TournamentManager
+                tournaments={data.tournaments}
+                onTournamentsChange={(tournaments) => {
+                  save({ ...data, tournaments });
+                }}
+              />
             </div>
           )}
-
 
           {tab === 'standings' && (
             <div className="max-w-3xl space-y-5">

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, Loader, ExternalLink } from 'lucide-react';
-import * as ChallongeAPI from '../services/challongeApi';
+import * as ChallongeAPI from '../services/challongeApiDirect';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -20,12 +20,43 @@ export interface TeamInTournament {
   players: TournamentPlayer[];
 }
 
+export interface TournamentEvent {
+  type: 'online' | 'offline' | 'hybrid';
+  location?: string;
+  startDate: string;
+  endDate: string;
+  maxTeams: number;
+  registeredTeams?: string[]; // Array of team IDs
+}
+
+export interface BracketMatch {
+  id: string;
+  team1Id: string;
+  team2Id: string;
+  team1Name: string;
+  team2Name: string;
+  winner?: string; // team ID of winner
+  round: number;
+  position: number; // Position in the round
+}
+
+export interface BracketGenerated {
+  rounds: BracketMatch[][];
+  customizationHistory: Array<{
+    timestamp: string;
+    changes: string;
+  }>;
+}
+
 export interface Tournament {
   id: string;
   name: string;
   overview: string;
   teams: TeamInTournament[];
+  event?: TournamentEvent;
   bracket?: BracketData;
+  generatedBracket?: BracketGenerated;
+  status: 'planning' | 'registration' | 'in-progress' | 'completed';
 }
 
 export interface BracketData {
@@ -195,6 +226,7 @@ function AddPlayersScreen({
         id: `slot-${i}`,
         name: '',
         role: undefined as PlayerRole | undefined,
+        photo: undefined,
       })),
   ].slice(0, totalSlots);
 
@@ -496,6 +528,15 @@ function BracketCreationModal({
     setError(null);
 
     try {
+      // Test API key first
+      console.log('Testing Challonge API key...');
+      const apiTest = await ChallongeAPI.testApiKey();
+      if (!apiTest.valid) {
+        setError(`API Configuration Error: ${apiTest.message}. Please check your Challonge API key.`);
+        setLoading(false);
+        return;
+      }
+
       const teamNames = tournament.teams.map(t => t.name);
       const result = await ChallongeAPI.createFullTournament(
         tournament.name,
@@ -662,6 +703,7 @@ function CreateTournamentScreen({
       name: '',
       overview: '',
       teams: [],
+      status: 'planning',
     }
   );
   const [currentTeam, setCurrentTeam] = useState<TeamInTournament | null>(null);
@@ -974,4 +1016,3 @@ function TournamentForm({
 // ── Main Export ────────────────────────────────────────────────────────────
 
 export { CreateTournamentScreen };
-export type { Tournament, BracketData, TeamInTournament, TournamentPlayer };

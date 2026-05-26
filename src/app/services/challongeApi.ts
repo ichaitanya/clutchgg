@@ -1,11 +1,7 @@
 // Challonge API Service
-// Uses a public CORS proxy service for browser requests
+// Uses backend API route to avoid CORS issues
 
-const DIRECT_API_BASE = 'https://api.challonge.com/v2.1';
-const API_KEY = '7eb30334967856353356f5bef299f68176c9432a0ddf45f3';
-
-// Use AllOrigins CORS proxy - more reliable than cors-anywhere
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const BACKEND_API = '/api/challonge';
 
 interface ChallongeTournament {
   id: string;
@@ -23,50 +19,64 @@ interface ChallongeParticipant {
 }
 
 /**
- * Make request through CORS proxy
+ * Test if API key is valid
+ */
+export async function testApiKey(): Promise<{ valid: boolean; message: string }> {
+  try {
+    const response = await fetch('/api/challonge?healthCheck=true');
+    const data = await response.json();
+    
+    if (data.valid) {
+      return { valid: true, message: '✓ API key is valid!' };
+    } else {
+      return { valid: false, message: `❌ API Error: ${data.reason}` };
+    }
+  } catch (error: any) {
+    return { valid: false, message: `❌ Connection Error: ${error.message}` };
+  }
+}
+
+/**
+ * Make request through backend API
  */
 async function proxyRequest(
   path: string,
   method: 'GET' | 'POST' | 'PUT' = 'POST',
   body?: any
 ) {
-  const url = `${DIRECT_API_BASE}${path}`;
-  
-  // Encode the URL for the proxy
-  const encodedUrl = encodeURIComponent(url);
-  const proxyUrl = `${CORS_PROXY}${encodedUrl}`;
-
-  const headers = new Headers({
-    'Content-Type': 'application/vnd.api+json',
-    'Accept': 'application/json',
-    'Authorization-Type': 'v1',
-    'Authorization': API_KEY,
-  });
-
   try {
     console.log(`[Challonge] ${method} ${path}`);
     
+    // Ensure path starts with /
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    
+    // Build the backend URL with path as query parameter
+    const apiUrl = `/api/challonge?path=${encodeURIComponent(normalizedPath)}`;
+    console.log(`[Challonge] Calling backend: ${apiUrl}`);
+
     const fetchOptions: RequestInit = {
       method,
-      headers,
+      headers: {
+        'Content-Type': 'application/vnd.api+json',
+        'Accept': 'application/json',
+      },
     };
 
-    if (body && method !== 'GET') {
-      // For proxy services, we need to handle body differently
-      // Send the body and authorization through custom headers
-      if (method === 'POST' || method === 'PUT') {
-        fetchOptions.body = JSON.stringify(body);
-      }
+    if (body && (method === 'POST' || method === 'PUT')) {
+      fetchOptions.body = JSON.stringify(body);
+      console.log(`[Challonge] Request body:`, body);
     }
 
-    const response = await fetch(proxyUrl, fetchOptions);
-    
+    const response = await fetch(apiUrl, fetchOptions);
+    const data = await response.json().catch(() => null);
+
     if (!response.ok) {
-      console.error(`[Challonge] Error ${response.status}:`, response.statusText);
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      const errorMessage = data?.error || data?.message || `API Error: ${response.status} ${response.statusText}`;
+      console.error(`[Challonge] Error ${response.status}:`, data);
+      throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    console.log(`[Challonge] Response:`, data);
     return data;
   } catch (error) {
     console.error('[Challonge] Request failed:', error);
@@ -84,11 +94,16 @@ export async function createChallongeTournament(
   try {
     const uniqueUrl = `${tournamentName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
 
+    // Convert tournament type to Challonge format (spaces to underscores)
+    const challongeType = tournamentType.replace(/\s+/g, '_');
+    
+    console.log(`[Challonge] Creating tournament with type: ${challongeType}`);
+
     const data = await proxyRequest('/tournaments', 'POST', {
       tournament: {
         name: tournamentName,
         url: uniqueUrl,
-        tournament_type: tournamentType,
+        tournament_type: challongeType,
         description: 'Tournament created from Clutchgg Admin Panel',
         open_signup: false,
         hold_third_place_match: false,
