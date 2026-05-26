@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, Loader, ExternalLink } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
+import { BracketConfigurationModal } from './BracketConfigurationModal';
+import { TwoStageTournamentModal } from './TwoStageTournamentModal';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +40,26 @@ export interface BracketMatch {
   winner?: string; // team ID of winner
   round: number;
   position: number; // Position in the round
+  date?: string; // YYYY-MM-DD format
+  time?: string; // HH:MM format
+}
+
+export interface GroupStageTeam {
+  id: string;
+  name: string;
+  wins?: number;
+  losses?: number;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  teams: GroupStageTeam[];
+}
+
+export interface GroupStage {
+  groups: Group[];
+  teamsQualifyingPerGroup: number; // Number of teams from each group that qualify
 }
 
 export interface BracketGenerated {
@@ -56,6 +78,8 @@ export interface Tournament {
   event?: TournamentEvent;
   bracket?: BracketData;
   generatedBracket?: BracketGenerated;
+  groupStage?: GroupStage;
+  knockoutBracket?: BracketGenerated; // For second stage
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
 }
 
@@ -502,186 +526,86 @@ function AddTeamScreen({
   );
 }
 
-// ── Bracket Creation Modal ─────────────────────────────────────────────────
+// ── Match Edit Modal ───────────────────────────────────────────────────────
 
-function BracketCreationModal({
-  tournament,
-  onClose,
-  onSuccess,
+function MatchEditModal({
+  match,
+  onSave,
+  onCancel,
 }: {
-  tournament: Tournament;
-  onClose: () => void;
-  onSuccess: (bracketData: BracketData) => void;
+  match: BracketMatch;
+  onSave: (match: BracketMatch) => void;
+  onCancel: () => void;
 }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [bracketResult, setBracketResult] = useState<any>(null);
-  const [tournamentType, setTournamentType] = useState<'single elimination' | 'double elimination' | 'round robin' | 'swiss'>('single elimination');
-
-  const handleCreateBracket = async () => {
-    if (tournament.teams.length === 0) {
-      setError('No teams in this tournament');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Test API key first
-      console.log('Testing Challonge API key...');
-      const apiTest = await ChallongeAPI.testApiKey();
-      if (!apiTest.valid) {
-        setError(`API Configuration Error: ${apiTest.message}. Please check your Challonge API key.`);
-        setLoading(false);
-        return;
-      }
-
-      const teamNames = tournament.teams.map(t => t.name);
-      const result = await ChallongeAPI.createFullTournament(
-        tournament.name,
-        teamNames,
-        tournamentType
-      );
-
-      setBracketResult(result);
-      console.log('Bracket created successfully:', result);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create bracket');
-      console.error('Error creating bracket:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [form, setForm] = useState<BracketMatch>(match);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl max-w-md w-full">
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a]">
-          <h3 className="text-white font-bold text-base">Create Tournament Bracket</h3>
+          <h2 className="text-white font-bold text-lg">Edit Match Schedule</h2>
           <button
-            onClick={onClose}
+            onClick={onCancel}
             className="text-gray-500 hover:text-white transition-colors"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
-          {bracketResult ? (
-            // Success State
-            <div className="space-y-4">
-              <div className="bg-green-900/20 border border-green-700/50 rounded-lg p-4">
-                <p className="text-green-400 text-sm font-semibold mb-2">✓ Bracket Created Successfully!</p>
-                <p className="text-gray-300 text-xs mb-3">{tournament.teams.length} teams added to the bracket</p>
-              </div>
+        <div className="p-6 space-y-5">
+          {/* Match Info */}
+          <div className="bg-[#0d0f16] rounded-lg p-4 border border-[#2a2d3a]">
+            <p className="text-gray-400 text-xs mb-2">Match</p>
+            <p className="text-white font-semibold text-sm">
+              {form.team1Name} vs {form.team2Name}
+            </p>
+          </div>
 
-              <div className="space-y-2">
-                <p className="text-gray-400 text-xs font-medium">Tournament Details:</p>
-                <div className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-3 space-y-2 text-xs">
-                  <div>
-                    <p className="text-gray-500">Name</p>
-                    <p className="text-white font-semibold">{bracketResult.name}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Tournament ID</p>
-                    <p className="text-white font-mono text-xs break-all">{bracketResult.tournamentId}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500">Bracket URL</p>
-                    <p className="text-[#ff4655] font-semibold">{bracketResult.bracketUrl}</p>
-                  </div>
-                </div>
-              </div>
+          {/* Date */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Date</label>
+            <input
+              type="date"
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              value={form.date || ''}
+              onChange={(e) => setForm(f => ({ ...f, date: e.target.value }))}
+            />
+          </div>
 
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    const bracketData: BracketData = {
-                      challongeId: bracketResult.tournamentId,
-                      challongeUrl: bracketResult.tournamentUrl,
-                      bracketUrl: bracketResult.bracketUrl,
-                      createdAt: new Date().toISOString(),
-                    };
-                    onSuccess(bracketData);
-                  }}
-                  className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
-                >
-                  Save & Close
-                </button>
-                <a
-                  href={bracketResult.bracketUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all flex items-center justify-center gap-2"
-                >
-                  <ExternalLink className="w-4 h-4" /> View Bracket
-                </a>
-              </div>
-            </div>
-          ) : (
-            // Creation State
-            <div className="space-y-4">
-              <div>
-                <p className="text-gray-300 text-sm mb-3">
-                  Create a bracket on Challonge for <span className="font-semibold text-white">{tournament.name}</span>
-                </p>
-                <p className="text-gray-500 text-xs">
-                  {tournament.teams.length} team{tournament.teams.length !== 1 ? 's' : ''} will be added to the bracket
-                </p>
-              </div>
+          {/* Time */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Time</label>
+            <input
+              type="time"
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              value={form.time || ''}
+              onChange={(e) => setForm(f => ({ ...f, time: e.target.value }))}
+            />
+          </div>
 
-              <div>
-                <label className="block text-xs text-gray-400 mb-2 font-medium">
-                  Bracket Type *
-                </label>
-                <select
-                  value={tournamentType}
-                  onChange={(e) => setTournamentType(e.target.value as any)}
-                  className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                >
-                  <option value="single elimination">Single Elimination</option>
-                  <option value="double elimination">Double Elimination</option>
-                  <option value="round robin">Round Robin</option>
-                  <option value="swiss">Swiss</option>
-                </select>
-              </div>
-
-              {error && (
-                <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-3">
-                  <p className="text-red-400 text-xs">{error}</p>
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={onClose}
-                  disabled={loading}
-                  className="flex-1 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateBracket}
-                  disabled={loading}
-                  className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" /> Creating...
-                    </>
-                  ) : (
-                    <>Create Bracket</>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
+          {/* Actions */}
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => onSave(form)}
+              className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
+            >
+              Save <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+// ── Bracket Creation Modal ─────────────────────────────────────────────────
 
 // ── Create Tournament Screen ───────────────────────────────────────────────
 
@@ -709,6 +633,7 @@ function CreateTournamentScreen({
   const [currentTeam, setCurrentTeam] = useState<TeamInTournament | null>(null);
   const [editingTeamIndex, setEditingTeamIndex] = useState<number | null>(null);
   const [showBracketModal, setShowBracketModal] = useState(false);
+  const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
 
   const handleTournamentSave = (name: string, overview: string) => {
     setTournament(t => ({ ...t, name, overview }));
@@ -762,6 +687,27 @@ function CreateTournamentScreen({
   const handleBracketCreated = (bracketData: BracketData) => {
     setTournament(t => ({ ...t, bracket: bracketData }));
     setShowBracketModal(false);
+  };
+
+  const handleBracketConfigurationGenerated = (bracket: BracketGenerated) => {
+    setTournament(t => ({ ...t, generatedBracket: bracket }));
+    setShowBracketModal(false);
+  };
+
+  const handleMatchEdit = (updatedMatch: BracketMatch) => {
+    if (!tournament.generatedBracket) return;
+
+    const newBracket = {
+      ...tournament.generatedBracket,
+      rounds: tournament.generatedBracket.rounds.map(round =>
+        round.map(match =>
+          match.id === updatedMatch.id ? updatedMatch : match
+        )
+      ),
+    };
+
+    setTournament(t => ({ ...t, generatedBracket: newBracket }));
+    setEditingMatch(null);
   };
 
   return (
@@ -866,6 +812,54 @@ function CreateTournamentScreen({
             </div>
           )}
 
+          {/* Generated Bracket Matches Section */}
+          {tournament.generatedBracket && (
+            <div className="bg-[#151821] border border-[#ff4655]/50 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">Bracket Matches</h3>
+                <div className="px-2.5 py-1 rounded-lg bg-[#ff4655]/10 border border-[#ff4655]/30">
+                  <p className="text-xs text-[#ff4655] font-semibold">
+                    {tournament.generatedBracket.rounds.reduce((sum, round) => sum + round.length, 0)} matches
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {tournament.generatedBracket.rounds.map((round, roundIdx) => (
+                  <div key={roundIdx}>
+                    <p className="text-gray-400 text-xs font-semibold mb-2">Round {roundIdx + 1}</p>
+                    <div className="space-y-2">
+                      {round.map((match) => (
+                        <div
+                          key={match.id}
+                          className="flex items-center justify-between bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a] hover:border-[#ff4655]/30 transition-colors"
+                        >
+                          <div className="flex-1">
+                            <p className="text-white text-sm font-semibold">
+                              {match.team1Name} vs {match.team2Name}
+                            </p>
+                            {(match.date || match.time) && (
+                              <p className="text-gray-500 text-xs mt-1">
+                                {match.date && `${match.date}`}
+                                {match.date && match.time && ' • '}
+                                {match.time && `${match.time}`}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setEditingMatch(match)}
+                            className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 flex-wrap">
             {isEditing && (
@@ -886,7 +880,7 @@ function CreateTournamentScreen({
             >
               <Plus className="w-4 h-4" /> Add Team
             </button>
-            {tournament.teams.length > 0 && !tournament.bracket && (
+            {tournament.teams.length > 0 && !tournament.bracket && !isEditing && (
               <button
                 onClick={() => setShowBracketModal(true)}
                 className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
@@ -925,10 +919,18 @@ function CreateTournamentScreen({
       
       {/* Bracket Creation Modal */}
       {showBracketModal && (
-        <BracketCreationModal
-          tournament={tournament}
+        <BracketConfigurationModal
           onClose={() => setShowBracketModal(false)}
-          onSuccess={handleBracketCreated}
+          onGenerate={handleBracketConfigurationGenerated}
+        />
+      )}
+
+      {/* Match Edit Modal */}
+      {editingMatch && (
+        <MatchEditModal
+          match={editingMatch}
+          onSave={handleMatchEdit}
+          onCancel={() => setEditingMatch(null)}
         />
       )}
     </div>

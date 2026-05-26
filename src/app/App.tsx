@@ -15,6 +15,27 @@ import type { AdminData } from './components/AdminPanel';
 
 const STORAGE_KEY = 'vct_admin_data';
 
+// Helper function to determine match status
+function getMatchStatus(date?: string, time?: string) {
+  if (!date) return 'upcoming';
+  
+  try {
+    const matchDateTime = new Date(`${date}T${time || '00:00'}`);
+    const now = new Date();
+    const diffMs = matchDateTime.getTime() - now.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    
+    // Match is live if within 3 hours
+    if (diffHours > -3 && diffHours < 3) return 'live';
+    // Match is past if more than 3 hours ago
+    if (diffHours < -3) return 'completed';
+    // Otherwise upcoming
+    return 'upcoming';
+  } catch {
+    return 'upcoming';
+  }
+}
+
 function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
@@ -27,13 +48,35 @@ function Home() {
 
   const handleDataChange = (data: AdminData) => setAdminData(data);
 
-  // Derive display data from admin data if available
-  const liveMatches = adminData
-    ? adminData.matches.filter(m => m.status === 'live' && m.visible)
-    : null;
-  const upcomingMatches = adminData
-    ? adminData.matches.filter(m => m.status === 'upcoming' && m.visible)
-    : null;
+  // Extract matches from tournament brackets
+  const tournamentBracketMatches = adminData
+    ? adminData.tournaments
+      .flatMap(tournament =>
+        tournament.generatedBracket
+          ? tournament.generatedBracket.rounds.flat().map(match => ({
+              ...match,
+              status: getMatchStatus(match.date, match.time),
+              tournamentName: tournament.name,
+            }))
+          : []
+      )
+    : [];
+
+  // Derive display data: first try tournament brackets, then fall back to admin matches
+  const liveMatches =
+    tournamentBracketMatches.length > 0
+      ? tournamentBracketMatches.filter(m => m.status === 'live')
+      : adminData
+      ? adminData.matches.filter(m => m.status === 'live' && m.visible)
+      : null;
+
+  const upcomingMatches =
+    tournamentBracketMatches.length > 0
+      ? tournamentBracketMatches.filter(m => m.status === 'upcoming')
+      : adminData
+      ? adminData.matches.filter(m => m.status === 'upcoming' && m.visible)
+      : null;
+
   const standings = adminData ? adminData.standings : null;
   const news = adminData ? adminData.news.filter(n => n.visible) : null;
 
@@ -60,17 +103,15 @@ function Home() {
                   liveMatches.map(m => (
                     <LiveMatch
                       key={m.id}
-                      team1={m.team1} team2={m.team2}
-                      score1={m.score1} score2={m.score2}
-                      map={m.map} viewers={m.viewers}
+                      team1={m.team1Name}
+                      team2={m.team2Name}
+                      score1={0}
+                      score2={0}
+                      map=""
+                      viewers=""
                       matchId={m.id}
                     />
                   ))
-                ) : !adminData ? (
-                  <>
-                    <LiveMatch team1="Paper Rex" team2="Fnatic" score1={11} score2={8} map="Bind - Round 19/24" viewers="125K" matchId="1" />
-                    <LiveMatch team1="Loud" team2="Evil Geniuses" score1={9} score2={6} map="Haven - Round 15/24" viewers="98K" matchId="2" />
-                  </>
                 ) : (
                   <div className="col-span-2 text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
                     No live matches right now
@@ -93,18 +134,14 @@ function Home() {
                   upcomingMatches.map(m => (
                     <UpcomingMatch
                       key={m.id}
-                      team1={m.team1} team2={m.team2}
-                      tournament={m.tournament}
-                      date={m.date} time={m.time}
+                      team1={m.team1Name}
+                      team2={m.team2Name}
+                      tournament={m.tournamentName || ''}
+                      date={m.date || ''}
+                      time={m.time || ''}
                       matchId={m.id}
                     />
                   ))
-                ) : !adminData ? (
-                  <>
-                    <UpcomingMatch team1="Team Liquid" team2="DRX" tournament="VCT Masters - Playoffs" date="May 20" time="14:00 PST" matchId="3" />
-                    <UpcomingMatch team1="100 Thieves" team2="Sentinels" tournament="VCT Masters - Playoffs" date="May 20" time="17:00 PST" matchId="4" />
-                    <UpcomingMatch team1="NRG" team2="Cloud9" tournament="VCT Masters - Playoffs" date="May 21" time="12:00 PST" matchId="5" />
-                  </>
                 ) : (
                   <div className="text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
                     No upcoming matches scheduled

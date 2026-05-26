@@ -339,6 +339,35 @@ export function TournamentManager({
             </p>
           </div>
         )}
+
+        {/* Bracket Generation Modal */}
+        {bracketGenerationModal && (
+          <BracketGenerationModal
+            tournament={tournaments.find((t) => t.id === bracketGenerationModal)!}
+            onClose={() => setBracketGenerationModal(null)}
+            onGenerate={(bracket) => handleGenerateBracket(bracketGenerationModal, bracket)}
+          />
+        )}
+
+        {/* Event Details Form Modal */}
+        {editingEventDetails && editingEventDetails === selectedTournament.id && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div className="w-full max-w-md">
+              <EventDetailsForm
+                event={selectedTournament.event || null}
+                onSave={(event) => {
+                  onTournamentsChange(
+                    tournaments.map((t) =>
+                      t.id === editingEventDetails ? { ...t, event, status: 'registration' } : t
+                    )
+                  );
+                  setEditingEventDetails(null);
+                }}
+                onCancel={() => setEditingEventDetails(null)}
+              />
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -432,31 +461,6 @@ export function TournamentManager({
             </div>
           ))}
         </div>
-      )}
-
-      {/* Event Details Form Modal */}
-      {editingEventDetails && (
-        <EventDetailsForm
-          event={tournaments.find((t) => t.id === editingEventDetails)?.event || null}
-          onSave={(event) => {
-            onTournamentsChange(
-              tournaments.map((t) =>
-                t.id === editingEventDetails ? { ...t, event, status: 'registration' } : t
-              )
-            );
-            setEditingEventDetails(null);
-          }}
-          onCancel={() => setEditingEventDetails(null)}
-        />
-      )}
-
-      {/* Bracket Configuration Modal */}
-      {bracketGenerationModal && (
-        <BracketGenerationModal
-          tournament={tournaments.find((t) => t.id === bracketGenerationModal)!}
-          onClose={() => setBracketGenerationModal(null)}
-          onGenerate={(bracket) => handleGenerateBracket(bracketGenerationModal, bracket)}
-        />
       )}
     </div>
   );
