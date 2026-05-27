@@ -179,6 +179,7 @@ export interface NewsItem {
   category: string;
   timeAgo: string;
   imageUrl: string;
+  link: string;
   visible: boolean;
 }
 
@@ -497,7 +498,7 @@ function NewsEditor({ items, onChange }: { items: NewsItem[]; onChange: (n: News
     onChange(items.map(n => n.id === id ? { ...n, [key]: val } : n));
   };
   const addItem = () => {
-    onChange([...items, { id: uid(), title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', visible: true }]);
+    onChange([...items, { id: uid(), title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true }]);
   };
   const remove = (id: string) => onChange(items.filter(n => n.id !== id));
 
@@ -534,6 +535,10 @@ function NewsEditor({ items, onChange }: { items: NewsItem[]; onChange: (n: News
           <input
             className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
             value={item.imageUrl} onChange={e => update(item.id, 'imageUrl', e.target.value)} placeholder="Image URL (https://...)"
+          />
+          <input
+            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+            value={item.link} onChange={e => update(item.id, 'link', e.target.value)} placeholder="Article link (https://...)"
           />
         </div>
       ))}

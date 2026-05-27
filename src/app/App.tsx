@@ -173,7 +173,7 @@ function Home() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {news && news.length > 0 ? (
                   news.map(n => (
-                    <NewsCard key={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} />
+                    <NewsCard key={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} link={n.link} />
                   ))
                 ) : !adminData ? (
                   <>

@@ -6,11 +6,23 @@ interface NewsCardProps {
   category: string;
   timeAgo: string;
   imageUrl: string;
+  link?: string;
 }
 
-export function NewsCard({ title, category, timeAgo, imageUrl }: NewsCardProps) {
+export function NewsCard({ title, category, timeAgo, imageUrl, link }: NewsCardProps) {
+  const handleClick = () => {
+    if (link) {
+      window.open(link, '_blank');
+    }
+  };
+
   return (
-    <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden hover:border-[#ff4655]/50 transition-colors cursor-pointer group">
+    <div 
+      onClick={handleClick}
+      className={`bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden hover:border-[#ff4655]/50 transition-colors ${
+        link ? 'cursor-pointer' : ''
+      } group`}
+    >
       <div className="aspect-video overflow-hidden relative">
         <ImageWithFallback
           src={imageUrl}
