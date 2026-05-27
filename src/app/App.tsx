@@ -100,18 +100,22 @@ function Home() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {liveMatches && liveMatches.length > 0 ? (
-                  liveMatches.map(m => (
-                    <LiveMatch
-                      key={m.id}
-                      team1={m.team1Name}
-                      team2={m.team2Name}
-                      score1={0}
-                      score2={0}
-                      map=""
-                      viewers=""
-                      matchId={m.id}
-                    />
-                  ))
+                  liveMatches.map(m => {
+                    const team1 = 'team1Name' in m ? m.team1Name : m.team1;
+                    const team2 = 'team2Name' in m ? m.team2Name : m.team2;
+                    return (
+                      <LiveMatch
+                        key={m.id}
+                        team1={team1}
+                        team2={team2}
+                        score1={0}
+                        score2={0}
+                        map=""
+                        viewers=""
+                        matchId={m.id}
+                      />
+                    );
+                  })
                 ) : (
                   <div className="col-span-2 text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
                     No live matches right now
@@ -131,17 +135,24 @@ function Home() {
               </div>
               <div className="space-y-3">
                 {upcomingMatches && upcomingMatches.length > 0 ? (
-                  upcomingMatches.map(m => (
-                    <UpcomingMatch
-                      key={m.id}
-                      team1={m.team1Name}
-                      team2={m.team2Name}
-                      tournament={m.tournamentName || ''}
-                      date={m.date || ''}
-                      time={m.time || ''}
-                      matchId={m.id}
-                    />
-                  ))
+                  upcomingMatches.map(m => {
+                    const team1 = 'team1Name' in m ? m.team1Name : m.team1;
+                    const team2 = 'team2Name' in m ? m.team2Name : m.team2;
+                    const tournament = 'tournamentName' in m ? m.tournamentName : m.tournament;
+                    const date = 'date' in m ? m.date : '';
+                    const time = 'time' in m ? m.time : '';
+                    return (
+                      <UpcomingMatch
+                        key={m.id}
+                        team1={team1}
+                        team2={team2}
+                        tournament={tournament || ''}
+                        date={date || ''}
+                        time={time || ''}
+                        matchId={m.id}
+                      />
+                    );
+                  })
                 ) : (
                   <div className="text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
                     No upcoming matches scheduled

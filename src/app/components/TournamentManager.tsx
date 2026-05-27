@@ -11,11 +11,13 @@ import {
   MapPin,
   ChevronRight,
   Loader,
+  Swords,
 } from 'lucide-react';
 import type { Tournament, TournamentEvent } from './TournamentCreation';
 import { CreateTournamentScreen } from './TournamentCreation';
 import { BracketDisplay } from './BracketDisplay';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
+import { TwoStageTournamentModal } from './TwoStageTournamentModal';
 
 interface TournamentManagerProps {
   tournaments: Tournament[];
@@ -158,13 +160,100 @@ function BracketGenerationModal({
   onClose: () => void;
   onGenerate: (bracket: any) => void;
 }) {
-  // This is now just a wrapper for the new BracketConfigurationModal
-  return (
-    <BracketConfigurationModal
-      onClose={onClose}
-      onGenerate={onGenerate}
-    />
-  );
+  const [step, setStep] = useState<'choose' | 'single' | 'two'>('choose');
+
+  if (step === 'choose') {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl max-w-lg w-full">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a]">
+            <div className="flex items-center gap-2">
+              <Trophy className="w-5 h-5 text-[#ff4655]" />
+              <h2 className="text-white font-bold text-lg">Tournament Format</h2>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-4">
+            {/* Single Stage Option */}
+            <button
+              onClick={() => setStep('single')}
+              className="w-full p-4 rounded-lg border-2 border-[#2a2d3a] bg-[#0d0f16] hover:border-[#ff4655]/50 hover:bg-[#0d0f16]/80 transition-all text-left"
+            >
+              <div className="flex items-start gap-3">
+                <Swords className="w-5 h-5 text-[#ff4655] flex-shrink-0 mt-1" />
+                <div>
+                  <p className="text-white font-semibold text-sm">Single Stage Tournament</p>
+                  <p className="text-gray-400 text-xs mt-1">
+                    Create a standard bracket (Single Elimination, Double Elimination, or Round Robin) with all teams competing from the start.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Two Stage Option */}
+            <button
+              onClick={() => setStep('two')}
+              className="w-full p-4 rounded-lg border-2 border-[#2a2d3a] bg-[#0d0f16] hover:border-[#ff4655]/50 hover:bg-[#0d0f16]/80 transition-all text-left"
+            >
+              <div className="flex items-start gap-3">
+                <Users className="w-5 h-5 text-[#ff4655] flex-shrink-0 mt-1" />
+                <div>
+                  <p className="text-white font-semibold text-sm">Two Stage Tournament</p>
+                  <p className="text-gray-400 text-xs mt-1">
+                    Group Stage followed by Knockout. Teams compete in groups, with top teams from each group qualifying for the knockout stage.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Cancel */}
+            <button
+              onClick={onClose}
+              className="w-full py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm font-semibold hover:border-gray-500 hover:text-white transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'single') {
+    return (
+      <div>
+        <BracketConfigurationModal
+          onClose={onClose}
+          onGenerate={(bracket) => {
+            onGenerate({ type: 'single', bracket });
+            onClose();
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (step === 'two') {
+    return (
+      <TwoStageTournamentModal
+        teams={tournament.teams}
+        onClose={onClose}
+        onComplete={(groupStage) => {
+          onGenerate({ type: 'two-stage', groupStage });
+          onClose();
+        }}
+      />
+    );
+  }
+
+  return null;
 }
 
 export function TournamentManager({
@@ -176,6 +265,7 @@ export function TournamentManager({
   const [selectedTournamentId, setSelectedTournamentId] = useState<string | null>(null);
   const [editingEventDetails, setEditingEventDetails] = useState<string | null>(null);
   const [bracketGenerationModal, setBracketGenerationModal] = useState<string | null>(null);
+  const [knockoutBracketModal, setKnockoutBracketModal] = useState<string | null>(null);
 
   const selectedTournament = tournaments.find((t) => t.id === selectedTournamentId);
   const editingTournament = tournaments.find((t) => t.id === editingTournamentId);
@@ -197,11 +287,30 @@ export function TournamentManager({
     if (selectedTournamentId === id) setSelectedTournamentId(null);
   };
 
-  const handleGenerateBracket = (tournamentId: string, bracket: any) => {
+  const handleGenerateBracket = (tournamentId: string, bracketData: any) => {
     const tournament = tournaments.find((t) => t.id === tournamentId);
-    if (!tournament || !bracket) return;
+    if (!tournament || !bracketData) return;
 
-    const updatedTournament = { ...tournament, generatedBracket: bracket, status: 'in-progress' as const };
+    let updatedTournament: Tournament;
+
+    if (bracketData.type === 'single') {
+      // Single stage tournament
+      updatedTournament = {
+        ...tournament,
+        generatedBracket: bracketData.bracket,
+        status: 'in-progress' as const,
+      };
+    } else if (bracketData.type === 'two-stage') {
+      // Two stage tournament - set group stage
+      updatedTournament = {
+        ...tournament,
+        groupStage: bracketData.groupStage,
+        status: 'in-progress' as const,
+      };
+    } else {
+      return;
+    }
+
     onTournamentsChange(
       tournaments.map((t) => (t.id === tournamentId ? updatedTournament : t))
     );
@@ -307,7 +416,73 @@ export function TournamentManager({
           </div>
         )}
 
-        {/* Bracket Section */}
+        {/* Group Stage Section (Two-Stage Tournament) */}
+        {selectedTournament.groupStage && (
+          <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-semibold flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#ff4655]" />
+                Group Stage
+              </h3>
+            </div>
+
+            <div className="space-y-4">
+              {selectedTournament.groupStage.groups.map((group) => (
+                <div key={group.id} className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-4">
+                  <h4 className="text-white font-semibold text-sm mb-3">{group.name}</h4>
+                  <div className="space-y-2">
+                    {group.teams.map((team) => (
+                      <div key={team.id} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-300">{team.name}</span>
+                        <div className="text-gray-500 text-xs">
+                          {team.wins ?? 0}W - {team.losses ?? 0}L
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3">
+              <p className="text-blue-300 text-xs">
+                ℹ️ Top {selectedTournament.groupStage.teamsQualifyingPerGroup} team(s) from each group will qualify for knockout stage
+              </p>
+            </div>
+
+            {!selectedTournament.knockoutBracket && (
+              <button
+                onClick={() => setKnockoutBracketModal(selectedTournament.id)}
+                className="w-full py-2.5 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 transition-all flex items-center justify-center gap-2"
+              >
+                <Trophy className="w-4 h-4" /> Generate Knockout Bracket
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Knockout Bracket Section (Second Stage) */}
+        {selectedTournament.knockoutBracket && (
+          <div className="space-y-4">
+            <h3 className="text-white font-semibold flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-[#ff4655]" />
+              Knockout Stage (2nd Stage)
+            </h3>
+            <BracketDisplay
+              bracket={selectedTournament.knockoutBracket}
+              teams={selectedTournament.teams}
+              onBracketChange={(bracket) => {
+                const updated = { ...selectedTournament, knockoutBracket: bracket };
+                onTournamentsChange(
+                  tournaments.map((t) => (t.id === selectedTournament.id ? updated : t))
+                );
+              }}
+              editable={true}
+            />
+          </div>
+        )}
+
+        {/* Single Stage Bracket Section */}
         {selectedTournament.generatedBracket ? (
           <BracketDisplay
             bracket={selectedTournament.generatedBracket}
@@ -346,6 +521,27 @@ export function TournamentManager({
             tournament={tournaments.find((t) => t.id === bracketGenerationModal)!}
             onClose={() => setBracketGenerationModal(null)}
             onGenerate={(bracket) => handleGenerateBracket(bracketGenerationModal, bracket)}
+          />
+        )}
+
+        {/* Knockout Bracket Generation Modal */}
+        {knockoutBracketModal && selectedTournament && (
+          <BracketConfigurationModal
+            onClose={() => setKnockoutBracketModal(null)}
+            onGenerate={(bracket) => {
+              const tournament = tournaments.find((t) => t.id === knockoutBracketModal);
+              if (!tournament) return;
+
+              const updatedTournament = {
+                ...tournament,
+                knockoutBracket: bracket,
+              };
+              onTournamentsChange(
+                tournaments.map((t) => (t.id === knockoutBracketModal ? updatedTournament : t))
+              );
+              setKnockoutBracketModal(null);
+              setSelectedTournamentId(knockoutBracketModal);
+            }}
           />
         )}
 
