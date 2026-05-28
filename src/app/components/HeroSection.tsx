@@ -1,6 +1,10 @@
 import { ImageWithFallback } from './figma/ImageWithFallback';
 
-export function HeroSection() {
+interface HeroSectionProps {
+  heroLink?: string;
+}
+
+export function HeroSection({ heroLink }: HeroSectionProps) {
   return (
     <div className="relative h-[400px] overflow-hidden rounded-lg">
       <ImageWithFallback
@@ -21,7 +25,19 @@ export function HeroSection() {
           <p className="text-gray-300 text-lg mb-6">
             VALORANT teams compete for glory and a spot in Champions
           </p>
-          <button className="bg-[#ff4655] hover:bg-[#ff3344] text-white px-6 py-3 rounded-lg font-semibold transition-colors">
+          <button 
+            onClick={() => {
+              if (heroLink) {
+                window.open(heroLink, '_blank');
+              }
+            }}
+            disabled={!heroLink}
+            className={`text-white px-6 py-3 rounded-lg font-semibold transition-colors ${
+              heroLink 
+                ? 'bg-[#ff4655] hover:bg-[#ff3344] cursor-pointer' 
+                : 'bg-gray-600 cursor-not-allowed opacity-75'
+            }`}
+          >
             Watch Live
           </button>
         </div>

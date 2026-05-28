@@ -4,7 +4,7 @@ import {
   Shield, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronRight,
   Tv, Calendar, Clock, Users, Trophy, AlertCircle,
   CheckCircle, Eye, EyeOff, Swords, BarChart2, Globe,
-  Lock, LogOut, KeyRound, User, TrendingUp, Zap
+  Lock, LogOut, KeyRound, User, TrendingUp, Zap, Settings
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
@@ -199,6 +199,7 @@ interface AdminData {
   news: NewsItem[];
   players: TopPlayer[];
   tournaments: Tournament[];
+  heroLink: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -213,6 +214,7 @@ const defaultData: AdminData = {
   news: [],
   players: [],
   tournaments: [],
+  heroLink: '',
 };
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -673,7 +675,7 @@ function SideTab({ icon: Icon, label, active, count, onClick }: {
 
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
-type Tab = 'matches' | 'standings' | 'news' | 'players' | 'tournaments';
+type Tab = 'matches' | 'standings' | 'news' | 'players' | 'tournaments' | 'settings';
 
 export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
@@ -797,6 +799,10 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
           <SideTab icon={BarChart2} label="Standings" active={tab === 'standings'} count={data.standings.length} onClick={() => setTab('standings')} />
           <SideTab icon={Trophy} label="News" active={tab === 'news'} count={data.news.length} onClick={() => setTab('news')} />
           <SideTab icon={TrendingUp} label="Top Players" active={tab === 'players'} count={(data.players || []).length} onClick={() => setTab('players')} />
+
+          <div className="my-3 border-t border-[#1e2130]" />
+          <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Site Settings</p>
+          <SideTab icon={Settings} label="Hero Section" active={tab === 'settings'} onClick={() => setTab('settings')} />
 
           <div className="mt-auto pt-4 border-t border-[#1e2130] space-y-2">
             <div className="bg-[#1e2130] rounded-xl p-3">
@@ -1002,6 +1008,37 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                 className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
               >
                 <Save className="w-4 h-4" /> Save Players
+              </button>
+            </div>
+          )}
+
+          {/* ── SETTINGS TAB ── */}
+          {tab === 'settings' && (
+            <div className="max-w-3xl space-y-5">
+              <div>
+                <h2 className="text-white font-bold text-lg">Hero Section</h2>
+                <p className="text-gray-500 text-sm">Configure the main hero banner on the homepage</p>
+              </div>
+              
+              <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6 space-y-4">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-2 font-medium">Watch Live Button Link</label>
+                  <p className="text-xs text-gray-600 mb-3">Enter the URL to open when users click the "Watch Live" button</p>
+                  <input
+                    type="url"
+                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-4 py-3 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors placeholder:text-gray-600"
+                    value={data.heroLink || ''}
+                    onChange={e => setData(d => ({ ...d, heroLink: e.target.value }))}
+                    placeholder="https://example.com/watch"
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={() => save(data)}
+                className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
+              >
+                <Save className="w-4 h-4" /> Save Settings
               </button>
             </div>
           )}
