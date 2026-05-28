@@ -69,10 +69,10 @@ export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDeta
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl w-full max-w-4xl my-8">
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto">
+      <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl w-full max-w-4xl my-8 flex flex-col max-h-[calc(100vh-2rem)]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-[#2a2d3a] sticky top-0 bg-[#151821]">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[#2a2d3a] sticky top-0 bg-[#151821] z-10 flex-shrink-0">
           <div>
             <h2 className="text-white font-bold text-xl flex items-center gap-2">
               <Trophy className="w-5 h-5 text-[#ff4655]" />
@@ -82,13 +82,13 @@ export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDeta
           </div>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-white transition-colors"
+            className="text-gray-500 hover:text-white transition-colors flex-shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="overflow-y-auto flex-1 p-6 space-y-6">
           {/* Event Details Section */}
           {tournament.event && (
             <div className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-5">
