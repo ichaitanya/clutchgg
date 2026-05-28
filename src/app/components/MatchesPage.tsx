@@ -54,19 +54,43 @@ export function MatchesPage() {
     ? adminData.matches.filter(m => m.status === 'completed' && m.visible)
     : [];
 
-  // Extract tournament matches grouped by tournament
+  // Extract tournament matches grouped by tournament (single-stage and two-stage)
   const tournamentMatches = adminData
     ? adminData.tournaments
-      .map(tournament => ({
-        tournament,
-        matches: tournament.generatedBracket
-          ? tournament.generatedBracket.rounds.flat().map(match => ({
-              ...match,
-              status: getMatchStatus(match.date, match.time),
-              tournamentName: tournament.name,
-            }))
-          : [],
-      }))
+      .map(tournament => {
+        const matchList: Array<{ id: string; team1Name: string; team2Name: string; date?: string; time?: string; status: string; stage: string; winner?: string }> = [];
+
+        // Single-stage: generatedBracket
+        if (tournament.generatedBracket) {
+          tournament.generatedBracket.rounds.flat().forEach(match => {
+            matchList.push({ ...match, status: getMatchStatus(match.date, match.time), stage: 'Main Bracket' });
+          });
+        }
+
+        // Two-stage: group stage matches (stored in stage1Bracket for groupstage format)
+        if (tournament.stage1Config?.format === 'groupstage' && tournament.stage1Bracket) {
+          const groups = tournament.stage1Config.groups ?? [];
+          tournament.stage1Bracket.rounds.flat().forEach(match => {
+            const group = groups.find(g => match.id.startsWith(`gs_${g.id}_`));
+            const status = match.winner ? 'completed' : 'upcoming';
+            matchList.push({ ...match, status, stage: group?.name ?? 'Group Stage' });
+          });
+        } else if (tournament.stage1Bracket) {
+          // Two-stage non-groupstage: stage1Bracket
+          tournament.stage1Bracket.rounds.flat().forEach(match => {
+            matchList.push({ ...match, status: getMatchStatus(match.date, match.time), stage: 'Stage 1' });
+          });
+        }
+
+        // Two-stage: stage2Bracket
+        if (tournament.stage2Bracket) {
+          tournament.stage2Bracket.rounds.flat().forEach(match => {
+            matchList.push({ ...match, status: getMatchStatus(match.date, match.time), stage: 'Stage 2' });
+          });
+        }
+
+        return { tournament, matches: matchList };
+      })
       .filter(t => t.matches.length > 0)
     : [];
 
@@ -104,9 +128,9 @@ export function MatchesPage() {
                         <span className="text-white font-semibold">{tournament.teams.length}</span>
                       </div>
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Bracket</span>
-                        <span className={tournament.generatedBracket ? 'text-[#4ade80]' : 'text-gray-600'}>
-                          {tournament.generatedBracket ? '✓' : '—'}
+                        <span className="text-gray-500">Format</span>
+                        <span className="text-[#4ade80]">
+                          {tournament.stage1Config ? '2-Stage' : tournament.generatedBracket ? '✓' : '—'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-xs">
@@ -308,18 +332,21 @@ export function MatchesPage() {
                                   </div>
                                 </div>
 
-                                {/* Time */}
-                                {(match.date || match.time) && (
-                                  <div className="pt-2 border-t border-[#2a2d3a]">
-                                    <p className="text-gray-400 text-xs">
+                                {/* Stage + Time */}
+                                <div className="pt-2 border-t border-[#2a2d3a] flex items-center justify-between gap-2">
+                                  {match.stage && (
+                                    <span className="text-xs text-purple-400 font-semibold">{match.stage}</span>
+                                  )}
+                                  {(match.date || match.time) && (
+                                    <p className="text-gray-400 text-xs ml-auto">
                                       {match.date && (
                                         <span>{new Date(`${match.date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                                       )}
                                       {match.date && match.time && <span> • </span>}
                                       {match.time && <span>{match.time}</span>}
                                     </p>
-                                  </div>
-                                )}
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ))}

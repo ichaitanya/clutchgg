@@ -1,8 +1,14 @@
 import { useState } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, Loader, ExternalLink } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3 } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
+import { ExcelImportModal } from './ExcelImportModal';
+import {
+  generateSimplifiedSingleEliminationBracket,
+  generateSimplifiedDoubleEliminationBracket,
+  generateSimplifiedRoundRobinBracket,
+} from '../utils/bracketUtils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +48,14 @@ export interface BracketMatch {
   position: number; // Position in the round
   date?: string; // YYYY-MM-DD format
   time?: string; // HH:MM format
+  bracketSection?: 'winners' | 'losers' | 'grand-final';
+  // Routing: which match/slot does winner/loser feed into
+  winnerGoesTo?: { matchId: string; slot: 1 | 2 };
+  loserGoesTo?: { matchId: string; slot: 1 | 2 };
+  // True if team was auto-populated by a previous match result (not manually assigned)
+  autoPopulated?: boolean;
+  // True if this slot needs a team to be manually selected
+  needsAssignment?: boolean;
 }
 
 export interface GroupStageTeam {
@@ -62,24 +76,50 @@ export interface GroupStage {
   teamsQualifyingPerGroup: number; // Number of teams from each group that qualify
 }
 
+export interface RRTeamEntry {
+  id: string;
+  name: string;
+}
+
 export interface BracketGenerated {
   rounds: BracketMatch[][];
+  bracketType?: 'single' | 'double' | 'roundrobin';
+  rrTeams?: RRTeamEntry[]; // for round robin: ordered list of participating teams
   customizationHistory: Array<{
     timestamp: string;
     changes: string;
   }>;
 }
 
+export type Stage1Format = 'single' | 'double' | 'roundrobin' | 'groupstage';
+export type Stage2Format = 'single' | 'double';
+
+export interface Stage1Config {
+  format: Stage1Format;
+  qualifiersCount: number;
+  // Only for groupstage format:
+  groups?: Group[];
+  teamsQualifyingPerGroup?: number;
+}
+
 export interface Tournament {
   id: string;
   name: string;
   overview: string;
+  tournamentType?: 'single' | 'group';
   teams: TeamInTournament[];
   event?: TournamentEvent;
   bracket?: BracketData;
+  // Two-stage tournament fields:
+  stage1Config?: Stage1Config;
+  stage1Bracket?: BracketGenerated;       // bracket for stage 1 (single/double/rr)
+  qualifiedTeams?: TeamInTournament[];    // teams that advance to stage 2
+  stage2Format?: Stage2Format;
+  stage2Bracket?: BracketGenerated;       // bracket for stage 2
+  // Legacy single-stage fields kept for backward compatibility:
   generatedBracket?: BracketGenerated;
   groupStage?: GroupStage;
-  knockoutBracket?: BracketGenerated; // For second stage
+  knockoutBracket?: BracketGenerated;
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
 }
 
@@ -416,10 +456,12 @@ function AddTeamScreen({
   team,
   onSave,
   onBack,
+  existingTeamNames = [],
 }: {
   team: TeamInTournament | null;
   onSave: (team: TeamInTournament) => void;
   onBack: () => void;
+  existingTeamNames?: string[];
 }) {
   const [form, setForm] = useState<TeamInTournament>(
     team || {
@@ -444,7 +486,11 @@ function AddTeamScreen({
     }
   };
 
-  const isValid = form.name.trim() !== '';
+  const trimmedName = form.name.trim();
+  const isDuplicate = existingTeamNames
+    .filter(n => n.toLowerCase() !== (team?.name ?? '').toLowerCase())
+    .some(n => n.toLowerCase() === trimmedName.toLowerCase());
+  const isValid = trimmedName !== '' && !isDuplicate;
 
   return (
     <div className="space-y-6">
@@ -498,11 +544,14 @@ function AddTeamScreen({
           </label>
           <input
             type="text"
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+            className={`w-full bg-[#0d0f16] border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none transition-colors ${isDuplicate ? 'border-red-500 focus:border-red-500' : 'border-[#2a2d3a] focus:border-[#ff4655]'}`}
             placeholder="e.g. Paper Rex"
             value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
           />
+          {isDuplicate && (
+            <p className="text-red-400 text-xs mt-1">A team with this name already exists.</p>
+          )}
         </div>
       </div>
 
@@ -530,61 +579,128 @@ function AddTeamScreen({
 
 function MatchEditModal({
   match,
+  teams,
   onSave,
   onCancel,
 }: {
   match: BracketMatch;
+  teams: TeamInTournament[];
   onSave: (match: BracketMatch) => void;
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<BracketMatch>(match);
 
+  // Allow team selection on round 0 or any match flagged as needsAssignment.
+  const isFirstRound = (match.round === 0 || match.needsAssignment === true) && !match.autoPopulated;
+
+  const isSlot = (name: string) =>
+    name === 'Select Team' || name.startsWith('Team Slot') || name === 'TBD' ||
+    name.startsWith('Winner') || name.startsWith('Loser') ||
+    name === 'LB TBD' || name === 'WB Champion' || name === 'LB Champion';
+
+  const TeamSelect = ({
+    label,
+    teamId,
+    teamName,
+    excludeId,
+    onChange,
+  }: {
+    label: string;
+    teamId: string;
+    teamName: string;
+    excludeId: string;
+    onChange: (id: string, name: string) => void;
+  }) => (
+    <div>
+      <label className="block text-xs text-gray-400 mb-1.5 font-medium">{label}</label>
+      {isSlot(teamName) ? (
+        <select
+          className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+          value={teamId}
+          onChange={e => {
+            const selected = teams.find(t => t.id === e.target.value);
+            if (selected) onChange(selected.id, selected.name);
+          }}
+        >
+          <option value={teamId} disabled>{teamName}</option>
+          {teams
+            .filter(t => t.id !== excludeId)
+            .map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))
+          }
+        </select>
+      ) : (
+        <div className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
+          {teamName}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl max-w-md w-full">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a]">
-          <h2 className="text-white font-bold text-lg">Edit Match Schedule</h2>
-          <button
-            onClick={onCancel}
-            className="text-gray-500 hover:text-white transition-colors"
-          >
+          <h2 className="text-white font-bold text-lg">Edit Match</h2>
+          <button onClick={onCancel} className="text-gray-500 hover:text-white transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Match Info */}
-          <div className="bg-[#0d0f16] rounded-lg p-4 border border-[#2a2d3a]">
-            <p className="text-gray-400 text-xs mb-2">Match</p>
-            <p className="text-white font-semibold text-sm">
-              {form.team1Name} vs {form.team2Name}
-            </p>
-          </div>
+          {isFirstRound ? (
+            <>
+              <TeamSelect
+                label="Team 1"
+                teamId={form.team1Id}
+                teamName={form.team1Name}
+                excludeId={form.team2Id}
+                onChange={(id, name) => setForm(f => ({ ...f, team1Id: id, team1Name: name }))}
+              />
+              <TeamSelect
+                label="Team 2"
+                teamId={form.team2Id}
+                teamName={form.team2Name}
+                excludeId={form.team1Id}
+                onChange={(id, name) => setForm(f => ({ ...f, team2Id: id, team2Name: name }))}
+              />
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-500 mb-1">Teams are auto-assigned based on match results.</p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
+                  {form.team1Name}
+                </div>
+                <span className="text-gray-600 text-xs font-bold">vs</span>
+                <div className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
+                  {form.team2Name}
+                </div>
+              </div>
+            </div>
+          )}
 
-          {/* Date */}
           <div>
             <label className="block text-xs text-gray-400 mb-1.5 font-medium">Date</label>
             <input
               type="date"
               className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
               value={form.date || ''}
-              onChange={(e) => setForm(f => ({ ...f, date: e.target.value }))}
+              onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
             />
           </div>
 
-          {/* Time */}
           <div>
             <label className="block text-xs text-gray-400 mb-1.5 font-medium">Time</label>
             <input
               type="time"
               className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
               value={form.time || ''}
-              onChange={(e) => setForm(f => ({ ...f, time: e.target.value }))}
+              onChange={e => setForm(f => ({ ...f, time: e.target.value }))}
             />
           </div>
 
-          {/* Actions */}
           <div className="flex gap-3 pt-4">
             <button
               onClick={onCancel}
@@ -593,7 +709,10 @@ function MatchEditModal({
               Cancel
             </button>
             <button
-              onClick={() => onSave(form)}
+              onClick={() => {
+                const bothAssigned = teams.some(t => t.id === form.team1Id) && teams.some(t => t.id === form.team2Id);
+                onSave({ ...form, needsAssignment: bothAssigned ? false : form.needsAssignment });
+              }}
               className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
             >
               Save <ChevronRight className="w-4 h-4" />
@@ -634,11 +753,12 @@ function CreateTournamentScreen({
   const [editingTeamIndex, setEditingTeamIndex] = useState<number | null>(null);
   const [showBracketModal, setShowBracketModal] = useState(false);
   const [showTwoStageTournamentModal, setShowTwoStageTournamentModal] = useState(false);
+  const [showExcelImportModal, setShowExcelImportModal] = useState(false);
   const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
   const [isGeneratingSecondStage, setIsGeneratingSecondStage] = useState(false);
 
-  const handleTournamentSave = (name: string, overview: string) => {
-    setTournament(t => ({ ...t, name, overview }));
+  const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group') => {
+    setTournament(t => ({ ...t, name, overview, tournamentType }));
     setCurrentTeam(null);
     setStep('teamList');
   };
@@ -712,17 +832,56 @@ function CreateTournamentScreen({
     setEditingMatch(null);
   };
 
-  const handleTwoStageTournamentComplete = (groupStage: GroupStage) => {
-    setTournament(t => ({ ...t, groupStage }));
+  const handleTwoStageTournamentComplete = (config: Stage1Config) => {
+    // Generate Stage 1 bracket immediately based on the chosen format
+    let stage1Bracket: BracketGenerated | undefined;
+    if (config.format === 'single') {
+      stage1Bracket = generateSimplifiedSingleEliminationBracket(tournament.teams);
+    } else if (config.format === 'double') {
+      stage1Bracket = generateSimplifiedDoubleEliminationBracket(tournament.teams);
+    } else if (config.format === 'roundrobin') {
+      stage1Bracket = generateSimplifiedRoundRobinBracket(tournament.teams);
+    }
+    // groupstage: auto-generate round-robin matches per group
+    if (config.format === 'groupstage' && config.groups) {
+      const groupRounds: BracketMatch[][] = config.groups.map(group => {
+        const matches: BracketMatch[] = [];
+        const teams = group.teams;
+        let pos = 0;
+        for (let i = 0; i < teams.length; i++) {
+          for (let j = i + 1; j < teams.length; j++) {
+            matches.push({
+              id: `gs_${group.id}_${teams[i].id}_${teams[j].id}`,
+              team1Id: teams[i].id,
+              team2Id: teams[j].id,
+              team1Name: teams[i].name,
+              team2Name: teams[j].name,
+              round: config.groups!.indexOf(group),
+              position: pos++,
+            });
+          }
+        }
+        return matches;
+      });
+      stage1Bracket = {
+        rounds: groupRounds,
+        bracketType: 'roundrobin',
+        customizationHistory: [],
+      };
+    }
+    setTournament(t => ({ ...t, stage1Config: config, stage1Bracket }));
     setShowTwoStageTournamentModal(false);
-    setIsGeneratingSecondStage(true);
-    setShowBracketModal(true);
   };
 
   const handleSecondStageBracketGenerated = (bracket: BracketGenerated) => {
-    setTournament(t => ({ ...t, knockoutBracket: bracket }));
+    setTournament(t => ({ ...t, stage2Bracket: bracket }));
     setShowBracketModal(false);
     setIsGeneratingSecondStage(false);
+  };
+
+  const handleExcelImport = (importedTeams: TeamInTournament[]) => {
+    setTournament(t => ({ ...t, teams: [...t.teams, ...importedTeams] }));
+    setShowExcelImportModal(false);
   };
 
   return (
@@ -785,12 +944,14 @@ function CreateTournamentScreen({
                       >
                         Edit
                       </button>
-                      <button
-                        onClick={() => handleDeleteTeam(i)}
-                        className="px-2 text-gray-600 hover:text-[#ff4655] transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {!isEditing && !tournament.generatedBracket && !tournament.bracket && !tournament.stage1Config && !tournament.groupStage && (
+                        <button
+                          onClick={() => handleDeleteTeam(i)}
+                          className="px-2 text-gray-600 hover:text-[#ff4655] transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -875,40 +1036,60 @@ function CreateTournamentScreen({
             </div>
           )}
 
-          {/* Group Stage Section */}
-          {tournament.groupStage && (
-            <div className="bg-[#151821] border border-blue-700/50 rounded-xl p-6">
+          {/* Stage 1 Configuration Section */}
+          {tournament.stage1Config && (
+            <div className="bg-[#151821] border border-purple-700/50 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-semibold">Group Stage</h3>
-                <div className="px-2.5 py-1 rounded-lg bg-blue-900/30 border border-blue-700/50">
-                  <p className="text-xs text-blue-400 font-semibold">
-                    {tournament.groupStage.groups.length} groups • {tournament.groupStage.teamsQualifyingPerGroup} qualify per group
+                <h3 className="text-white font-semibold">Stage 1 Configuration</h3>
+                <div className="px-2.5 py-1 rounded-lg bg-purple-900/30 border border-purple-700/50">
+                  <p className="text-xs text-purple-400 font-semibold capitalize">
+                    {tournament.stage1Config.format} · {tournament.stage1Config.qualifiersCount} qualify
                   </p>
                 </div>
               </div>
-              <div className="space-y-4">
-                {tournament.groupStage.groups.map((group) => (
-                  <div key={group.id} className="bg-[#0d0f16] rounded-lg p-4 border border-[#2a2d3a]">
-                    <h4 className="text-white font-semibold text-sm mb-3">{group.name}</h4>
-                    <div className="space-y-2">
-                      {group.teams.length === 0 ? (
-                        <p className="text-gray-500 text-xs">No teams assigned</p>
-                      ) : (
-                        group.teams.map((team) => (
-                          <div key={team.id} className="flex items-center justify-between bg-[#151821] rounded p-2 text-sm">
-                            <span className="text-gray-300">{team.name}</span>
-                            {team.wins !== undefined && team.losses !== undefined && (
-                              <span className="text-gray-500 text-xs">
-                                {team.wins}W - {team.losses}L
-                              </span>
-                            )}
-                          </div>
-                        ))
-                      )}
+              {/* Group details if groupstage */}
+              {tournament.stage1Config.format === 'groupstage' && tournament.stage1Config.groups && (
+                <div className="space-y-3 mb-4">
+                  {tournament.stage1Config.groups.map(group => (
+                    <div key={group.id} className="bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a]">
+                      <h4 className="text-white font-semibold text-xs mb-2">{group.name}</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {group.teams.map(t => (
+                          <span key={t.id} className="px-2 py-0.5 bg-[#1e2130] text-gray-300 text-xs rounded">{t.name}</span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+              {!isEditing && (
+                <button
+                  onClick={() => setTournament(t => ({ ...t, stage1Config: undefined, stage1Bracket: undefined, qualifiedTeams: undefined, stage2Bracket: undefined }))}
+                  className="w-full py-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-semibold transition-all"
+                >
+                  Reset Stage 1 Configuration
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Legacy group stage section (kept for backward compat) */}
+          {tournament.groupStage && !tournament.stage1Config && (
+            <div className="bg-[#151821] border border-blue-700/50 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">Group Stage Configuration</h3>
+                <div className="px-2.5 py-1 rounded-lg bg-blue-900/30 border border-blue-700/50">
+                  <p className="text-xs text-blue-400 font-semibold">
+                    {tournament.groupStage.groups.length} groups • {tournament.groupStage.teamsQualifyingPerGroup} qualify
+                  </p>
+                </div>
               </div>
+              <button
+                onClick={() => setTournament(t => ({ ...t, groupStage: undefined, knockoutBracket: undefined }))}
+                className="w-full py-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-semibold transition-all"
+              >
+                Reset Group Stage
+              </button>
             </div>
           )}
 
@@ -957,6 +1138,16 @@ function CreateTournamentScreen({
                   </div>
                 ))}
               </div>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => {
+                    setTournament(t => ({ ...t, knockoutBracket: undefined }));
+                  }}
+                  className="flex-1 py-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-semibold transition-all"
+                >
+                  Reset Knockout Bracket
+                </button>
+              </div>
             </div>
           )}
 
@@ -970,31 +1161,42 @@ function CreateTournamentScreen({
                 Cancel
               </button>
             )}
-            <button
-              onClick={() => {
-                setCurrentTeam(null);
-                setEditingTeamIndex(null);
-                setStep('teamForm');
-              }}
-              className="flex-1 min-w-[120px] py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
-            >
-              <Plus className="w-4 h-4" /> Add Team
-            </button>
-            {tournament.teams.length > 0 && !tournament.bracket && !tournament.generatedBracket && !tournament.groupStage && !isEditing && (
-              <div className="flex gap-2 flex-wrap w-full">
+            {!isEditing && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
+              <button
+                onClick={() => {
+                  setCurrentTeam(null);
+                  setEditingTeamIndex(null);
+                  setStep('teamForm');
+                }}
+                className="flex-1 min-w-[120px] py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Add Team
+              </button>
+            )}
+            {!isEditing && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
+              <button
+                onClick={() => setShowExcelImportModal(true)}
+                className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" /> Import from Excel
+              </button>
+            )}
+            {tournament.teams.length > 0 && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && !isEditing && (
+              tournament.tournamentType === 'group' ? (
+                <button
+                  onClick={() => setShowTwoStageTournamentModal(true)}
+                  className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Swords className="w-4 h-4" /> Configure Stage 1
+                </button>
+              ) : (
                 <button
                   onClick={() => setShowBracketModal(true)}
                   className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
                 >
-                  <Plus className="w-4 h-4" /> Single Stage Bracket
+                  <Swords className="w-4 h-4" /> Configure Bracket
                 </button>
-                <button
-                  onClick={() => setShowTwoStageTournamentModal(true)}
-                  className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-4 h-4" /> Two Stage Tournament
-                </button>
-              </div>
+              )
             )}
             {tournament.teams.length > 0 && (
               <button
@@ -1012,6 +1214,7 @@ function CreateTournamentScreen({
           team={currentTeam}
           onSave={handleTeamFormSave}
           onBack={() => setStep('teamList')}
+          existingTeamNames={tournament.teams.map(t => t.name)}
         />
       )}
       {step === 'players' && currentTeam && (
@@ -1044,6 +1247,7 @@ function CreateTournamentScreen({
           onGenerate={isGeneratingSecondStage ? handleSecondStageBracketGenerated : handleBracketConfigurationGenerated}
           isSecondStage={isGeneratingSecondStage}
           qualifiedTeamsCount={isGeneratingSecondStage && tournament.groupStage ? tournament.groupStage.groups.length * tournament.groupStage.teamsQualifyingPerGroup : undefined}
+          teams={tournament.teams}
         />
       )}
 
@@ -1051,8 +1255,18 @@ function CreateTournamentScreen({
       {editingMatch && (
         <MatchEditModal
           match={editingMatch}
+          teams={tournament.teams}
           onSave={handleMatchEdit}
           onCancel={() => setEditingMatch(null)}
+        />
+      )}
+
+      {/* Excel Import Modal */}
+      {showExcelImportModal && (
+        <ExcelImportModal
+          onImport={handleExcelImport}
+          onCancel={() => setShowExcelImportModal(false)}
+          existingTeamNames={tournament.teams.map(t => t.name)}
         />
       )}
     </div>
@@ -1066,12 +1280,15 @@ function TournamentForm({
   isEditing = false,
   initialTournament,
 }: {
-  onSave: (name: string, overview: string) => void;
+  onSave: (name: string, overview: string, tournamentType: 'single' | 'group') => void;
   isEditing?: boolean;
   initialTournament?: Tournament;
 }) {
   const [name, setName] = useState(initialTournament?.name || '');
   const [overview, setOverview] = useState(initialTournament?.overview || '');
+  const [tournamentType, setTournamentType] = useState<'single' | 'group'>(
+    initialTournament?.tournamentType || 'single'
+  );
 
   const isValid = name.trim() !== '' && overview.trim() !== '';
 
@@ -1115,6 +1332,66 @@ function TournamentForm({
             onChange={e => setOverview(e.target.value)}
           />
         </div>
+
+        {/* Tournament Format */}
+        {!isEditing && (
+          <div>
+            <label className="block text-xs text-gray-400 mb-3 font-medium">
+              Tournament Format *
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setTournamentType('single')}
+                className={`bg-[#0d0f16] border-2 rounded-lg p-4 transition-all text-left group ${
+                  tournamentType === 'single'
+                    ? 'border-purple-600 bg-purple-600/10'
+                    : 'border-[#2a2d3a] hover:border-purple-600/50'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h4 className={`font-semibold text-sm ${tournamentType === 'single' ? 'text-purple-400' : 'text-white'}`}>
+                      Single Stage
+                    </h4>
+                    <p className="text-gray-400 text-xs mt-0.5">Direct bracket</p>
+                  </div>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${tournamentType === 'single' ? 'bg-purple-600/30' : 'bg-purple-600/10'}`}>
+                    <Swords className="w-3.5 h-3.5 text-purple-400" />
+                  </div>
+                </div>
+                <p className="text-gray-500 text-xs">
+                  Teams compete directly in elimination or round-robin format.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTournamentType('group')}
+                className={`bg-[#0d0f16] border-2 rounded-lg p-4 transition-all text-left group ${
+                  tournamentType === 'group'
+                    ? 'border-blue-600 bg-blue-600/10'
+                    : 'border-[#2a2d3a] hover:border-blue-600/50'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h4 className={`font-semibold text-sm ${tournamentType === 'group' ? 'text-blue-400' : 'text-white'}`}>
+                      Group Stage
+                    </h4>
+                    <p className="text-gray-400 text-xs mt-0.5">Groups + Knockout</p>
+                  </div>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${tournamentType === 'group' ? 'bg-blue-600/30' : 'bg-blue-600/10'}`}>
+                    <Grid3x3 className="w-3.5 h-3.5 text-blue-400" />
+                  </div>
+                </div>
+                <p className="text-gray-500 text-xs">
+                  Teams compete in groups, then qualified teams face off in knockout round.
+                </p>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
@@ -1123,10 +1400,10 @@ function TournamentForm({
           onClick={() => window.location.reload()}
           className="flex-1 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all"
         >
-          {isEditing ? 'Cancel' : 'Cancel'}
+          Cancel
         </button>
         <button
-          onClick={() => onSave(name, overview)}
+          onClick={() => onSave(name, overview, tournamentType)}
           disabled={!isValid}
           className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >

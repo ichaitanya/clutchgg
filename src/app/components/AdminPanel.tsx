@@ -256,13 +256,16 @@ const emptyMatch = (): Match => ({
   tournament: 'Valorant Tournament', date: '', time: '', visible: true,
 });
 
-function MatchForm({ match, onSave, onCancel }: {
+function MatchForm({ match, onSave, onCancel, teamNames }: {
   match: Match;
   onSave: (m: Match) => void;
   onCancel: () => void;
+  teamNames: string[];
 }) {
   const [form, setForm] = useState<Match>(match);
   const set = (key: keyof Match, val: any) => setForm(f => ({ ...f, [key]: val }));
+
+  const teamSelectClass = "w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors appearance-none cursor-pointer";
 
   return (
     <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6 space-y-5">
@@ -280,18 +283,44 @@ function MatchForm({ match, onSave, onCancel }: {
       <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-end">
         <div>
           <label className="block text-xs text-gray-400 mb-1.5 font-medium">Team 1</label>
-          <input
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-            value={form.team1} onChange={e => set('team1', e.target.value)} placeholder="e.g. Paper Rex"
-          />
+          {teamNames.length > 0 ? (
+            <select
+              className={teamSelectClass}
+              value={form.team1}
+              onChange={e => set('team1', e.target.value)}
+            >
+              <option value="">— Select Team —</option>
+              {teamNames.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={teamSelectClass}
+              value={form.team1} onChange={e => set('team1', e.target.value)} placeholder="e.g. Paper Rex"
+            />
+          )}
         </div>
         <div className="pb-2.5 text-gray-600 font-bold text-sm">VS</div>
         <div>
           <label className="block text-xs text-gray-400 mb-1.5 font-medium">Team 2</label>
-          <input
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-            value={form.team2} onChange={e => set('team2', e.target.value)} placeholder="e.g. Fnatic"
-          />
+          {teamNames.length > 0 ? (
+            <select
+              className={teamSelectClass}
+              value={form.team2}
+              onChange={e => set('team2', e.target.value)}
+            >
+              <option value="">— Select Team —</option>
+              {teamNames.filter(n => n !== form.team1).map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={teamSelectClass}
+              value={form.team2} onChange={e => set('team2', e.target.value)} placeholder="e.g. Fnatic"
+            />
+          )}
         </div>
       </div>
 
@@ -844,6 +873,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                   match={emptyMatch()}
                   onSave={saveMatch}
                   onCancel={() => setAddingMatch(false)}
+                  teamNames={Array.from(new Set(data.tournaments.flatMap(t => t.teams.map(tm => tm.name))))}
                 />
               )}
 
@@ -852,6 +882,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                   match={editingMatch}
                   onSave={saveMatch}
                   onCancel={() => setEditingMatch(null)}
+                  teamNames={Array.from(new Set(data.tournaments.flatMap(t => t.teams.map(tm => tm.name))))}
                 />
               )}
 

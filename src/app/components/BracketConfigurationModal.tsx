@@ -1,17 +1,19 @@
+import { X, Swords } from 'lucide-react';
 import { useState } from 'react';
-import { X, Users, Swords } from 'lucide-react';
 import {
   generateSimplifiedSingleEliminationBracket,
   generateSimplifiedDoubleEliminationBracket,
   generateSimplifiedRoundRobinBracket,
+  nextPowerOfTwo,
 } from '../utils/bracketUtils';
-import type { BracketGenerated } from './TournamentCreation';
+import type { BracketGenerated, TeamInTournament } from './TournamentCreation';
 
 interface BracketConfigurationModalProps {
   onClose: () => void;
   onGenerate: (bracket: BracketGenerated) => void;
   isSecondStage?: boolean;
   qualifiedTeamsCount?: number;
+  teams?: TeamInTournament[];
 }
 
 export function BracketConfigurationModal({
@@ -19,45 +21,47 @@ export function BracketConfigurationModal({
   onGenerate,
   isSecondStage = false,
   qualifiedTeamsCount,
+  teams = [],
 }: BracketConfigurationModalProps) {
-  const [teamCount, setTeamCount] = useState<number>(qualifiedTeamsCount || 8);
   const [bracketType, setBracketType] = useState<'single' | 'double' | 'roundrobin'>('single');
 
-  const bracketTypes = [
+  const teamCount = qualifiedTeamsCount ?? teams.length;
+  const paddedCount = nextPowerOfTwo(teamCount);
+  const byeCount = paddedCount - teamCount;
+
+  const allBracketTypes = [
     {
-      id: 'single',
+      id: 'single' as const,
       label: 'Single Elimination',
       description: 'Teams are paired for matches. Losers are eliminated immediately.',
-      requirements: 'Must be power of 2 (4, 8, 16, 32, 64)',
     },
     {
-      id: 'double',
+      id: 'double' as const,
       label: 'Double Elimination',
       description: 'Losers get a second chance in the losers bracket. Must win twice to be eliminated.',
-      requirements: 'Must be power of 2 (4, 8, 16, 32, 64)',
     },
     {
-      id: 'roundrobin',
+      id: 'roundrobin' as const,
       label: 'Round Robin',
       description: 'Every team plays every other team once. Standings based on wins.',
-      requirements: 'Any number of teams (2-64)',
     },
   ];
-
-  const teamOptions = [4, 8, 16, 32, 64];
+  const bracketTypes = isSecondStage
+    ? allBracketTypes.filter(t => t.id !== 'roundrobin')
+    : allBracketTypes;
 
   const handleGenerate = () => {
     let bracket: BracketGenerated;
 
     switch (bracketType) {
       case 'single':
-        bracket = generateSimplifiedSingleEliminationBracket(teamCount);
+        bracket = generateSimplifiedSingleEliminationBracket(teams, qualifiedTeamsCount);
         break;
       case 'double':
-        bracket = generateSimplifiedDoubleEliminationBracket(teamCount);
+        bracket = generateSimplifiedDoubleEliminationBracket(teams, qualifiedTeamsCount);
         break;
       case 'roundrobin':
-        bracket = generateSimplifiedRoundRobinBracket(teamCount);
+        bracket = generateSimplifiedRoundRobinBracket(teams);
         break;
     }
 
@@ -81,39 +85,27 @@ export function BracketConfigurationModal({
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-white transition-colors"
-          >
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Team Count Selection */}
-          <div>
-            <label className="flex items-center gap-2 text-white font-semibold text-sm mb-3">
-              <Users className="w-4 h-4 text-[#ff4655]" />
-              Select Number of Teams
-            </label>
-            <div className="grid grid-cols-5 gap-3">
-              {teamOptions.map((num) => (
-                <button
-                  key={num}
-                  onClick={() => setTeamCount(num)}
-                  className={`py-3 rounded-lg border-2 transition-colors font-semibold text-sm ${
-                    teamCount === num
-                      ? 'border-[#ff4655] bg-[#ff4655]/10 text-[#ff4655]'
-                      : 'border-[#2a2d3a] bg-[#0d0f16] text-gray-400 hover:border-[#ff4655]/50 hover:text-white'
-                  }`}
-                >
-                  {num}
-                </button>
-              ))}
+          {/* Team count info */}
+          <div className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-4 py-3 flex items-center gap-3">
+            <div className="flex-1">
+              <p className="text-white text-sm font-semibold">{teamCount} teams</p>
+              {bracketType !== 'roundrobin' && byeCount > 0 && (
+                <p className="text-gray-500 text-xs mt-0.5">
+                  Bracket size: {paddedCount} slots · {byeCount} bye{byeCount > 1 ? 's' : ''} added automatically
+                </p>
+              )}
+              {bracketType === 'roundrobin' && (
+                <p className="text-gray-500 text-xs mt-0.5">
+                  {teamCount % 2 !== 0 ? `${teamCount - 1} pairs per round · 1 bye per round` : `${teamCount / 2} matches per round`}
+                </p>
+              )}
             </div>
-            <p className="text-xs text-gray-500 mt-2">
-              This creates {teamCount} empty team slots that you'll fill in manually
-            </p>
           </div>
 
           {/* Bracket Type Selection */}
@@ -126,7 +118,7 @@ export function BracketConfigurationModal({
               {bracketTypes.map((type) => (
                 <button
                   key={type.id}
-                  onClick={() => setBracketType(type.id as 'single' | 'double' | 'roundrobin')}
+                  onClick={() => setBracketType(type.id)}
                   className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
                     bracketType === type.id
                       ? 'border-[#ff4655] bg-[#ff4655]/10'
@@ -137,7 +129,6 @@ export function BracketConfigurationModal({
                     {type.label}
                   </p>
                   <p className="text-gray-500 text-xs mt-1">{type.description}</p>
-                  <p className="text-gray-600 text-xs mt-2">Requirements: {type.requirements}</p>
                 </button>
               ))}
             </div>
@@ -146,9 +137,10 @@ export function BracketConfigurationModal({
           {/* Info Box */}
           <div className={`border rounded-lg p-4 ${isSecondStage ? 'bg-purple-900/20 border-purple-700/30' : 'bg-[#0d0f16] border-[#2a2d3a]'}`}>
             <p className={`text-sm ${isSecondStage ? 'text-purple-300' : 'text-gray-300'}`}>
-              💡 <span className="font-semibold">Note:</span> {isSecondStage 
-                ? 'This creates the knockout stage bracket for qualified teams. The qualified teams from each group will compete in this stage.'
-                : 'This creates an empty bracket structure. You\'ll be able to add team names manually after creation. The bracket will be visible to users in the Matches section but uneditable.'}
+              💡 <span className="font-semibold">Note:</span>{' '}
+              {isSecondStage
+                ? 'This creates the knockout stage bracket for qualified teams.'
+                : 'Teams are auto-populated from your tournament roster. You can set match dates and times after creation.'}
             </p>
           </div>
 
@@ -162,10 +154,9 @@ export function BracketConfigurationModal({
             </button>
             <button
               onClick={handleGenerate}
-              className={`flex-1 py-3 rounded-lg text-white text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-                isSecondStage 
-                  ? 'bg-purple-600 hover:bg-purple-700' 
-                  : 'bg-[#ff4655] hover:bg-[#ff3344]'
+              disabled={teamCount < 2}
+              className={`flex-1 py-3 rounded-lg text-white text-sm font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                isSecondStage ? 'bg-purple-600 hover:bg-purple-700' : 'bg-[#ff4655] hover:bg-[#ff3344]'
               }`}
             >
               <Swords className="w-4 h-4" />
