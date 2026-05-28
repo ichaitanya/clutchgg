@@ -32,7 +32,6 @@ export interface TournamentEvent {
   type: 'online' | 'offline' | 'hybrid';
   location?: string;
   startDate: string;
-  endDate: string;
   maxTeams: number;
   registeredTeams?: string[]; // Array of team IDs
 }
@@ -757,8 +756,8 @@ function CreateTournamentScreen({
   const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
   const [isGeneratingSecondStage, setIsGeneratingSecondStage] = useState(false);
 
-  const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group') => {
-    setTournament(t => ({ ...t, name, overview, tournamentType }));
+  const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent) => {
+    setTournament(t => ({ ...t, name, overview, tournamentType, event }));
     setCurrentTeam(null);
     setStep('teamList');
   };
@@ -903,6 +902,55 @@ function CreateTournamentScreen({
               </button>
             )}
           </div>
+
+          {/* Event Details Card */}
+          {tournament.event && (
+            <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6">
+              <h3 className="text-white font-semibold mb-4 text-sm">Event Details</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-gray-500 text-xs mb-2 font-medium">Event Type</p>
+                  <p className="text-white text-sm font-semibold capitalize">{tournament.event.type}</p>
+                </div>
+                {tournament.event.location && (
+                  <div>
+                    <p className="text-gray-500 text-xs mb-2 font-medium">Location</p>
+                    <p className="text-white text-sm font-semibold">{tournament.event.location}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-gray-500 text-xs mb-2 font-medium">Start Date</p>
+                  <p className="text-white text-sm font-semibold">
+                    {new Date(tournament.event.startDate).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+              
+              {/* Team Slots */}
+              <div className="mt-5 pt-5 border-t border-[#2a2d3a]">
+                <p className="text-gray-500 text-xs mb-3 font-medium">Team Registration</p>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-end gap-2 mb-2">
+                      <p className="text-white text-lg font-bold">{tournament.teams.length}</p>
+                      <p className="text-gray-500 text-sm">/ {tournament.event.maxTeams} teams</p>
+                    </div>
+                    <div className="w-full bg-[#0d0f16] rounded-full h-2 overflow-hidden border border-[#2a2d3a]">
+                      <div
+                        className="h-full bg-gradient-to-r from-[#ff4655] to-[#ff6670] transition-all"
+                        style={{ width: `${(tournament.teams.length / tournament.event.maxTeams) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[#60a5fa] text-sm font-semibold">
+                      {tournament.event.maxTeams - tournament.teams.length} slots available
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Teams List */}
           <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6">
@@ -1151,6 +1199,33 @@ function CreateTournamentScreen({
             </div>
           )}
 
+          {/* Create Bracket Section - Available when no bracket exists */}
+          {!tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && tournament.teams.length > 0 && (
+            <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6">
+              <h3 className="text-white font-semibold mb-2">Create Tournament Bracket</h3>
+              <p className="text-gray-500 text-sm mb-4">
+                Set up the bracket structure and match schedule for your tournament.
+              </p>
+              <div className="flex gap-3 flex-wrap">
+                {tournament.tournamentType === 'group' ? (
+                  <button
+                    onClick={() => setShowTwoStageTournamentModal(true)}
+                    className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Swords className="w-4 h-4" /> Configure Stage 1
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowBracketModal(true)}
+                    className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Swords className="w-4 h-4" /> Configure Bracket
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 flex-wrap">
             {isEditing && (
@@ -1173,7 +1248,7 @@ function CreateTournamentScreen({
                 <Plus className="w-4 h-4" /> Add Team
               </button>
             )}
-            {!isEditing && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
+            {!tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
               <button
                 onClick={() => setShowExcelImportModal(true)}
                 className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
@@ -1181,7 +1256,7 @@ function CreateTournamentScreen({
                 <Upload className="w-4 h-4" /> Import from Excel
               </button>
             )}
-            {tournament.teams.length > 0 && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && !isEditing && (
+            {!isEditing && tournament.teams.length > 0 && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
               tournament.tournamentType === 'group' ? (
                 <button
                   onClick={() => setShowTwoStageTournamentModal(true)}
@@ -1280,7 +1355,7 @@ function TournamentForm({
   isEditing = false,
   initialTournament,
 }: {
-  onSave: (name: string, overview: string, tournamentType: 'single' | 'group') => void;
+  onSave: (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent) => void;
   isEditing?: boolean;
   initialTournament?: Tournament;
 }) {
@@ -1289,8 +1364,14 @@ function TournamentForm({
   const [tournamentType, setTournamentType] = useState<'single' | 'group'>(
     initialTournament?.tournamentType || 'single'
   );
+  const [eventType, setEventType] = useState<'online' | 'offline' | 'hybrid'>(
+    initialTournament?.event?.type || 'online'
+  );
+  const [location, setLocation] = useState(initialTournament?.event?.location || '');
+  const [startDate, setStartDate] = useState(initialTournament?.event?.startDate || '');
+  const [maxTeams, setMaxTeams] = useState(initialTournament?.event?.maxTeams?.toString() || '8');
 
-  const isValid = name.trim() !== '' && overview.trim() !== '';
+  const isValid = name.trim() !== '' && overview.trim() !== '' && startDate !== '' && maxTeams !== '';
 
   return (
     <div className="space-y-6">
@@ -1331,6 +1412,72 @@ function TournamentForm({
             value={overview}
             onChange={e => setOverview(e.target.value)}
           />
+        </div>
+
+        {/* Event Details Section */}
+        <div className="border-t border-[#2a2d3a] pt-5 mt-5">
+          <h3 className="text-white font-semibold text-sm mb-4">Event Details</h3>
+          
+          {/* Event Type */}
+          <div className="mb-4">
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+              Event Type *
+            </label>
+            <select
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              value={eventType}
+              onChange={e => setEventType(e.target.value as 'online' | 'offline' | 'hybrid')}
+            >
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+          </div>
+
+          {/* Location */}
+          {eventType !== 'online' && (
+            <div className="mb-4">
+              <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                Location {eventType === 'offline' && '*'}
+              </label>
+              <input
+                type="text"
+                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                placeholder="e.g. Bangkok, Thailand"
+                value={location}
+                onChange={e => setLocation(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Start Date */}
+          <div className="mb-4">
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+              Start Date *
+            </label>
+            <input
+              type="date"
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+            />
+          </div>
+
+          {/* Max Teams */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+              Maximum Teams *
+            </label>
+            <input
+              type="number"
+              min="2"
+              max="128"
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              placeholder="e.g. 8"
+              value={maxTeams}
+              onChange={e => setMaxTeams(e.target.value)}
+            />
+          </div>
         </div>
 
         {/* Tournament Format */}
@@ -1403,7 +1550,12 @@ function TournamentForm({
           Cancel
         </button>
         <button
-          onClick={() => onSave(name, overview, tournamentType)}
+          onClick={() => onSave(name, overview, tournamentType, {
+            type: eventType,
+            location: location || undefined,
+            startDate,
+            maxTeams: parseInt(maxTeams, 10),
+          })}
           disabled={!isValid}
           className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >

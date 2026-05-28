@@ -34,7 +34,6 @@ function EventDetailsForm({
     event || {
       type: 'online',
       startDate: '',
-      endDate: '',
       maxTeams: 16,
     }
   );
@@ -83,25 +82,14 @@ function EventDetailsForm({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs text-gray-400 mb-1.5 font-medium">Start Date</label>
-          <input
-            type="date"
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-            value={form.startDate}
-            onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-400 mb-1.5 font-medium">End Date</label>
-          <input
-            type="date"
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-            value={form.endDate}
-            onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-          />
-        </div>
+      <div>
+        <label className="block text-xs text-gray-400 mb-1.5 font-medium">Start Date</label>
+        <input
+          type="date"
+          className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+          value={form.startDate}
+          onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+        />
       </div>
 
       <div>
@@ -410,10 +398,6 @@ export function TournamentManager({
               <div>
                 <p className="text-gray-500 text-xs mb-1">Start Date</p>
                 <p className="text-white text-sm font-semibold">{new Date(t.event.startDate).toLocaleDateString()}</p>
-              </div>
-              <div>
-                <p className="text-gray-500 text-xs mb-1">End Date</p>
-                <p className="text-white text-sm font-semibold">{new Date(t.event.endDate).toLocaleDateString()}</p>
               </div>
               <div>
                 <p className="text-gray-500 text-xs mb-1">Max Teams</p>

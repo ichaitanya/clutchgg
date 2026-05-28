@@ -121,13 +121,6 @@ export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDeta
                     {new Date(tournament.event.startDate).toLocaleDateString()}
                   </p>
                 </div>
-                
-                <div>
-                  <p className="text-gray-500 text-xs mb-2 font-medium">End Date</p>
-                  <p className="text-white text-sm font-semibold">
-                    {new Date(tournament.event.endDate).toLocaleDateString()}
-                  </p>
-                </div>
               </div>
             </div>
           )}

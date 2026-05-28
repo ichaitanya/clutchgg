@@ -52,7 +52,6 @@ function TournamentCard({
               <span className="text-gray-400">Dates: </span>
               <span className="text-white font-semibold">
                 {new Date(tournament.event.startDate).toLocaleDateString()} -{' '}
-                {new Date(tournament.event.endDate).toLocaleDateString()}
               </span>
             </div>
 
