@@ -10,13 +10,17 @@ import type { BracketGenerated } from './TournamentCreation';
 interface BracketConfigurationModalProps {
   onClose: () => void;
   onGenerate: (bracket: BracketGenerated) => void;
+  isSecondStage?: boolean;
+  qualifiedTeamsCount?: number;
 }
 
 export function BracketConfigurationModal({
   onClose,
   onGenerate,
+  isSecondStage = false,
+  qualifiedTeamsCount,
 }: BracketConfigurationModalProps) {
-  const [teamCount, setTeamCount] = useState<number>(8);
+  const [teamCount, setTeamCount] = useState<number>(qualifiedTeamsCount || 8);
   const [bracketType, setBracketType] = useState<'single' | 'double' | 'roundrobin'>('single');
 
   const bracketTypes = [
@@ -68,7 +72,14 @@ export function BracketConfigurationModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a] sticky top-0 bg-[#151821]">
           <div className="flex items-center gap-2">
             <Swords className="w-5 h-5 text-[#ff4655]" />
-            <h2 className="text-white font-bold text-lg">Create Bracket Structure</h2>
+            <div>
+              <h2 className="text-white font-bold text-lg">
+                {isSecondStage ? 'Create Knockout Stage Bracket' : 'Create Bracket Structure'}
+              </h2>
+              {isSecondStage && (
+                <p className="text-xs text-gray-400 mt-1">Second stage: Teams qualified from group stage</p>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -133,9 +144,11 @@ export function BracketConfigurationModal({
           </div>
 
           {/* Info Box */}
-          <div className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-4">
-            <p className="text-gray-300 text-sm">
-              💡 <span className="font-semibold">Note:</span> This creates an empty bracket structure. You'll be able to add team names manually after creation. The bracket will be visible to users in the Matches section but uneditable.
+          <div className={`border rounded-lg p-4 ${isSecondStage ? 'bg-purple-900/20 border-purple-700/30' : 'bg-[#0d0f16] border-[#2a2d3a]'}`}>
+            <p className={`text-sm ${isSecondStage ? 'text-purple-300' : 'text-gray-300'}`}>
+              💡 <span className="font-semibold">Note:</span> {isSecondStage 
+                ? 'This creates the knockout stage bracket for qualified teams. The qualified teams from each group will compete in this stage.'
+                : 'This creates an empty bracket structure. You\'ll be able to add team names manually after creation. The bracket will be visible to users in the Matches section but uneditable.'}
             </p>
           </div>
 
@@ -149,10 +162,14 @@ export function BracketConfigurationModal({
             </button>
             <button
               onClick={handleGenerate}
-              className="flex-1 py-3 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
+              className={`flex-1 py-3 rounded-lg text-white text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                isSecondStage 
+                  ? 'bg-purple-600 hover:bg-purple-700' 
+                  : 'bg-[#ff4655] hover:bg-[#ff3344]'
+              }`}
             >
               <Swords className="w-4 h-4" />
-              Create Bracket Structure
+              {isSecondStage ? 'Create Knockout Bracket' : 'Create Bracket Structure'}
             </button>
           </div>
         </div>

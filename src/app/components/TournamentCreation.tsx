@@ -633,7 +633,9 @@ function CreateTournamentScreen({
   const [currentTeam, setCurrentTeam] = useState<TeamInTournament | null>(null);
   const [editingTeamIndex, setEditingTeamIndex] = useState<number | null>(null);
   const [showBracketModal, setShowBracketModal] = useState(false);
+  const [showTwoStageTournamentModal, setShowTwoStageTournamentModal] = useState(false);
   const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
+  const [isGeneratingSecondStage, setIsGeneratingSecondStage] = useState(false);
 
   const handleTournamentSave = (name: string, overview: string) => {
     setTournament(t => ({ ...t, name, overview }));
@@ -708,6 +710,19 @@ function CreateTournamentScreen({
 
     setTournament(t => ({ ...t, generatedBracket: newBracket }));
     setEditingMatch(null);
+  };
+
+  const handleTwoStageTournamentComplete = (groupStage: GroupStage) => {
+    setTournament(t => ({ ...t, groupStage }));
+    setShowTwoStageTournamentModal(false);
+    setIsGeneratingSecondStage(true);
+    setShowBracketModal(true);
+  };
+
+  const handleSecondStageBracketGenerated = (bracket: BracketGenerated) => {
+    setTournament(t => ({ ...t, knockoutBracket: bracket }));
+    setShowBracketModal(false);
+    setIsGeneratingSecondStage(false);
   };
 
   return (
@@ -860,6 +875,91 @@ function CreateTournamentScreen({
             </div>
           )}
 
+          {/* Group Stage Section */}
+          {tournament.groupStage && (
+            <div className="bg-[#151821] border border-blue-700/50 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">Group Stage</h3>
+                <div className="px-2.5 py-1 rounded-lg bg-blue-900/30 border border-blue-700/50">
+                  <p className="text-xs text-blue-400 font-semibold">
+                    {tournament.groupStage.groups.length} groups • {tournament.groupStage.teamsQualifyingPerGroup} qualify per group
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {tournament.groupStage.groups.map((group) => (
+                  <div key={group.id} className="bg-[#0d0f16] rounded-lg p-4 border border-[#2a2d3a]">
+                    <h4 className="text-white font-semibold text-sm mb-3">{group.name}</h4>
+                    <div className="space-y-2">
+                      {group.teams.length === 0 ? (
+                        <p className="text-gray-500 text-xs">No teams assigned</p>
+                      ) : (
+                        group.teams.map((team) => (
+                          <div key={team.id} className="flex items-center justify-between bg-[#151821] rounded p-2 text-sm">
+                            <span className="text-gray-300">{team.name}</span>
+                            {team.wins !== undefined && team.losses !== undefined && (
+                              <span className="text-gray-500 text-xs">
+                                {team.wins}W - {team.losses}L
+                              </span>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Knockout Stage Section */}
+          {tournament.knockoutBracket && (
+            <div className="bg-[#151821] border border-purple-700/50 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">Knockout Stage (2nd Stage)</h3>
+                <div className="px-2.5 py-1 rounded-lg bg-purple-900/30 border border-purple-700/50">
+                  <p className="text-xs text-purple-400 font-semibold">
+                    {tournament.knockoutBracket.rounds.reduce((sum, round) => sum + round.length, 0)} matches
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {tournament.knockoutBracket.rounds.map((round, roundIdx) => (
+                  <div key={roundIdx}>
+                    <p className="text-gray-400 text-xs font-semibold mb-2">Round {roundIdx + 1}</p>
+                    <div className="space-y-2">
+                      {round.map((match) => (
+                        <div
+                          key={match.id}
+                          className="flex items-center justify-between bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a] hover:border-purple-700/30 transition-colors"
+                        >
+                          <div className="flex-1">
+                            <p className="text-white text-sm font-semibold">
+                              {match.team1Name} vs {match.team2Name}
+                            </p>
+                            {(match.date || match.time) && (
+                              <p className="text-gray-500 text-xs mt-1">
+                                {match.date && `${match.date}`}
+                                {match.date && match.time && ' • '}
+                                {match.time && `${match.time}`}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setEditingMatch(match)}
+                            className="ml-3 px-3 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 rounded transition-colors"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 flex-wrap">
             {isEditing && (
@@ -880,13 +980,21 @@ function CreateTournamentScreen({
             >
               <Plus className="w-4 h-4" /> Add Team
             </button>
-            {tournament.teams.length > 0 && !tournament.bracket && !isEditing && (
-              <button
-                onClick={() => setShowBracketModal(true)}
-                className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Create Bracket
-              </button>
+            {tournament.teams.length > 0 && !tournament.bracket && !tournament.generatedBracket && !tournament.groupStage && !isEditing && (
+              <div className="flex gap-2 flex-wrap w-full">
+                <button
+                  onClick={() => setShowBracketModal(true)}
+                  className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Single Stage Bracket
+                </button>
+                <button
+                  onClick={() => setShowTwoStageTournamentModal(true)}
+                  className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Two Stage Tournament
+                </button>
+              </div>
             )}
             {tournament.teams.length > 0 && (
               <button
@@ -917,11 +1025,25 @@ function CreateTournamentScreen({
         />
       )}
       
+      {/* Two-Stage Tournament Modal */}
+      {showTwoStageTournamentModal && (
+        <TwoStageTournamentModal
+          teams={tournament.teams}
+          onClose={() => setShowTwoStageTournamentModal(false)}
+          onComplete={handleTwoStageTournamentComplete}
+        />
+      )}
+
       {/* Bracket Creation Modal */}
       {showBracketModal && (
         <BracketConfigurationModal
-          onClose={() => setShowBracketModal(false)}
-          onGenerate={handleBracketConfigurationGenerated}
+          onClose={() => {
+            setShowBracketModal(false);
+            setIsGeneratingSecondStage(false);
+          }}
+          onGenerate={isGeneratingSecondStage ? handleSecondStageBracketGenerated : handleBracketConfigurationGenerated}
+          isSecondStage={isGeneratingSecondStage}
+          qualifiedTeamsCount={isGeneratingSecondStage && tournament.groupStage ? tournament.groupStage.groups.length * tournament.groupStage.teamsQualifyingPerGroup : undefined}
         />
       )}
 
