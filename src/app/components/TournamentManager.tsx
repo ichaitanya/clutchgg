@@ -30,13 +30,13 @@ function EventDetailsForm({
   onSave: (event: TournamentEvent) => void;
   onCancel: () => void;
 }) {
-  const [form, setForm] = useState<TournamentEvent>(
-    event || {
-      type: 'online',
-      startDate: '',
-      maxTeams: 16,
-    }
-  );
+  const [form, setForm] = useState<TournamentEvent>({
+    type: event?.type || 'online',
+    location: event?.location,
+    startDate: event?.startDate || '',
+    maxTeams: event?.maxTeams || 16,
+    registeredTeams: event?.registeredTeams,
+  });
 
   return (
     <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6 space-y-5">
@@ -312,7 +312,18 @@ export function TournamentManager({
   const editingTournament = tournaments.find((t) => t.id === editingTournamentId);
 
   const updateTournament = (updated: Tournament) => {
-    onTournamentsChange(tournaments.map(t => t.id === updated.id ? updated : t));
+    const updatedArray = tournaments.map(t => {
+      if (t.id === updated.id) {
+        // Deep merge to preserve all fields
+        return {
+          ...t,
+          ...updated,
+          ...(updated.event && t.event ? { event: { ...t.event, ...updated.event } } : {})
+        };
+      }
+      return t;
+    });
+    onTournamentsChange(updatedArray);
   };
 
   const handleSaveTournament = (tournament: Tournament) => {
