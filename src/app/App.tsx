@@ -9,6 +9,7 @@ import { NewsCard } from './components/NewsCard';
 import { AdminPanel } from './components/AdminPanel';
 import { MatchScoreboard } from './components/MatchScoreboard';
 import { MatchesPage } from './components/MatchesPage';
+import { TournamentMatchPage } from './components/TournamentMatchPage';
 import { TeamsPage } from './components/TeamsPage';
 import { TrendingUp } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
@@ -298,6 +299,7 @@ export default function App() {
         <Route path="/teams" element={<TeamsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/match/:matchId" element={<MatchScoreboard />} />
+        <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />
       </Routes>
     </Router>
   );

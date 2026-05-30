@@ -5,6 +5,7 @@ export interface ExcelTeamData {
   teamName: string;
   players: Array<{
     name: string;
+    riotId?: string; // "name#tag" — optional, used for API match lookups
     role?: PlayerRole;
     photo?: string; // Not expected from Excel, but can be added manually later
   }>;
@@ -69,6 +70,7 @@ function extractTeamsFromData(jsonData: any[]): ExcelImportResult {
   let teamNameCol = '';
   let playerNameCols: string[] = [];
   let roleCols: { [key: number]: string } = {};
+  let riotIdCols: { [key: number]: string } = {};
   let photoCol = '';
 
   // Find team name column
@@ -97,6 +99,15 @@ function extractTeamsFromData(jsonData: any[]): ExcelImportResult {
     if (match) {
       const playerIndex = parseInt(match[1]) - 1;
       roleCols[playerIndex] = h;
+    }
+  });
+
+  // Find Riot ID columns (Riot ID 1, Riot ID 2, ...)
+  headers.forEach((h) => {
+    const match = h.toLowerCase().match(/riot\s*id\s*(\d+)/);
+    if (match) {
+      const playerIndex = parseInt(match[1]) - 1;
+      riotIdCols[playerIndex] = h;
     }
   });
 
@@ -132,7 +143,10 @@ function extractTeamsFromData(jsonData: any[]): ExcelImportResult {
           }
         }
 
-        players.push({ name: playerName, role });
+        const riotIdCol = riotIdCols[index];
+        const riotId = riotIdCol ? row[riotIdCol]?.toString().trim() || undefined : undefined;
+
+        players.push({ name: playerName, role, riotId });
         if (index < 5) mandatoryPlayerCount++;
       }
     });
@@ -167,28 +181,38 @@ export function generateExcelTemplate(): void {
     {
       'Team Name': 'Example Team 1',
       'Player Name 1': 'jinggg',
-      'Player Name 2': 'sscary',
-      'Player Name 3': 'ForSaken',
-      'Player Name 4': 'papabrainchip',
-      'Player Name 5': 'Ghost',
+      'Riot ID 1': 'jinggg#NA1',
       'Role 1': 'igl',
+      'Player Name 2': 'sscary',
+      'Riot ID 2': 'sscary#EU1',
       'Role 2': 'duelist',
+      'Player Name 3': 'ForSaken',
+      'Riot ID 3': 'ForSaken#AP1',
       'Role 3': 'controller',
+      'Player Name 4': 'papabrainchip',
+      'Riot ID 4': 'papabrainchip#KR1',
       'Role 4': 'sentinel',
+      'Player Name 5': 'Ghost',
+      'Riot ID 5': 'Ghost#NA2',
       'Role 5': 'initiator',
       'Photo': '', // Optional photo upload
     },
     {
       'Team Name': 'Example Team 2',
       'Player Name 1': 'FNS',
-      'Player Name 2': 'Marved',
-      'Player Name 3': 'Crashies',
-      'Player Name 4': 'Sick',
-      'Player Name 5': 'Derke',
+      'Riot ID 1': '',
       'Role 1': 'igl',
+      'Player Name 2': 'Marved',
+      'Riot ID 2': '',
       'Role 2': 'controller',
+      'Player Name 3': 'Crashies',
+      'Riot ID 3': '',
       'Role 3': 'duelist',
+      'Player Name 4': 'Sick',
+      'Riot ID 4': '',
       'Role 4': 'sentinel',
+      'Player Name 5': 'Derke',
+      'Riot ID 5': '',
       'Role 5': 'initiator',
       'Photo': '',
     },
@@ -199,16 +223,21 @@ export function generateExcelTemplate(): void {
   // Set column widths
   worksheet['!cols'] = [
     { wch: 20 }, // Team Name
-    { wch: 20 }, // Player Name 1
-    { wch: 20 }, // Player Name 2
-    { wch: 20 }, // Player Name 3
-    { wch: 20 }, // Player Name 4
-    { wch: 20 }, // Player Name 5
-    { wch: 15 }, // Role 1
-    { wch: 15 }, // Role 2
-    { wch: 15 }, // Role 3
-    { wch: 15 }, // Role 4
-    { wch: 15 }, // Role 5
+    { wch: 18 }, // Player Name 1
+    { wch: 20 }, // Riot ID 1
+    { wch: 14 }, // Role 1
+    { wch: 18 }, // Player Name 2
+    { wch: 20 }, // Riot ID 2
+    { wch: 14 }, // Role 2
+    { wch: 18 }, // Player Name 3
+    { wch: 20 }, // Riot ID 3
+    { wch: 14 }, // Role 3
+    { wch: 18 }, // Player Name 4
+    { wch: 20 }, // Riot ID 4
+    { wch: 14 }, // Role 4
+    { wch: 18 }, // Player Name 5
+    { wch: 20 }, // Riot ID 5
+    { wch: 14 }, // Role 5
     { wch: 20 }, // Photo
   ];
 
@@ -221,13 +250,18 @@ export function generateExcelTemplate(): void {
     [],
     ['Instructions:'],
     ['1. Team Name (Required): Enter the name of the team'],
-    ['2. Player Name 1-5 (Mandatory): Enter player names for first 5 slots (minimum 1 required)'],
-    ['3. Role (Optional): Use one of these roles: igl, duelist, controller, sentinel, initiator'],
-    ['4. Photo (Optional): Photo upload is not supported via Excel. Photos must be added manually.'],
+    ['2. Player Name 1-5 (Mandatory): Enter player display names for first 5 slots (minimum 1 required)'],
+    ['3. Riot ID 1-5 (Optional): Enter the player\'s full Riot ID as name#tag (e.g. jinggg#NA1).'],
+    ['   Used to pull match history from the API. Can be filled later if a player changes their name.'],
+    ['4. Role (Optional): Use one of these roles: igl, duelist, controller, sentinel, initiator'],
+    ['5. Photo (Optional): Photo upload is not supported via Excel. Photos must be added manually.'],
+    [],
+    ['Note: Only the Player Name is shown on the team page and scoreboard. The Riot ID is stored'],
+    ['for API lookups only and is not displayed publicly.'],
     [],
     ['Example Row Structure:'],
-    ['Team Name | Player Name 1 | Player Name 2 | Player Name 3 | Player Name 4 | Player Name 5 | Role 1 | Role 2 | Role 3 | Role 4 | Role 5 | Photo'],
-    ['Paper Rex | jinggg | sscary | ForSaken | papabrainchip | GHost | igl | duelist | controller | sentinel | initiator | '],
+    ['Team Name | Player Name 1 | Riot ID 1 | Role 1 | ... (repeat per player) | Photo'],
+    ['Paper Rex | jinggg | jinggg#NA1 | igl | ... | '],
   ];
 
   const instructionsSheet = XLSX.utils.aoa_to_sheet(instructions);
@@ -249,6 +283,7 @@ export function convertExcelTeamsToTournamentTeams(excelTeams: ExcelTeamData[]):
     players: team.players.map((player) => ({
       id: `player-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       name: player.name,
+      riotId: player.riotId,
       role: player.role,
       photo: player.photo,
     })),

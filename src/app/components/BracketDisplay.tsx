@@ -187,6 +187,7 @@ function MatchCard({
   usedTeamIds,
   onSetWinner,
   onAssignTeam,
+  onFetchData,
 }: {
   match: BracketMatch;
   editable: boolean;
@@ -195,6 +196,7 @@ function MatchCard({
   usedTeamIds: Set<string>;
   onSetWinner: (teamId: string, teamName: string) => void;
   onAssignTeam: (slot: 1 | 2, teamId: string, teamName: string) => void;
+  onFetchData?: () => void;
 }) {
   const isPlaceholder = (name: string) =>
     name.startsWith('Team Slot') || name.startsWith('Winner') || name.startsWith('Loser') ||
@@ -235,12 +237,9 @@ function MatchCard({
 
   return (
     <div className="w-44 bg-[#151821] border border-[#2a2d3a] rounded-lg overflow-hidden shadow-lg">
-      <button
-        disabled={!editable || isSlot1 || !!match.winner}
-        onClick={() => onSetWinner(match.team1Id, match.team1Name)}
-        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left border-b border-[#2a2d3a] transition-colors
+      <div
+        className={`w-full flex items-center gap-2 px-3 py-2.5 border-b border-[#2a2d3a]
           ${winner1 ? `${accentBg} ${accentBorder} border-l-2` : ''}
-          ${!match.winner && editable && !isSlot1 ? `hover:bg-[#1e2130] ${accentHover}` : ''}
           ${winner2 ? 'opacity-40' : ''}
         `}
       >
@@ -248,14 +247,11 @@ function MatchCard({
           {match.team1Name}
         </span>
         {winner1 && <span className={`text-[10px] font-bold ${accentText}`}>W</span>}
-      </button>
+      </div>
 
-      <button
-        disabled={!editable || isSlot2 || !!match.winner}
-        onClick={() => onSetWinner(match.team2Id, match.team2Name)}
-        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors
+      <div
+        className={`w-full flex items-center gap-2 px-3 py-2.5
           ${winner2 ? `${accentBg} ${accentBorder} border-l-2` : ''}
-          ${!match.winner && editable && !isSlot2 ? `hover:bg-[#1e2130] ${accentHover}` : ''}
           ${winner1 ? 'opacity-40' : ''}
         `}
       >
@@ -263,7 +259,17 @@ function MatchCard({
           {match.team2Name}
         </span>
         {winner2 && <span className={`text-[10px] font-bold ${accentText}`}>W</span>}
-      </button>
+      </div>
+
+      {/* Fetch Match Data button */}
+      {onFetchData && !isSlot1 && !isSlot2 && (
+        <button
+          onClick={onFetchData}
+          className="w-full px-2 py-1.5 text-[10px] bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] border-t border-[#2a2d3a] transition-colors font-semibold"
+        >
+          Fetch Match Data
+        </button>
+      )}
     </div>
   );
 }
@@ -280,6 +286,7 @@ function BracketTree({
   onSetWinner,
   onResetMatch,
   onAssignTeam,
+  onFetchData,
 }: {
   rounds: BracketMatch[][];
   globalRoundOffset: number;
@@ -291,6 +298,7 @@ function BracketTree({
   onSetWinner: (globalRoundIdx: number, matchIdx: number, teamId: string, teamName: string) => void;
   onResetMatch: (globalRoundIdx: number, matchIdx: number) => void;
   onAssignTeam: (globalRoundIdx: number, matchIdx: number, slot: 1 | 2, teamId: string, teamName: string) => void;
+  onFetchData?: (globalRoundIdx: number, matchIdx: number) => void;
 }) {
   const getMatchTopOffset = (roundIdx: number, matchIdx: number): number => {
     const baseMatchHeight = 64;
@@ -353,6 +361,7 @@ function BracketTree({
                         usedTeamIds={usedTeamIds}
                         onSetWinner={(id, name) => onSetWinner(globalRoundOffset + roundIdx, matchIdx, id, name)}
                         onAssignTeam={(slot, id, name) => onAssignTeam(globalRoundOffset + roundIdx, matchIdx, slot, id, name)}
+                        onFetchData={onFetchData ? () => onFetchData(globalRoundOffset + roundIdx, matchIdx) : undefined}
                       />
 
                       {!isLastRound && (
@@ -614,6 +623,12 @@ export function BracketDisplay({
     });
   };
 
+  const handleFetchData = async (roundIdx: number, matchIdx: number) => {
+    // Placeholder — full integration would be in a follow-up task
+    // This would call fetchMatchDataFromAPI from TournamentCreation
+    alert('Fetch Match Data clicked for Round ' + (roundIdx + 1) + ' Match ' + (matchIdx + 1) + '\n\nFull API integration coming soon!');
+  };
+
   // Compute global round offsets for each section
   const winnersOffset = 0;
   const losersOffset = winnersRounds.length;
@@ -646,8 +661,8 @@ export function BracketDisplay({
         {editable && (
           <p className="text-xs text-gray-500">
             {bracket.rounds[0]?.some(m => m.needsAssignment)
-              ? 'Assign teams to each slot in Round 1, then click a team name to set match winners.'
-              : 'Click a team name to set them as the winner. Winners auto-advance; losers drop to the Losers Bracket.'}
+              ? 'Assign teams to each slot in Round 1, then edit each match to enter map results.'
+              : 'Edit each match to enter map results. Winner is determined by most maps won.'}
           </p>
         )}
 
@@ -669,6 +684,7 @@ export function BracketDisplay({
             onSetWinner={handleSetWinner}
             onResetMatch={handleResetMatch}
             onAssignTeam={handleAssignTeam}
+            onFetchData={handleFetchData}
           />
         </div>
 
@@ -691,6 +707,7 @@ export function BracketDisplay({
               onSetWinner={handleSetWinner}
               onResetMatch={handleResetMatch}
               onAssignTeam={handleAssignTeam}
+              onFetchData={handleFetchData}
             />
           </div>
         )}
@@ -714,6 +731,7 @@ export function BracketDisplay({
               onSetWinner={handleSetWinner}
               onResetMatch={handleResetMatch}
               onAssignTeam={handleAssignTeam}
+              onFetchData={handleFetchData}
             />
           </div>
         )}
@@ -849,8 +867,8 @@ export function BracketDisplay({
       {editable && (
         <p className="text-xs text-gray-500">
           {bracket.rounds[0]?.some(m => m.needsAssignment)
-            ? 'Assign teams to each slot in Round 1, then click a team name to set match winners.'
-            : 'Click a team name to set them as the winner. Winners auto-advance to the next round.'}
+            ? 'Assign teams to each slot in Round 1, then edit each match to enter map results.'
+            : 'Edit each match to enter map results. Winner is determined by most maps won.'}
         </p>
       )}
       <BracketTree
@@ -864,6 +882,7 @@ export function BracketDisplay({
         onSetWinner={handleSetWinner}
         onResetMatch={handleResetMatch}
         onAssignTeam={handleAssignTeam}
+        onFetchData={handleFetchData}
       />
       {QualifyBanner}
     </div>

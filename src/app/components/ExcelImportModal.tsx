@@ -12,9 +12,10 @@ interface ExcelImportModalProps {
   onImport: (teams: TeamInTournament[]) => void;
   onCancel: () => void;
   existingTeamNames?: string[];
+  remainingSlots?: number;
 }
 
-export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }: ExcelImportModalProps) {
+export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], remainingSlots }: ExcelImportModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<ExcelImportResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -65,10 +66,13 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }:
   const handleImport = () => {
     if (!importResult || importResult.teams.length === 0) return;
 
-    const uniqueTeams = importResult.teams.filter(
+    let uniqueTeams = importResult.teams.filter(
       t => !existingTeamNames.some(e => e.toLowerCase() === t.teamName.toLowerCase())
     );
     if (uniqueTeams.length === 0) return;
+    if (remainingSlots !== undefined && uniqueTeams.length > remainingSlots) {
+      uniqueTeams = uniqueTeams.slice(0, remainingSlots);
+    }
     const teams = convertExcelTeamsToTournamentTeams(uniqueTeams);
     onImport(teams);
   };
@@ -192,6 +196,10 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }:
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-[#ff4655] font-bold">•</span>
+                    <span><strong>Riot ID 1-5</strong> - Optional. Full Riot ID as name#tag (e.g. jinggg#NA1). Used for API match lookups; not shown publicly.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#ff4655] font-bold">•</span>
                     <span><strong>Role 1-5</strong> - Optional. Use: igl, duelist, controller, sentinel, initiator</span>
                   </li>
                   <li className="flex items-start gap-2">
@@ -245,6 +253,24 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }:
                     </div>
                   )}
 
+                  {/* Slot limit warning banner */}
+                  {(() => {
+                    const uniqueCount = importResult.teams.length - duplicateTeams.length;
+                    const overLimit = remainingSlots !== undefined && uniqueCount > remainingSlots;
+                    if (!overLimit) return null;
+                    const skipped = uniqueCount - remainingSlots!;
+                    return (
+                      <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4">
+                        <div className="flex items-start gap-3">
+                          <AlertTriangle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                          <p className="text-yellow-400 text-sm font-semibold">
+                            Only {remainingSlots} slot{remainingSlots !== 1 ? 's' : ''} remaining. {skipped} team{skipped !== 1 ? 's' : ''} will be skipped to stay within the tournament limit.
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Duplicate warning banner */}
                   {duplicateTeams.length > 0 && (
                     <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4">
@@ -286,6 +312,9 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }:
                                 <div key={playerIndex} className="text-xs text-gray-400 flex items-center justify-between">
                                   <span>
                                     {playerIndex + 1}. {player.name}
+                                    {player.riotId && (
+                                      <span className="text-gray-600 ml-2">({player.riotId})</span>
+                                    )}
                                   </span>
                                   {player.role && (
                                     <span className="text-[#ff4655] uppercase tracking-wider font-semibold">
@@ -307,8 +336,12 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }:
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-5 h-5 text-green-500" />
                         <p className="text-green-400 text-sm font-semibold">
-                          {importResult.teams.length - duplicateTeams.length} team{importResult.teams.length - duplicateTeams.length !== 1 ? 's' : ''} ready to import.
-                          {duplicateTeams.length > 0 && ` (${duplicateTeams.length} skipped)`}
+                          {(() => {
+                            const uniqueCount = importResult.teams.length - duplicateTeams.length;
+                            const importCount = remainingSlots !== undefined ? Math.min(uniqueCount, remainingSlots) : uniqueCount;
+                            const totalSkipped = importResult.teams.length - importCount;
+                            return `${importCount} team${importCount !== 1 ? 's' : ''} ready to import.${totalSkipped > 0 ? ` (${totalSkipped} skipped)` : ''}`;
+                          })()}
                         </p>
                       </div>
                     </div>
@@ -354,12 +387,17 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [] }:
               </button>
               <button
                 onClick={handleImport}
-                disabled={!importResult || importResult.teams.length === 0 || importResult.teams.length === duplicateTeams.length}
+                disabled={!importResult || importResult.teams.length === 0 || importResult.teams.length === duplicateTeams.length || (remainingSlots !== undefined && remainingSlots <= 0)}
                 className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {duplicateTeams.length > 0 && importResult && importResult.teams.length > duplicateTeams.length
-                  ? `Import ${importResult.teams.length - duplicateTeams.length} Team${importResult.teams.length - duplicateTeams.length !== 1 ? 's' : ''}`
-                  : 'Import Teams'}
+                {(() => {
+                  if (!importResult) return 'Import Teams';
+                  const uniqueCount = importResult.teams.length - duplicateTeams.length;
+                  const importCount = remainingSlots !== undefined ? Math.min(uniqueCount, remainingSlots) : uniqueCount;
+                  return importCount > 0
+                    ? `Import ${importCount} Team${importCount !== 1 ? 's' : ''}`
+                    : 'Import Teams';
+                })()}
               </button>
             </>
           )}

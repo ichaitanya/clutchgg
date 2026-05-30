@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3 } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
@@ -9,6 +9,7 @@ import {
   generateSimplifiedDoubleEliminationBracket,
   generateSimplifiedRoundRobinBracket,
 } from '../utils/bracketUtils';
+import * as ValorantAPI from '../services/valorantApi';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ export type PlayerRole = 'igl' | 'duelist' | 'controller' | 'sentinel' | 'initia
 export interface TournamentPlayer {
   id: string;
   name: string;
+  riotId?: string; // Riot ID in "name#tag" format — used for API match lookups
   role?: PlayerRole;
   photo?: string; // base64 or URL
 }
@@ -34,6 +36,26 @@ export interface TournamentEvent {
   startDate: string;
   maxTeams: number;
   registeredTeams?: string[]; // Array of team IDs
+}
+
+export interface MatchMapResult {
+  mapName: string;
+  team1Score: number;
+  team2Score: number;
+  playerStats?: MatchPlayerStat[];
+}
+
+export interface MatchPlayerStat {
+  playerId: string;
+  playerName: string;
+  teamId: string;
+  agent?: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd: number;
+  acs: number;
+  hsPercent: number;
 }
 
 export interface BracketMatch {
@@ -55,6 +77,11 @@ export interface BracketMatch {
   autoPopulated?: boolean;
   // True if this slot needs a team to be manually selected
   needsAssignment?: boolean;
+  // Match format
+  format?: 'bo1' | 'bo3' | 'bo5';
+  // Match result details
+  maps?: MatchMapResult[];
+  playerStats?: MatchPlayerStat[];
 }
 
 export interface GroupStageTeam {
@@ -218,6 +245,21 @@ function PlayerDetailsForm({
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             />
+          </div>
+
+          {/* Riot ID — used for API lookups, not shown publicly */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+              Riot ID <span className="text-gray-600">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              placeholder="e.g. jinggg#NA1"
+              value={form.riotId || ''}
+              onChange={e => setForm(f => ({ ...f, riotId: e.target.value || undefined }))}
+            />
+            <p className="text-[11px] text-gray-600 mt-1">Used to pull match history from the API. Not shown on the team page or scoreboard.</p>
           </div>
 
           {/* Player Role */}
@@ -574,6 +616,81 @@ function AddTeamScreen({
   );
 }
 
+// ── API Fetch Helper ──────────────────────────────────────────────────────
+// Extracts the roster-matching fetch logic for reuse across components.
+export async function fetchMatchDataFromAPI(
+  team1: TeamInTournament | undefined,
+  team2: TeamInTournament | undefined,
+  match: BracketMatch
+): Promise<{ maps: MatchMapResult[]; playerStats: MatchPlayerStat[] } | null> {
+  const region = 'ap';
+  const mode = 'competitive'; // default; will be configurable later
+
+  // Build source players list.
+  const iglOf = (t?: TeamInTournament) => t?.players.find(p => p.role === 'igl' && p.riotId);
+  const anyOf = (t?: TeamInTournament) => t?.players.filter(p => p.riotId && p.role !== 'igl') ?? [];
+  const seen = new Set<string>();
+  const sources: { riotId: string }[] = [];
+  for (const cand of [iglOf(team1), iglOf(team2), ...anyOf(team1), ...anyOf(team2)]) {
+    if (cand?.riotId && !seen.has(cand.riotId.toLowerCase())) {
+      seen.add(cand.riotId.toLowerCase());
+      sources.push({ riotId: cand.riotId });
+    }
+  }
+
+  if (sources.length === 0) throw new Error('No players with Riot IDs found on either team.');
+
+  // Build rosters for matching.
+  const team1Players = team1?.players.map(p => p.riotId || p.name) || [];
+  const team2Players = team2?.players.map(p => p.riotId || p.name) || [];
+  const displayNameByRiotId: Record<string, string> = {};
+  for (const p of [...(team1?.players ?? []), ...(team2?.players ?? [])]) {
+    if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
+  }
+
+  // Find match with both rosters.
+  let matchDetails: ValorantAPI.MatchDetails | null = null;
+  for (const src of sources) {
+    const [n, t] = src.riotId.split('#');
+    if (!n || !t) continue;
+    const history = await ValorantAPI.getPlayerMatchHistory(n, t, region, mode);
+    if (history.length === 0) continue;
+    matchDetails = await ValorantAPI.findMatchWithBothRosters(
+      history,
+      team1Players,
+      team2Players,
+      ValorantAPI.getMatchDetails,
+    );
+    if (matchDetails) break;
+  }
+
+  if (!matchDetails) {
+    throw new Error('No recent match found containing players from both teams. Verify Riot IDs and that the match has been played.');
+  }
+
+  // Build map + stats.
+  const mapping = ValorantAPI.mapPlayersToTeams(matchDetails.players, team1Players, team2Players);
+  const team1Rounds = mapping.team1Name === 'Blue' ? matchDetails.teams.blue.rounds_won : matchDetails.teams.red.rounds_won;
+  const team2Rounds = mapping.team1Name === 'Blue' ? matchDetails.teams.red.rounds_won : matchDetails.teams.blue.rounds_won;
+  const mapStats = ValorantAPI.buildPlayerStatsFromAPI(
+    matchDetails.players,
+    mapping.team1Name,
+    mapping.team2Name,
+    match.team1Id,
+    match.team2Id,
+    matchDetails.metadata.rounds_played,
+    displayNameByRiotId
+  );
+  const apiMap: MatchMapResult = {
+    mapName: matchDetails.metadata.map,
+    team1Score: team1Rounds,
+    team2Score: team2Rounds,
+    playerStats: mapStats,
+  };
+
+  return { maps: [apiMap], playerStats: mapStats };
+}
+
 // ── Match Edit Modal ───────────────────────────────────────────────────────
 
 function MatchEditModal({
@@ -588,8 +705,8 @@ function MatchEditModal({
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<BracketMatch>(match);
+  const [tab, setTab] = useState<'details' | 'maps' | 'stats'>('details');
 
-  // Allow team selection on round 0 or any match flagged as needsAssignment.
   const isFirstRound = (match.round === 0 || match.needsAssignment === true) && !match.autoPopulated;
 
   const isSlot = (name: string) =>
@@ -637,86 +754,331 @@ function MatchEditModal({
     </div>
   );
 
+  // ── Maps tab helpers ──
+  const boFormat = form.format ?? 'bo3';
+  const maxMaps = boFormat === 'bo1' ? 1 : boFormat === 'bo3' ? 3 : 5;
+  const maps = form.maps ?? [];
+  const addMap = () => {
+    if (maps.length >= maxMaps) return;
+    setForm(f => ({ ...f, maps: [...(f.maps ?? []), { mapName: '', team1Score: 0, team2Score: 0 }] }));
+  };
+  const removeMap = (i: number) =>
+    setForm(f => ({ ...f, maps: (f.maps ?? []).filter((_, idx) => idx !== i) }));
+  const updateMap = (i: number, field: keyof MatchMapResult, value: string | number) =>
+    setForm(f => ({
+      ...f,
+      maps: (f.maps ?? []).map((m, idx) => idx === i ? { ...m, [field]: value } : m),
+    }));
+
+  // Compute winner from map wins
+  const computeWinnerFromMaps = (currentForm: BracketMatch): string | undefined => {
+    if (!currentForm.maps || currentForm.maps.length === 0) return currentForm.winner;
+    let w1 = 0, w2 = 0;
+    for (const m of currentForm.maps) {
+      if (m.team1Score > m.team2Score) w1++;
+      else if (m.team2Score > m.team1Score) w2++;
+    }
+    const needed = Math.ceil(maxMaps / 2);
+    if (w1 >= needed) return currentForm.team1Id;
+    if (w2 >= needed) return currentForm.team2Id;
+    if (currentForm.maps.length === maxMaps) {
+      // All maps played — most wins wins
+      if (w1 > w2) return currentForm.team1Id;
+      if (w2 > w1) return currentForm.team2Id;
+    }
+    return undefined;
+  };
+
+  // ── Stats tab helpers ──
+  const team1 = teams.find(t => t.id === form.team1Id);
+  const team2 = teams.find(t => t.id === form.team2Id);
+  const allPlayers = [
+    ...(team1?.players ?? []).map(p => ({ ...p, teamId: form.team1Id })),
+    ...(team2?.players ?? []).map(p => ({ ...p, teamId: form.team2Id })),
+  ];
+  const initStats = (): MatchPlayerStat[] =>
+    allPlayers.map(p => ({
+      playerId: p.id,
+      playerName: p.name,
+      teamId: p.teamId,
+      agent: '',
+      kills: 0,
+      deaths: 0,
+      assists: 0,
+      kd: 0,
+      acs: 0,
+      hsPercent: 0,
+    }));
+  const stats = form.playerStats && form.playerStats.length > 0 ? form.playerStats : initStats();
+  const updateStat = (playerId: string, field: keyof MatchPlayerStat, value: string | number) =>
+    setForm(f => ({
+      ...f,
+      playerStats: (f.playerStats && f.playerStats.length > 0 ? f.playerStats : initStats()).map(s =>
+        s.playerId === playerId
+          ? {
+              ...s,
+              [field]: value,
+              kd: field === 'kills' || field === 'deaths'
+                ? parseFloat((((field === 'kills' ? Number(value) : s.kills)) / Math.max(1, (field === 'deaths' ? Number(value) : s.deaths))).toFixed(2))
+                : s.kd,
+            }
+          : s
+      ),
+    }));
+
+  const tabs = [
+    { id: 'details', label: 'Details' },
+    { id: 'maps', label: `Maps${maps.length > 0 ? ` (${maps.length}/${maxMaps})` : ` (${boFormat.toUpperCase()})`}` },
+    { id: 'stats', label: 'Player Stats' },
+  ] as const;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl max-w-md w-full">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a]">
+      <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a] flex-shrink-0">
           <h2 className="text-white font-bold text-lg">Edit Match</h2>
           <button onClick={onCancel} className="text-gray-500 hover:text-white transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
-          {isFirstRound ? (
-            <>
-              <TeamSelect
-                label="Team 1"
-                teamId={form.team1Id}
-                teamName={form.team1Name}
-                excludeId={form.team2Id}
-                onChange={(id, name) => setForm(f => ({ ...f, team1Id: id, team1Name: name }))}
-              />
-              <TeamSelect
-                label="Team 2"
-                teamId={form.team2Id}
-                teamName={form.team2Name}
-                excludeId={form.team1Id}
-                onChange={(id, name) => setForm(f => ({ ...f, team2Id: id, team2Name: name }))}
-              />
-            </>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs text-gray-500 mb-1">Teams are auto-assigned based on match results.</p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
-                  {form.team1Name}
+        {/* Tabs */}
+        <div className="flex gap-1 px-6 pt-4 flex-shrink-0">
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                tab === t.id
+                  ? 'bg-[#ff4655] text-white'
+                  : 'text-gray-400 hover:text-white hover:bg-[#2a2d3a]'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-6">
+          {tab === 'details' && (
+            <div className="space-y-5">
+              {isFirstRound ? (
+                <>
+                  <TeamSelect
+                    label="Team 1"
+                    teamId={form.team1Id}
+                    teamName={form.team1Name}
+                    excludeId={form.team2Id}
+                    onChange={(id, name) => setForm(f => ({ ...f, team1Id: id, team1Name: name }))}
+                  />
+                  <TeamSelect
+                    label="Team 2"
+                    teamId={form.team2Id}
+                    teamName={form.team2Name}
+                    excludeId={form.team1Id}
+                    onChange={(id, name) => setForm(f => ({ ...f, team2Id: id, team2Name: name }))}
+                  />
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 mb-1">Teams are auto-assigned based on match results.</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
+                      {form.team1Name}
+                    </div>
+                    <span className="text-gray-600 text-xs font-bold">vs</span>
+                    <div className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
+                      {form.team2Name}
+                    </div>
+                  </div>
                 </div>
-                <span className="text-gray-600 text-xs font-bold">vs</span>
-                <div className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm">
-                  {form.team2Name}
+              )}
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">Date</label>
+                <input
+                  type="date"
+                  className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                  value={form.date || ''}
+                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">Time</label>
+                <input
+                  type="time"
+                  className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                  value={form.time || ''}
+                  onChange={e => setForm(f => ({ ...f, time: e.target.value }))}
+                />
+              </div>
+
+              {/* Match Format */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">Match Format</label>
+                <div className="flex gap-2">
+                  {(['bo1', 'bo3', 'bo5'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        format: fmt,
+                        // Trim maps to new max if needed
+                        maps: (f.maps ?? []).slice(0, fmt === 'bo1' ? 1 : fmt === 'bo3' ? 3 : 5),
+                      }))}
+                      className={`flex-1 py-2 rounded-lg border text-sm font-semibold uppercase transition-all ${
+                        (form.format ?? 'bo3') === fmt
+                          ? 'border-[#ff4655] bg-[#ff4655]/20 text-[#ff4655]'
+                          : 'border-[#2a2d3a] text-gray-400 hover:border-gray-500 hover:text-white'
+                      }`}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
           )}
 
-          <div>
-            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Date</label>
-            <input
-              type="date"
-              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-              value={form.date || ''}
-              onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-            />
-          </div>
+          {tab === 'maps' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">Enter the result of each map played.</p>
+                <span className="text-xs text-gray-500 font-semibold">{maps.length}/{maxMaps} maps · {boFormat.toUpperCase()}</span>
+              </div>
+              {maps.map((m, i) => (
+                <div key={i} className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400 text-xs font-semibold uppercase tracking-wider">Map {i + 1}</span>
+                    <button onClick={() => removeMap(i)} className="text-gray-600 hover:text-red-400 transition-colors">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <input
+                    placeholder="Map name (e.g. Ascent)"
+                    className="w-full bg-[#151821] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                    value={m.mapName}
+                    onChange={e => updateMap(i, 'mapName', e.target.value)}
+                  />
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 mb-1">{form.team1Name}</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="w-full bg-[#151821] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                        value={m.team1Score}
+                        onChange={e => updateMap(i, 'team1Score', parseInt(e.target.value) || 0)}
+                      />
+                    </div>
+                    <span className="text-gray-600 font-bold mt-5">:</span>
+                    <div className="flex-1">
+                      <label className="block text-xs text-gray-500 mb-1">{form.team2Name}</label>
+                      <input
+                        type="number"
+                        min={0}
+                        className="w-full bg-[#151821] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                        value={m.team2Score}
+                        onChange={e => updateMap(i, 'team2Score', parseInt(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={addMap}
+                disabled={maps.length >= maxMaps}
+                className="w-full py-2.5 rounded-lg border border-dashed border-[#2a2d3a] text-gray-400 text-sm hover:border-[#ff4655]/50 hover:text-white transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-4 h-4" /> Add Map {maps.length >= maxMaps ? `(max ${maxMaps} for ${boFormat.toUpperCase()})` : ''}
+              </button>
+            </div>
+          )}
 
-          <div>
-            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Time</label>
-            <input
-              type="time"
-              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-              value={form.time || ''}
-              onChange={e => setForm(f => ({ ...f, time: e.target.value }))}
-            />
-          </div>
+          {tab === 'stats' && (
+            <div className="space-y-6">
+              {allPlayers.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-6">No players found for these teams. Add players to the teams first.</p>
+              ) : (
+                [form.team1Id, form.team2Id].map(teamId => {
+                  const teamObj = teams.find(t => t.id === teamId);
+                  if (!teamObj || teamObj.players.length === 0) return null;
+                  const teamStats = stats.filter(s => s.teamId === teamId);
+                  return (
+                    <div key={teamId}>
+                      <p className="text-white text-sm font-bold mb-3 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-[#ff4655]" />
+                        {teamObj.name}
+                      </p>
+                      <div className="space-y-3">
+                        {teamStats.map(s => (
+                          <div key={s.playerId} className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-3">
+                            <p className="text-white text-sm font-semibold mb-2">{s.playerName}</p>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">Agent</label>
+                                <input
+                                  placeholder="e.g. Jett"
+                                  className="w-full bg-[#151821] border border-[#2a2d3a] rounded px-2 py-1.5 text-white text-xs focus:border-[#ff4655] focus:outline-none"
+                                  value={s.agent ?? ''}
+                                  onChange={e => updateStat(s.playerId, 'agent', e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">K</label>
+                                <input type="number" min={0} className="w-full bg-[#151821] border border-[#2a2d3a] rounded px-2 py-1.5 text-white text-xs focus:border-[#ff4655] focus:outline-none" value={s.kills} onChange={e => updateStat(s.playerId, 'kills', parseInt(e.target.value) || 0)} />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">D</label>
+                                <input type="number" min={0} className="w-full bg-[#151821] border border-[#2a2d3a] rounded px-2 py-1.5 text-white text-xs focus:border-[#ff4655] focus:outline-none" value={s.deaths} onChange={e => updateStat(s.playerId, 'deaths', parseInt(e.target.value) || 0)} />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">A</label>
+                                <input type="number" min={0} className="w-full bg-[#151821] border border-[#2a2d3a] rounded px-2 py-1.5 text-white text-xs focus:border-[#ff4655] focus:outline-none" value={s.assists} onChange={e => updateStat(s.playerId, 'assists', parseInt(e.target.value) || 0)} />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">ACS</label>
+                                <input type="number" min={0} className="w-full bg-[#151821] border border-[#2a2d3a] rounded px-2 py-1.5 text-white text-xs focus:border-[#ff4655] focus:outline-none" value={s.acs} onChange={e => updateStat(s.playerId, 'acs', parseInt(e.target.value) || 0)} />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">HS%</label>
+                                <input type="number" min={0} max={100} className="w-full bg-[#151821] border border-[#2a2d3a] rounded px-2 py-1.5 text-white text-xs focus:border-[#ff4655] focus:outline-none" value={s.hsPercent} onChange={e => updateStat(s.playerId, 'hsPercent', parseInt(e.target.value) || 0)} />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
 
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={onCancel}
-              className="flex-1 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                const bothAssigned = teams.some(t => t.id === form.team1Id) && teams.some(t => t.id === form.team2Id);
-                onSave({ ...form, needsAssignment: bothAssigned ? false : form.needsAssignment });
-              }}
-              className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
-            >
-              Save <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="flex gap-3 px-6 py-4 border-t border-[#2a2d3a] flex-shrink-0">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              const bothAssigned = teams.some(t => t.id === form.team1Id) && teams.some(t => t.id === form.team2Id);
+              const computedWinner = computeWinnerFromMaps(form);
+              const finalForm: BracketMatch = {
+                ...form,
+                winner: computedWinner,
+                needsAssignment: bothAssigned ? false : form.needsAssignment,
+              };
+              onSave(finalForm);
+            }}
+            className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
+          >
+            Save <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>
@@ -818,13 +1180,63 @@ function CreateTournamentScreen({
   const handleMatchEdit = (updatedMatch: BracketMatch) => {
     if (!tournament.generatedBracket) return;
 
+    // Replace the match in the bracket
+    let newRounds = tournament.generatedBracket.rounds.map(round =>
+      round.map(match => match.id === updatedMatch.id ? updatedMatch : match)
+    );
+
+    // Propagate winner to the next slot if a winner was set
+    if (updatedMatch.winner) {
+      const winnerId = updatedMatch.winner;
+      const winnerName = winnerId === updatedMatch.team1Id ? updatedMatch.team1Name : updatedMatch.team2Name;
+      const loserId = winnerId === updatedMatch.team1Id ? updatedMatch.team2Id : updatedMatch.team1Name;
+      const loserName = winnerId === updatedMatch.team1Id ? updatedMatch.team2Name : updatedMatch.team1Name;
+
+      const applyToSlot = (rounds: BracketMatch[][], matchId: string, slot: 1 | 2, teamId: string, teamName: string) =>
+        rounds.map(round => round.map(m => {
+          if (m.id !== matchId) return m;
+          return slot === 1
+            ? { ...m, team1Id: teamId, team1Name: teamName, winner: undefined, autoPopulated: true }
+            : { ...m, team2Id: teamId, team2Name: teamName, winner: undefined, autoPopulated: true };
+        }));
+
+      if (tournament.generatedBracket.bracketType === 'double' && updatedMatch.winnerGoesTo) {
+        newRounds = applyToSlot(newRounds, updatedMatch.winnerGoesTo.matchId, updatedMatch.winnerGoesTo.slot, winnerId, winnerName);
+        if (updatedMatch.loserGoesTo) {
+          const actualLoserId = winnerId === updatedMatch.team1Id ? updatedMatch.team2Id : updatedMatch.team1Id;
+          const actualLoserName = winnerId === updatedMatch.team1Id ? updatedMatch.team2Name : updatedMatch.team1Name;
+          newRounds = applyToSlot(newRounds, updatedMatch.loserGoesTo.matchId, updatedMatch.loserGoesTo.slot, actualLoserId, actualLoserName);
+        }
+      } else if (tournament.generatedBracket.bracketType !== 'roundrobin') {
+        // Single elim: find the round and advance winner
+        const roundIdx = newRounds.findIndex(r => r.some(m => m.id === updatedMatch.id));
+        const matchIdx = newRounds[roundIdx]?.findIndex(m => m.id === updatedMatch.id) ?? -1;
+        const nextRound = newRounds[roundIdx + 1];
+        if (nextRound && matchIdx >= 0) {
+          const nextMatchIdx = Math.floor(matchIdx / 2);
+          const isTeam1Slot = matchIdx % 2 === 0;
+          newRounds = newRounds.map((r, rIdx) => {
+            if (rIdx !== roundIdx + 1) return r;
+            return r.map((m, j) => {
+              if (j !== nextMatchIdx) return m;
+              return isTeam1Slot
+                ? { ...m, team1Id: winnerId, team1Name: winnerName, winner: undefined, autoPopulated: true }
+                : { ...m, team2Id: winnerId, team2Name: winnerName, winner: undefined, autoPopulated: true };
+            });
+          });
+        }
+      }
+
+      void loserId; void loserName; // used above via destructuring
+    }
+
     const newBracket = {
       ...tournament.generatedBracket,
-      rounds: tournament.generatedBracket.rounds.map(round =>
-        round.map(match =>
-          match.id === updatedMatch.id ? updatedMatch : match
-        )
-      ),
+      rounds: newRounds,
+      customizationHistory: [
+        ...tournament.generatedBracket.customizationHistory,
+        { timestamp: new Date().toISOString(), changes: `Match ${updatedMatch.id} updated` },
+      ],
     };
 
     setTournament(t => ({ ...t, generatedBracket: newBracket }));
@@ -1237,41 +1649,40 @@ function CreateTournamentScreen({
               </button>
             )}
             {!isEditing && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
-              <button
-                onClick={() => {
-                  setCurrentTeam(null);
-                  setEditingTeamIndex(null);
-                  setStep('teamForm');
-                }}
-                className="flex-1 min-w-[120px] py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Add Team
-              </button>
+              (() => {
+                const slotsLeft = tournament.event ? tournament.event.maxTeams - tournament.teams.length : Infinity;
+                const isFull = slotsLeft <= 0;
+                return isFull ? (
+                  <div className="flex-1 min-w-[120px] py-2.5 rounded-lg bg-[#2a2d3a] text-gray-500 text-sm font-semibold flex items-center justify-center gap-2 cursor-not-allowed">
+                    <Plus className="w-4 h-4" /> Slots Full
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setCurrentTeam(null);
+                      setEditingTeamIndex(null);
+                      setStep('teamForm');
+                    }}
+                    className="flex-1 min-w-[120px] py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" /> Add Team
+                  </button>
+                );
+              })()
             )}
             {!tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
-              <button
-                onClick={() => setShowExcelImportModal(true)}
-                className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
-              >
-                <Upload className="w-4 h-4" /> Import from Excel
-              </button>
-            )}
-            {!isEditing && tournament.teams.length > 0 && !tournament.generatedBracket && !tournament.bracket && !tournament.groupStage && !tournament.stage1Config && (
-              tournament.tournamentType === 'group' ? (
-                <button
-                  onClick={() => setShowTwoStageTournamentModal(true)}
-                  className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
-                >
-                  <Swords className="w-4 h-4" /> Configure Stage 1
-                </button>
-              ) : (
-                <button
-                  onClick={() => setShowBracketModal(true)}
-                  className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-all flex items-center justify-center gap-2"
-                >
-                  <Swords className="w-4 h-4" /> Configure Bracket
-                </button>
-              )
+              (() => {
+                const slotsLeft = tournament.event ? tournament.event.maxTeams - tournament.teams.length : Infinity;
+                const isFull = slotsLeft <= 0;
+                return isFull ? null : (
+                  <button
+                    onClick={() => setShowExcelImportModal(true)}
+                    className="flex-1 min-w-[140px] py-2.5 rounded-lg bg-orange-600 text-white text-sm font-semibold hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" /> Import from Excel
+                  </button>
+                );
+              })()
             )}
             {tournament.teams.length > 0 && (
               <button
@@ -1342,6 +1753,7 @@ function CreateTournamentScreen({
           onImport={handleExcelImport}
           onCancel={() => setShowExcelImportModal(false)}
           existingTeamNames={tournament.teams.map(t => t.name)}
+          remainingSlots={tournament.event ? tournament.event.maxTeams - tournament.teams.length : undefined}
         />
       )}
     </div>

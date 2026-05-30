@@ -309,7 +309,8 @@ export function MatchesPage() {
                           {statusMatches.map((match) => (
                             <div
                               key={match.id}
-                              className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/30 transition-colors"
+                              onClick={() => navigate(`/tournament-match/${match.id}`)}
+                              className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/30 transition-colors cursor-pointer"
                             >
                               <div className="space-y-3">
                                 {/* Teams */}

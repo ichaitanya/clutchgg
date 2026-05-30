@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s -H \"Authorization: HDEV-97d92e1f-2fc9-49c5-9e49-bd959e394385\" \"https://api.henrikdev.xyz/valorant/v3/matches/ap/TsWaGg/6969?mode=competitive&size=1\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\)['data'][0]; p=d['players']['all_players'][0]; print\\('STATS KEYS:', list\\(p['stats'].keys\\(\\)\\)\\); print\\('STATS:', p['stats']\\); print\\('TEAMS:', json.dumps\\(d['teams'], indent=1\\)\\); print\\('PLAYER TOP KEYS:', list\\(p.keys\\(\\)\\)\\)\")",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',c=>s+=c\\).on\\('end',\\(\\)=>{const d=JSON.parse\\(s\\).data[0];const p=d.players.all_players[0];console.log\\('STATS:',JSON.stringify\\(p.stats\\)\\);console.log\\('TEAMS:',JSON.stringify\\(d.teams\\)\\);console.log\\('CHAR:',p.character\\);console.log\\('PLAYER_KEYS:',Object.keys\\(p\\).join\\(','\\)\\);}\\)\")",
+      "Bash(curl -s -H \"Authorization: HDEV-97d92e1f-2fc9-49c5-9e49-bd959e394385\" \"https://api.henrikdev.xyz/valorant/v2/match/1c128b96-3fb2-4a93-b13e-59ec120d706b\")",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',c=>s+=c\\).on\\('end',\\(\\)=>{const d=JSON.parse\\(s\\).data;console.log\\('PLAYERS_KEYS:',Object.keys\\(d.players\\).join\\(','\\)\\);console.log\\('ALL_PLAYERS_IS_ARRAY:',Array.isArray\\(d.players.all_players\\)\\);console.log\\('META_ROUNDS:',d.metadata.rounds_played\\);console.log\\('TEAMS:',JSON.stringify\\(d.teams\\)\\);}\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\TS ^_^\\. claude\\projects\\s--work-clutchgg-clutchgg\\memory"
+    ]
+  }
+}
