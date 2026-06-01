@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Header } from './Header';
 import { useNavigate } from 'react-router-dom';
-import { TournamentDetailsDisplay } from './TournamentDetailsDisplay';
 import type { AdminData } from './AdminPanel';
-import type { Tournament, BracketMatch } from './TournamentCreation';
+import type { BracketMatch } from './TournamentCreation';
 import { loadAdminData } from '../services/db';
 
 // Helper function to determine match status
@@ -56,7 +55,6 @@ function getEffectiveStatus(match: BracketMatch) {
 export function MatchesPage() {
   const navigate = useNavigate();
   const [adminData, setAdminData] = useState<AdminData | null>(null);
-  const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
 
   useEffect(() => {
     loadAdminData().then(setAdminData).catch(() => {});
@@ -126,7 +124,7 @@ export function MatchesPage() {
                 .map(tournament => (
                   <div
                     key={tournament.id}
-                    onClick={() => setSelectedTournament(tournament)}
+                    onClick={() => navigate(`/tournament/${tournament.id}`)}
                     className="bg-[#151821] border border-[#2a2d3a] rounded-lg p-4 cursor-pointer hover:border-[#ff4655]/50 transition-all"
                   >
                     <h3 className="text-white font-bold text-sm mb-2">{tournament.name}</h3>
@@ -298,14 +296,6 @@ export function MatchesPage() {
           </section>
         )}
       </main>
-
-      {/* Tournament Details Modal */}
-      {selectedTournament && (
-        <TournamentDetailsDisplay
-          tournament={selectedTournament}
-          onClose={() => setSelectedTournament(null)}
-        />
-      )}
     </div>
   );
 }

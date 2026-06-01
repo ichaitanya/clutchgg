@@ -1,15 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { buildMentionIndex, makeMentionToken, type MentionEntity } from '../utils/mentions';
 import {
-  Shield, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronRight,
+  Shield, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronUp, ChevronRight,
   Tv, Calendar, Clock, Users, Trophy, AlertCircle,
   CheckCircle, Eye, EyeOff, Swords, BarChart2, Globe,
-  Lock, LogOut, KeyRound, User, TrendingUp, Zap, Settings
+  Lock, LogOut, KeyRound, User, TrendingUp, Zap, Settings, Image as ImageIcon, Loader
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
 import { supabase, signIn, signOut } from '../services/supabase';
-import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceTopPlayers, replaceStandings, setSiteConfig, migrateFromLocalStorage } from '../services/db';
+import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings, setSiteConfig, migrateFromLocalStorage } from '../services/db';
 
 function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('');
@@ -172,14 +173,24 @@ export interface StandingTeam {
   losses: number;
 }
 
+// A block of article body content. Articles are composed of an ordered list of
+// these (HLTV-style): subheadings, paragraphs, and inline images.
+export type NewsBlock =
+  | { id: string; type: 'heading'; text: string }
+  | { id: string; type: 'paragraph'; text: string }
+  | { id: string; type: 'image'; url: string; caption?: string };
+
 export interface NewsItem {
   id: string;
   title: string;
   category: string;
   timeAgo: string;
-  imageUrl: string;
-  link: string;
+  imageUrl: string;   // cover image
+  link: string;       // optional external link (legacy / "read more")
   visible: boolean;
+  author?: string;
+  body?: NewsBlock[];
+  tournamentId?: string; // optional: tournament this article is about
 }
 
 export interface TopPlayer {
@@ -532,160 +543,408 @@ function StandingsEditor({ teams, onChange }: { teams: StandingTeam[]; onChange:
   );
 }
 
-// ─── News Editor ──────────────────────────────────────────────────────────────
+// ─── News / Article Editor ─────────────────────────────────────────────────────
 
-function NewsEditor({ items, onChange }: { items: NewsItem[]; onChange: (n: NewsItem[]) => void }) {
-  const update = (id: string, key: keyof NewsItem, val: any) => {
-    onChange(items.map(n => n.id === id ? { ...n, [key]: val } : n));
+// Read an uploaded image file as a base64 data URL.
+function readImageAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// A paragraph textarea with @-mention autocomplete. Typing "@" opens a picker of
+// teams/players from the DB; selecting one inserts a mention token that becomes a
+// link when the article is rendered.
+function ParagraphEditor({ value, onChange, mentionIndex }: {
+  value: string;
+  onChange: (v: string) => void;
+  mentionIndex: MentionEntity[];
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const [menu, setMenu] = useState<{ at: number; query: string } | null>(null);
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  // Detect an active "@query" immediately before the caret.
+  const detect = (text: string, caret: number) => {
+    const upto = text.slice(0, caret);
+    const at = upto.lastIndexOf('@');
+    if (at === -1) { setMenu(null); return; }
+    const between = upto.slice(at + 1);
+    // The query runs until the @ — abort if it contains whitespace/newline or a token bracket.
+    if (/[\s\n\]\)]/.test(between)) { setMenu(null); return; }
+    setMenu({ at, query: between });
+    setActiveIdx(0);
   };
-  const addItem = () => {
-    onChange([...items, { id: uid(), title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true }]);
+
+  const matches = menu
+    ? mentionIndex
+        .filter(e => e.name.toLowerCase().includes(menu.query.toLowerCase()))
+        .slice(0, 8)
+    : [];
+
+  const choose = (e: MentionEntity) => {
+    if (!menu) return;
+    const ta = taRef.current;
+    const caret = ta?.selectionStart ?? value.length;
+    const before = value.slice(0, menu.at);
+    const after = value.slice(caret);
+    const token = makeMentionToken(e);
+    const next = `${before}${token} ${after}`;
+    onChange(next);
+    setMenu(null);
+    // Restore focus + caret after the inserted token.
+    requestAnimationFrame(() => {
+      if (ta) {
+        const pos = (before + token + ' ').length;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      }
+    });
   };
-  const remove = (id: string) => onChange(items.filter(n => n.id !== id));
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!menu || matches.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => (i + 1) % matches.length); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => (i - 1 + matches.length) % matches.length); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(matches[activeIdx]); }
+    else if (e.key === 'Escape') { setMenu(null); }
+  };
 
   return (
-    <div className="space-y-4">
-      {items.map(item => (
-        <div key={item.id} className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-500 font-medium">News item</span>
-            <div className="flex items-center gap-3">
-              <button onClick={() => update(item.id, 'visible', !item.visible)} className={`flex items-center gap-1 text-xs transition-colors ${item.visible ? 'text-[#ff4655]' : 'text-gray-600 hover:text-gray-400'}`}>
-                {item.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                {item.visible ? 'Visible' : 'Hidden'}
+    <div className="relative">
+      <textarea
+        ref={taRef}
+        rows={3}
+        className="w-full bg-[#151821] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none resize-y"
+        value={value}
+        onChange={e => { onChange(e.target.value); detect(e.target.value, e.target.selectionStart); }}
+        onKeyDown={onKeyDown}
+        onClick={e => detect(value, (e.target as HTMLTextAreaElement).selectionStart)}
+        onBlur={() => setTimeout(() => setMenu(null), 150)}
+        placeholder="Paragraph text…  (type @ to mention a team or player)"
+      />
+      {menu && matches.length > 0 && (
+        <div className="absolute z-20 left-3 right-3 mt-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg shadow-xl overflow-hidden max-h-56 overflow-y-auto">
+          {matches.map((e, i) => (
+            <button
+              key={`${e.kind}-${e.id}`}
+              onMouseDown={ev => { ev.preventDefault(); choose(e); }}
+              onMouseEnter={() => setActiveIdx(i)}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${i === activeIdx ? 'bg-[#ff4655]/15 text-white' : 'text-gray-300 hover:bg-[#151821]'}`}
+            >
+              <span className={`text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded ${e.kind === 'team' ? 'text-blue-400 bg-blue-400/10' : 'text-green-400 bg-green-400/10'}`}>
+                {e.kind}
+              </span>
+              <span className="font-medium">{e.name}</span>
+              {e.kind === 'player' && e.teamName && <span className="text-gray-500 text-xs">· {e.teamName}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <p className="text-[10px] text-gray-600 mt-1">Type <span className="text-gray-400">@</span> to link a team or player.</p>
+    </div>
+  );
+}
+
+// Editor for a single article's body blocks (headings, paragraphs, images).
+function ArticleBodyEditor({ blocks, onChange, mentionIndex }: { blocks: NewsBlock[]; onChange: (b: NewsBlock[]) => void; mentionIndex: MentionEntity[] }) {
+  const updateBlock = (id: string, patch: Partial<NewsBlock>) =>
+    onChange(blocks.map(b => (b.id === id ? { ...b, ...patch } as NewsBlock : b)));
+  const removeBlock = (id: string) => onChange(blocks.filter(b => b.id !== id));
+  const move = (index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= blocks.length) return;
+    const next = [...blocks];
+    [next[index], next[j]] = [next[j], next[index]];
+    onChange(next);
+  };
+  const addHeading = () => onChange([...blocks, { id: uid(), type: 'heading', text: '' }]);
+  const addParagraph = () => onChange([...blocks, { id: uid(), type: 'paragraph', text: '' }]);
+  const addImage = () => onChange([...blocks, { id: uid(), type: 'image', url: '', caption: '' }]);
+
+  const handleBlockImage = async (id: string, file: File) => {
+    const url = await readImageAsDataUrl(file);
+    updateBlock(id, { url } as Partial<NewsBlock>);
+  };
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-xs text-gray-400 font-medium">Article Body</label>
+      {blocks.length === 0 && (
+        <p className="text-xs text-gray-600">No content yet. Add a heading, paragraph, or image below.</p>
+      )}
+      {blocks.map((block, i) => (
+        <div key={block.id} className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
+              {block.type}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => move(i, -1)} disabled={i === 0} className="text-gray-600 hover:text-white disabled:opacity-30 transition-colors p-0.5">
+                <ChevronUp className="w-3.5 h-3.5" />
               </button>
-              <button onClick={() => remove(item.id)} className="text-gray-600 hover:text-[#ff4655] transition-colors">
+              <button onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="text-gray-600 hover:text-white disabled:opacity-30 transition-colors p-0.5">
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={() => removeBlock(block.id)} className="text-gray-600 hover:text-[#ff4655] transition-colors p-0.5">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
-          <input
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-            value={item.title} onChange={e => update(item.id, 'title', e.target.value)} placeholder="Article title..."
-          />
-          <div className="grid grid-cols-2 gap-3">
+
+          {block.type === 'heading' && (
             <input
-              className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-              value={item.category} onChange={e => update(item.id, 'category', e.target.value)} placeholder="CATEGORY"
+              className="w-full bg-[#151821] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm font-bold focus:border-[#ff4655] focus:outline-none"
+              value={block.text}
+              onChange={e => updateBlock(block.id, { text: e.target.value })}
+              placeholder="Section heading (bold)"
             />
-            <input
-              className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-              value={item.timeAgo} onChange={e => update(item.id, 'timeAgo', e.target.value)} placeholder="2 hours ago"
+          )}
+
+          {block.type === 'paragraph' && (
+            <ParagraphEditor
+              value={block.text}
+              onChange={text => updateBlock(block.id, { text })}
+              mentionIndex={mentionIndex}
             />
-          </div>
-          <input
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-            value={item.imageUrl} onChange={e => update(item.id, 'imageUrl', e.target.value)} placeholder="Image URL (https://...)"
-          />
-          <input
-            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-            value={item.link} onChange={e => update(item.id, 'link', e.target.value)} placeholder="Article link (https://...)"
-          />
+          )}
+
+          {block.type === 'image' && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                {block.url && (
+                  <img src={block.url} alt="" className="w-24 h-16 object-cover rounded border border-[#2a2d3a]" />
+                )}
+                <label className="flex-1 flex items-center justify-center gap-2 bg-[#151821] border border-dashed border-[#2a2d3a] rounded-lg py-4 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
+                  <ImageIcon className="w-4 h-4 text-gray-500" />
+                  <span className="text-xs text-gray-500">{block.url ? 'Replace image' : 'Upload image'}</span>
+                  <input
+                    type="file" accept="image/*" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleBlockImage(block.id, f); }}
+                  />
+                </label>
+              </div>
+              <input
+                className="w-full bg-[#151821] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+                value={block.caption ?? ''}
+                onChange={e => updateBlock(block.id, { caption: e.target.value } as Partial<NewsBlock>)}
+                placeholder="Image caption (optional)"
+              />
+            </div>
+          )}
         </div>
       ))}
-      <button onClick={addItem} className="flex items-center gap-2 text-sm text-[#ff4655] hover:text-[#ff6670] transition-colors px-1">
-        <Plus className="w-4 h-4" /> Add news item
-      </button>
+
+      <div className="flex flex-wrap gap-2">
+        <button onClick={addHeading} className="flex items-center gap-1.5 text-xs bg-[#0d0f16] border border-[#2a2d3a] text-gray-300 hover:border-[#ff4655]/50 hover:text-white px-3 py-1.5 rounded-lg transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Heading
+        </button>
+        <button onClick={addParagraph} className="flex items-center gap-1.5 text-xs bg-[#0d0f16] border border-[#2a2d3a] text-gray-300 hover:border-[#ff4655]/50 hover:text-white px-3 py-1.5 rounded-lg transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Paragraph
+        </button>
+        <button onClick={addImage} className="flex items-center gap-1.5 text-xs bg-[#0d0f16] border border-[#2a2d3a] text-gray-300 hover:border-[#ff4655]/50 hover:text-white px-3 py-1.5 rounded-lg transition-colors">
+          <Plus className="w-3.5 h-3.5" /> Image
+        </button>
+      </div>
     </div>
   );
 }
 
+function NewsEditor({ items, onChange, onSaveArticle, onDeleteArticle, savingId, tournaments }: {
+  items: NewsItem[];
+  onChange: (n: NewsItem[]) => void;
+  onSaveArticle: (item: NewsItem) => void;
+  onDeleteArticle: (id: string) => void;
+  savingId: string | null;
+  tournaments: Tournament[];
+}) {
+  const mentionIndex = useMemo(() => buildMentionIndex(tournaments), [tournaments]);
+  // Which article is currently expanded for editing (only one at a time).
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-// ─── Players Editor ───────────────────────────────────────────────────────────
+  const update = (id: string, patch: Partial<NewsItem>) => {
+    onChange(items.map(n => n.id === id ? { ...n, ...patch } : n));
+  };
+  const addItem = () => {
+    const id = uid();
+    onChange([...items, { id, title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true, author: '', body: [] }]);
+    setExpandedId(id); // open the new article for editing
+  };
 
-function PlayersEditor({ players, onChange }: { players: TopPlayer[]; onChange: (p: TopPlayer[]) => void }) {
-  const update = (id: string, key: keyof TopPlayer, val: any) => {
-    onChange(players.map(p => p.id === id ? { ...p, [key]: val } : p));
+  const handleCover = async (id: string, file: File) => {
+    const url = await readImageAsDataUrl(file);
+    update(id, { imageUrl: url });
   };
-  const addPlayer = () => {
-    const newPlayer: TopPlayer = { id: uid(), rank: players.length + 1, name: '', team: '', rating: 1.00, kills: 0, deaths: 0 };
-    onChange([...players, newPlayer]);
-  };
-  const remove = (id: string) => onChange(players.filter(p => p.id !== id));
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-xl border border-[#2a2d3a]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-[#151821] text-gray-400 text-xs uppercase">
-              <th className="px-4 py-3 text-left w-16">Rank</th>
-              <th className="px-4 py-3 text-left">Player Name</th>
-              <th className="px-4 py-3 text-left w-24">Team</th>
-              <th className="px-4 py-3 text-center w-24">Rating</th>
-              <th className="px-4 py-3 text-center w-20">Kills</th>
-              <th className="px-4 py-3 text-center w-20">Deaths</th>
-              <th className="px-4 py-3 text-center w-20">K/D</th>
-              <th className="px-4 py-3 w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {players.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-gray-600 text-sm">
-                  No players yet. Add one below.
-                </td>
-              </tr>
-            )}
-            {players.map((player) => (
-              <tr key={player.id} className="border-t border-[#2a2d3a] hover:bg-[#151821] transition-colors">
-                <td className="px-4 py-2">
-                  <input type="number" min={1}
-                    className="w-12 bg-[#0d0f16] border border-[#2a2d3a] rounded px-2 py-1 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-                    value={player.rank} onChange={e => update(player.id, 'rank', Number(e.target.value))}
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <input
-                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded px-2 py-1 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-                    value={player.name} onChange={e => update(player.id, 'name', e.target.value)}
-                    placeholder="Player name"
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <input
-                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded px-2 py-1 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-                    value={player.team} onChange={e => update(player.id, 'team', e.target.value)}
-                    placeholder="PRX"
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <input type="number" min={0} max={5} step={0.01}
-                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded px-2 py-1 text-[#ff4655] text-sm text-center focus:border-[#ff4655] focus:outline-none"
-                    value={player.rating} onChange={e => update(player.id, 'rating', parseFloat(e.target.value) || 0)}
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <input type="number" min={0}
-                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded px-2 py-1 text-green-400 text-sm text-center focus:border-[#ff4655] focus:outline-none"
-                    value={player.kills} onChange={e => update(player.id, 'kills', Number(e.target.value))}
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  <input type="number" min={0}
-                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded px-2 py-1 text-red-400 text-sm text-center focus:border-[#ff4655] focus:outline-none"
-                    value={player.deaths} onChange={e => update(player.id, 'deaths', Number(e.target.value))}
-                  />
-                </td>
-                <td className="px-4 py-2 text-center text-gray-400 text-xs">
-                  {player.kills}/{player.deaths}
-                </td>
-                <td className="px-4 py-2">
-                  <button onClick={() => remove(player.id)} className="text-gray-600 hover:text-[#ff4655] transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <button onClick={addPlayer} className="flex items-center gap-2 text-sm text-[#ff4655] hover:text-[#ff6670] transition-colors px-1">
-        <Plus className="w-4 h-4" /> Add player
+      {items.length === 0 && (
+        <div className="text-center py-10 bg-[#151821] border border-[#2a2d3a] rounded-xl text-gray-600 text-sm">
+          No articles yet. Add one below.
+        </div>
+      )}
+      {items.map(item => {
+        const isOpen = expandedId === item.id;
+
+        // Collapsed row — title + meta + edit/delete.
+        if (!isOpen) {
+          return (
+            <div key={item.id} className="bg-[#151821] border border-[#2a2d3a] rounded-xl px-4 py-3 flex items-center gap-3">
+              {item.imageUrl ? (
+                <img src={item.imageUrl} alt="" className="w-16 h-10 object-cover rounded flex-shrink-0 border border-[#2a2d3a]" />
+              ) : (
+                <div className="w-16 h-10 rounded flex-shrink-0 bg-[#0d0f16] flex items-center justify-center">
+                  <ImageIcon className="w-4 h-4 text-gray-600" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-white text-sm font-semibold truncate">{item.title || 'Untitled article'}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {item.category && <span className="text-[10px] text-gray-500 uppercase tracking-wider">{item.category}</span>}
+                  {!item.visible && <span className="text-[10px] text-gray-600">· Hidden</span>}
+                </div>
+              </div>
+              <button
+                onClick={() => update(item.id, { visible: !item.visible })}
+                className={`flex items-center gap-1 text-xs transition-colors ${item.visible ? 'text-[#ff4655]' : 'text-gray-600 hover:text-gray-400'}`}
+                title={item.visible ? 'Visible' : 'Hidden'}
+              >
+                {item.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                onClick={() => setExpandedId(item.id)}
+                className="flex items-center gap-1.5 text-xs bg-[#0d0f16] border border-[#2a2d3a] text-gray-300 hover:border-[#ff4655]/50 hover:text-white px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Edit3 className="w-3.5 h-3.5" /> Edit
+              </button>
+              <button onClick={() => onDeleteArticle(item.id)} className="text-gray-600 hover:text-[#ff4655] transition-colors">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        }
+
+        // Expanded editor.
+        return (
+        <div key={item.id} className="bg-[#151821] border border-[#ff4655]/30 rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setExpandedId(null)} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors">
+              <ChevronUp className="w-3.5 h-3.5" /> Collapse
+            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={() => update(item.id, { visible: !item.visible })} className={`flex items-center gap-1 text-xs transition-colors ${item.visible ? 'text-[#ff4655]' : 'text-gray-600 hover:text-gray-400'}`}>
+                {item.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                {item.visible ? 'Visible' : 'Hidden'}
+              </button>
+              <button onClick={() => onDeleteArticle(item.id)} className="text-gray-600 hover:text-[#ff4655] transition-colors">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Title */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Title</label>
+            <input
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+              value={item.title} onChange={e => update(item.id, { title: e.target.value })} placeholder="Article title…"
+            />
+          </div>
+
+          {/* Category + Author */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5 font-medium">Category</label>
+              <input
+                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+                value={item.category} onChange={e => update(item.id, { category: e.target.value })} placeholder="e.g. ROSTER MOVE"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5 font-medium">Author <span className="text-gray-600">(optional)</span></label>
+              <input
+                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+                value={item.author ?? ''} onChange={e => update(item.id, { author: e.target.value })} placeholder="e.g. king_dempz"
+              />
+            </div>
+          </div>
+
+          {/* Tournament link */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Tournament <span className="text-gray-600">(optional)</span></label>
+            <select
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+              value={item.tournamentId ?? ''}
+              onChange={e => update(item.id, { tournamentId: e.target.value || undefined })}
+            >
+              <option value="">No tournament</option>
+              {tournaments.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Cover image */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Cover Image</label>
+            <div className="flex items-center gap-3">
+              {item.imageUrl && (
+                <img src={item.imageUrl} alt="" className="w-28 h-16 object-cover rounded border border-[#2a2d3a]" />
+              )}
+              <label className="flex-1 flex items-center justify-center gap-2 bg-[#0d0f16] border border-dashed border-[#2a2d3a] rounded-lg py-4 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
+                <ImageIcon className="w-4 h-4 text-gray-500" />
+                <span className="text-xs text-gray-500">{item.imageUrl ? 'Replace cover' : 'Upload cover'}</span>
+                <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleCover(item.id, f); }} />
+              </label>
+            </div>
+            <input
+              className="w-full mt-2 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+              value={item.imageUrl} onChange={e => update(item.id, { imageUrl: e.target.value })} placeholder="…or paste image URL (https://)"
+            />
+          </div>
+
+          {/* Body blocks */}
+          <ArticleBodyEditor blocks={item.body ?? []} onChange={body => update(item.id, { body })} mentionIndex={mentionIndex} />
+
+          {/* Optional external link */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">External Link <span className="text-gray-600">(optional)</span></label>
+            <input
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
+              value={item.link} onChange={e => update(item.id, { link: e.target.value })} placeholder="https://… (opens externally instead of the article page)"
+            />
+          </div>
+
+          {/* Per-article save */}
+          <div className="pt-2 border-t border-[#2a2d3a] flex justify-end gap-2">
+            <button
+              onClick={() => setExpandedId(null)}
+              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-xl border border-[#2a2d3a] hover:border-gray-500 transition-all"
+            >
+              Done
+            </button>
+            <button
+              onClick={() => onSaveArticle(item)}
+              disabled={savingId === item.id || !item.title.trim()}
+              className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {savingId === item.id ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {savingId === item.id ? 'Saving…' : 'Save Article'}
+            </button>
+          </div>
+        </div>
+        );
+      })}
+      <button onClick={addItem} className="flex items-center gap-2 text-sm text-[#ff4655] hover:text-[#ff6670] transition-colors px-1">
+        <Plus className="w-4 h-4" /> Add article
       </button>
     </div>
   );
 }
+
 
 // ─── Sidebar Tab ──────────────────────────────────────────────────────────────
 
@@ -714,7 +973,7 @@ function SideTab({ icon: Icon, label, active, count, onClick }: {
 
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
-type Tab = 'news' | 'players' | 'tournaments' | 'settings';
+type Tab = 'news' | 'tournaments' | 'settings';
 
 export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
@@ -764,6 +1023,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   const [data, setData] = useState<AdminData>(defaultData);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [dbLoading, setDbLoading] = useState(true);
+  const [savingNewsId, setSavingNewsId] = useState<string | null>(null);
   // IDs of news items currently persisted in the DB. Used on save to delete any
   // items the admin removed from the editor (the upsert pass alone can't remove).
   const persistedNewsIds = useRef<Set<string>>(new Set());
@@ -835,7 +1095,6 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Content</p>
           <SideTab icon={Trophy} label="Tournaments" active={tab === 'tournaments'} count={data.tournaments.length} onClick={() => setTab('tournaments')} />
           <SideTab icon={Trophy} label="News" active={tab === 'news'} count={data.news.length} onClick={() => setTab('news')} />
-          <SideTab icon={TrendingUp} label="Top Players" active={tab === 'players'} count={(data.players || []).length} onClick={() => setTab('players')} />
 
           <div className="my-3 border-t border-[#1e2130]" />
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Site Settings</p>
@@ -875,67 +1134,41 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
             <div className="max-w-3xl space-y-5">
               <div>
                 <h2 className="text-white font-bold text-lg">Latest News</h2>
-                <p className="text-gray-500 text-sm">Manage news cards shown on the homepage</p>
+                <p className="text-gray-500 text-sm">Manage news articles shown on the homepage. Each article saves on its own.</p>
               </div>
               <NewsEditor
                 items={data.news}
+                tournaments={data.tournaments}
                 onChange={news => setData(d => ({ ...d, news }))}
-              />
-              <button
-                onClick={async () => {
+                savingId={savingNewsId}
+                onSaveArticle={async (item) => {
+                  setSavingNewsId(item.id);
                   try {
-                    // Persist current items, and remove any that were deleted
-                    // from the editor since the last load/save.
-                    const currentIds = new Set(data.news.map(n => n.id));
-                    const removed = [...persistedNewsIds.current].filter(id => !currentIds.has(id));
-                    await Promise.all([
-                      ...data.news.map(upsertNews),
-                      ...removed.map(deleteNews),
-                    ]);
-                    persistedNewsIds.current = currentIds;
-                    save(data);
+                    await upsertNews(item);
+                    persistedNewsIds.current.add(item.id);
+                    onDataChange?.(data);
+                    showToast('Article saved!', 'success');
                   } catch (e) {
-                    console.error('[Admin] Failed to save news:', e);
-                    showToast(e instanceof Error ? `Failed to save news: ${e.message}` : 'Failed to save news', 'error');
+                    console.error('[Admin] Failed to save article:', e);
+                    showToast(e instanceof Error ? `Failed to save article: ${e.message}` : 'Failed to save article', 'error');
+                  } finally {
+                    setSavingNewsId(null);
                   }
                 }}
-                className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
-              >
-                <Save className="w-4 h-4" /> Save News
-              </button>
-            </div>
-          )}
-
-          {/* ── PLAYERS TAB ── */}
-          {tab === 'players' && (
-            <div className="max-w-4xl space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-white font-bold text-lg">Top Players</h2>
-                  <p className="text-gray-500 text-sm">Manage the top players leaderboard shown on the homepage</p>
-                </div>
-                <button
-                  onClick={() => save({ ...data, players: [...(data.players || [])].sort((a, b) => b.rating - a.rating).map((p, i) => ({ ...p, rank: i + 1 })) })}
-                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] px-3 py-2 rounded-xl transition-all"
-                >
-                  <TrendingUp className="w-3.5 h-3.5" /> Auto-rank by rating
-                </button>
-              </div>
-              <PlayersEditor
-                players={data.players || []}
-                onChange={players => setData(d => ({ ...d, players }))}
-              />
-              <button
-                onClick={async () => {
-                  try {
-                    await replaceTopPlayers(data.players || []);
-                    save(data);
-                  } catch { showToast('Failed to save players', 'error'); }
+                onDeleteArticle={async (id) => {
+                  // Remove locally and, if it was already persisted, delete in DB.
+                  setData(d => ({ ...d, news: d.news.filter(n => n.id !== id) }));
+                  if (persistedNewsIds.current.has(id)) {
+                    try {
+                      await deleteNews(id);
+                      persistedNewsIds.current.delete(id);
+                    } catch (e) {
+                      console.error('[Admin] Failed to delete article:', e);
+                      showToast('Failed to delete article', 'error');
+                    }
+                  }
                 }}
-                className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
-              >
-                <Save className="w-4 h-4" /> Save Players
-              </button>
+              />
             </div>
           )}
 

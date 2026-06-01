@@ -8,14 +8,17 @@ interface UpcomingMatchProps {
   date: string;
   time: string;
   matchId?: string;
+  // Tournament bracket matches open the rich tournament match page; standalone
+  // admin matches use the legacy scoreboard page.
+  isTournamentMatch?: boolean;
 }
 
-export function UpcomingMatch({ team1, team2, tournament, date, time, matchId }: UpcomingMatchProps) {
+export function UpcomingMatch({ team1, team2, tournament, date, time, matchId, isTournamentMatch }: UpcomingMatchProps) {
   const navigate = useNavigate();
 
   const handleClick = () => {
     if (matchId) {
-      navigate(`/match/${matchId}`);
+      navigate(isTournamentMatch ? `/tournament-match/${matchId}` : `/match/${matchId}`);
     }
   };
 

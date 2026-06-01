@@ -6,6 +6,7 @@ import type { AdminData } from './AdminPanel';
 import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult } from './TournamentCreation';
 import { getTournaments } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
+import { mapImageUrl, agentIconUrl } from '../utils/valorantAssets';
 
 interface MatchContext {
   match: BracketMatch;
@@ -234,7 +235,22 @@ function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlay
                       <span className="text-white font-semibold text-sm">{s.playerName}</span>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-gray-400 text-sm">{s.agent || '—'}</td>
+                  <td className="px-3 py-3 text-gray-400 text-sm">
+                    {s.agent ? (
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {s.agent.split(',').map(a => a.trim()).filter(Boolean).map((a, idx) => {
+                          const url = agentIconUrl(a);
+                          return (
+                            <span key={idx} className="flex items-center gap-1" title={a}>
+                              {url
+                                ? <img src={url} alt={a} className="w-6 h-6 rounded object-cover bg-[#0d0f16] flex-shrink-0" />
+                                : <span className="w-6 h-6 rounded bg-[#0d0f16] border border-[#2a2d3a] flex items-center justify-center text-[9px] text-gray-500 flex-shrink-0">{a.slice(0, 2).toUpperCase()}</span>}
+                            </span>
+                          );
+                        })}
+                      </span>
+                    ) : '—'}
+                  </td>
                   <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.kills}</td>
                   <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.deaths}</td>
                   <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.assists}</td>
@@ -513,7 +529,12 @@ export function TournamentMatchPage() {
           {/* Tournament info strip */}
           <div className="border-t border-[#2a2d3a] px-6 py-3 flex items-center justify-center gap-2">
             <Trophy className="w-3.5 h-3.5 text-[#ff4655]" />
-            <span className="text-gray-400 text-xs">{tournament.name}</span>
+            <button
+              onClick={() => navigate(`/tournament/${tournament.id}`)}
+              className="text-[#ff4655] text-xs hover:underline"
+            >
+              {tournament.name}
+            </button>
             <span className="text-gray-600 text-xs">·</span>
             <span className="text-gray-500 text-xs">Round {match.round + 1}</span>
           </div>
@@ -544,6 +565,12 @@ export function TournamentMatchPage() {
                         : 'border-[#2a2d3a]'
                     } ${clickable ? 'cursor-pointer hover:border-[#ff4655]/60' : ''}`}
                   >
+                    {mapImageUrl(m.mapName) && (
+                      <div className="relative h-24 -mx-4 -mt-4 mb-3 rounded-t-xl overflow-hidden bg-[#0d0f16]">
+                        <img src={mapImageUrl(m.mapName)!} alt={m.mapName} className="absolute inset-0 w-full h-full object-cover object-center" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#151821] via-[#151821]/20 to-transparent" />
+                      </div>
+                    )}
                     <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-3">
                       {m.mapName || `Map ${i + 1}`}
                     </p>
@@ -693,6 +720,30 @@ export function TournamentMatchPage() {
                 })}
               </div>
             )}
+
+            {/* Official map splash banner for the selected map */}
+            {!isTotalView && (() => {
+              const selMap = match.maps?.[safeMapIndex];
+              const splash = mapImageUrl(selMap?.mapName);
+              if (!selMap || !splash) return null;
+              return (
+                <div className="relative rounded-xl overflow-hidden border border-[#2a2d3a] mb-4 h-28 sm:h-36">
+                  <img src={splash} alt={selMap.mapName} className="absolute inset-0 w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f16] via-[#0d0f16]/60 to-[#0d0f16]/30" />
+                  <div className="relative h-full flex items-center justify-between px-5">
+                    <div>
+                      <p className="text-gray-300 text-[11px] uppercase tracking-widest">Map</p>
+                      <p className="text-white font-black text-2xl sm:text-3xl">{selMap.mapName}</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-white">
+                      <span className={`text-3xl font-black ${selMap.team1Score > selMap.team2Score ? 'text-white' : 'text-gray-400'}`}>{selMap.team1Score}</span>
+                      <span className="text-gray-500 text-xl">:</span>
+                      <span className={`text-3xl font-black ${selMap.team2Score > selMap.team1Score ? 'text-white' : 'text-gray-400'}`}>{selMap.team2Score}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-4">
               <StatsTable

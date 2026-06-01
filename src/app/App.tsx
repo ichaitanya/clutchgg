@@ -12,6 +12,8 @@ import { TournamentMatchPage } from './components/TournamentMatchPage';
 import { TeamsPage } from './components/TeamsPage';
 import { StatsPage, getTopPlayersByAcs } from './components/StatsPage';
 import { PlayerPage } from './components/PlayerPage';
+import { ArticlePage } from './components/ArticlePage';
+import { TournamentPage } from './components/TournamentPage';
 import { TrendingUp } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import { loadAdminData } from './services/db';
@@ -98,6 +100,7 @@ function Home() {
               <div className="space-y-3">
                 {upcomingMatches && upcomingMatches.length > 0 ? (
                   upcomingMatches.map(m => {
+                    const isTournamentMatch = 'team1Name' in m;
                     const team1 = 'team1Name' in m ? m.team1Name : m.team1;
                     const team2 = 'team2Name' in m ? m.team2Name : m.team2;
                     const tournament = 'tournamentName' in m ? m.tournamentName : m.tournament;
@@ -112,6 +115,7 @@ function Home() {
                         date={date || ''}
                         time={time || ''}
                         matchId={m.id}
+                        isTournamentMatch={isTournamentMatch}
                       />
                     );
                   })
@@ -130,12 +134,11 @@ function Home() {
                   <div className="w-1 h-6 bg-[#ff4655] rounded" />
                   Latest News
                 </h2>
-                <button className="text-[#ff4655] text-sm hover:underline">View all</button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {news && news.length > 0 ? (
                   news.map(n => (
-                    <NewsCard key={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} link={n.link} />
+                    <NewsCard key={n.id} id={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} link={n.link} />
                   ))
                 ) : !adminData ? (
                   <>
@@ -291,8 +294,11 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/matches" element={<MatchesPage />} />
         <Route path="/teams" element={<TeamsPage />} />
+        <Route path="/teams/:teamId" element={<TeamsPage />} />
         <Route path="/stats" element={<StatsPage />} />
         <Route path="/player/:tournamentId/:playerId" element={<PlayerPage />} />
+        <Route path="/news/:id" element={<ArticlePage />} />
+        <Route path="/tournament/:id" element={<TournamentPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/match/:matchId" element={<MatchScoreboard />} />
         <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { ChevronLeft, Users, User } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Header } from './Header';
 import type { Tournament, TeamInTournament, TournamentPlayer } from './TournamentCreation';
 import { getTournaments } from '../services/db';
 
@@ -8,13 +9,22 @@ type ViewMode = 'teams' | 'players';
 
 export function TeamsPage() {
   const navigate = useNavigate();
-  const [viewMode, setViewMode] = useState<ViewMode>('teams');
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const { teamId: routeTeamId } = useParams();
+  const [viewMode, setViewMode] = useState<ViewMode>(routeTeamId ? 'players' : 'teams');
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(routeTeamId ?? null);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
 
   useEffect(() => {
     getTournaments().then(setTournaments).catch(() => {});
   }, []);
+
+  // Deep link: when arriving at /teams/:teamId, open that team's players view.
+  useEffect(() => {
+    if (routeTeamId) {
+      setSelectedTeamId(routeTeamId);
+      setViewMode('players');
+    }
+  }, [routeTeamId]);
 
   // Get all teams from all tournaments — deduplicated.
   // A team that appears in multiple tournaments is only listed once. Two teams
@@ -51,10 +61,18 @@ export function TeamsPage() {
     return teams;
   }, [tournaments]);
 
-  // Get selected team's players
+  // Get selected team's players. Prefer the deduped list, but fall back to
+  // searching every tournament's roster so deep links (e.g. from an article
+  // mention) resolve even when dedup kept a different id for that team.
   const selectedTeam = useMemo(() => {
-    return allTeams.find(t => t.id === selectedTeamId);
-  }, [selectedTeamId, allTeams]);
+    const fromList = allTeams.find(t => t.id === selectedTeamId);
+    if (fromList) return fromList;
+    for (const t of tournaments) {
+      const team = t.teams.find(tm => tm.id === selectedTeamId);
+      if (team) return { ...team, tournamentName: t.name, tournamentId: t.id };
+    }
+    return undefined;
+  }, [selectedTeamId, allTeams, tournaments]);
 
   // Initialize selected team when first team is available
   useEffect(() => {
@@ -65,9 +83,11 @@ export function TeamsPage() {
 
   return (
     <div className="min-h-screen bg-[#0d0f16] pb-12">
-      {/* Header */}
-      <div className="bg-[#151821] border-b border-[#2a2d3a] sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-4">
+      <Header />
+
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Page title */}
+        <div className="flex items-center gap-4 mb-6">
           <button
             onClick={() => navigate('/')}
             className="p-2 hover:bg-[#1e2130] rounded-lg transition-colors text-gray-500 hover:text-white"
@@ -81,9 +101,7 @@ export function TeamsPage() {
             </p>
           </div>
         </div>
-      </div>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
         {allTeams.length === 0 ? (
           <div className="text-center py-16">
             <Users className="w-12 h-12 mx-auto text-gray-600 mb-4" />

@@ -41,6 +41,9 @@ export async function getNews(): Promise<NewsItem[]> {
     imageUrl: row.image_url ?? '',
     link: row.link ?? '',
     visible: row.visible,
+    author: row.author ?? undefined,
+    body: Array.isArray(row.body) ? row.body : [],
+    tournamentId: row.tournament_id ?? undefined,
   }));
 }
 
@@ -52,6 +55,9 @@ export async function upsertNews(item: NewsItem): Promise<NewsItem> {
     image_url: item.imageUrl,
     link: item.link,
     visible: item.visible,
+    author: item.author ?? null,
+    body: item.body ?? [],
+    tournament_id: item.tournamentId ?? null,
     published_at: new Date().toISOString(),
   };
   const { data, error } = await supabase
@@ -68,6 +74,9 @@ export async function upsertNews(item: NewsItem): Promise<NewsItem> {
     imageUrl: data.image_url ?? '',
     link: data.link ?? '',
     visible: data.visible,
+    author: data.author ?? undefined,
+    body: Array.isArray(data.body) ? data.body : [],
+    tournamentId: data.tournament_id ?? undefined,
   };
 }
 

@@ -1,4 +1,5 @@
 import { Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 
 interface NewsCardProps {
@@ -7,12 +8,20 @@ interface NewsCardProps {
   timeAgo: string;
   imageUrl: string;
   link?: string;
+  // Internal article id. When provided (and no external link), the card opens
+  // the in-app article page; an external link takes precedence if set.
+  id?: string;
 }
 
-export function NewsCard({ title, category, timeAgo, imageUrl, link }: NewsCardProps) {
+export function NewsCard({ title, category, timeAgo, imageUrl, link, id }: NewsCardProps) {
+  const navigate = useNavigate();
+
+  const clickable = !!link || !!id;
   const handleClick = () => {
     if (link) {
       window.open(link, '_blank');
+    } else if (id) {
+      navigate(`/news/${id}`);
     }
   };
 
@@ -20,7 +29,7 @@ export function NewsCard({ title, category, timeAgo, imageUrl, link }: NewsCardP
     <div 
       onClick={handleClick}
       className={`bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden hover:border-[#ff4655]/50 transition-colors ${
-        link ? 'cursor-pointer' : ''
+        clickable ? 'cursor-pointer' : ''
       } group`}
     >
       <div className="aspect-video overflow-hidden relative">

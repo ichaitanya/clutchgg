@@ -10,6 +10,27 @@ import type {
 } from './TournamentCreation';
 import { getStageOptions, statMatchesPlayer } from './StatsPage';
 import { getTournaments } from '../services/db';
+import { agentIconUrl } from '../utils/valorantAssets';
+
+// Render an agent name with its official icon (falls back to a 2-letter chip).
+function AgentTag({ agent }: { agent?: string }) {
+  if (!agent) return <span className="text-gray-500">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      {agent.split(',').map(a => a.trim()).filter(Boolean).map((a, i) => {
+        const url = agentIconUrl(a);
+        return (
+          <span key={i} className="inline-flex items-center gap-1" title={a}>
+            {url
+              ? <img src={url} alt={a} className="w-5 h-5 rounded object-cover bg-[#0d0f16] flex-shrink-0" />
+              : <span className="w-5 h-5 rounded bg-[#0d0f16] border border-[#2a2d3a] flex items-center justify-center text-[8px] text-gray-500 flex-shrink-0">{a.slice(0, 2).toUpperCase()}</span>}
+            <span>{a}</span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 // One played map's stat line for this player, tagged with where it happened.
 interface PlayerMapStat extends MatchPlayerStat {
@@ -232,9 +253,12 @@ export function PlayerPage() {
                 )}
               </div>
               {agg.agents.length > 0 && (
-                <p className="text-gray-500 text-xs mt-3">
-                  Agents played: <span className="text-gray-300">{agg.agents.join(', ')}</span>
-                </p>
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                  <span className="text-gray-500 text-xs">Agents played:</span>
+                  <span className="text-gray-300 text-xs">
+                    <AgentTag agent={agg.agents.join(', ')} />
+                  </span>
+                </div>
               )}
             </div>
           </div>
@@ -293,7 +317,7 @@ export function PlayerPage() {
                       <td className="px-4 py-3 text-purple-400">{s.stageLabel}</td>
                       <td className="px-4 py-3 text-white">{s.opponentName}</td>
                       <td className="px-4 py-3 text-gray-300">{s.mapName}</td>
-                      <td className="px-4 py-3 text-gray-400">{s.agent || '—'}</td>
+                      <td className="px-4 py-3 text-gray-400"><AgentTag agent={s.agent} /></td>
                       <td className="px-4 py-3 text-center text-gray-300">
                         {s.kills} / {s.deaths} / {s.assists}
                       </td>

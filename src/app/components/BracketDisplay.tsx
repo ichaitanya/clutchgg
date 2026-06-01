@@ -303,10 +303,16 @@ function BracketTree({
     return count * slotHeight;
   };
 
-  const maxHeight = Math.max(...rounds.map((_, i) => getColumnHeight(i)));
+  // Matches are absolutely positioned at `top + 24` (the 24px round-header row)
+  // and each card is ~64px tall, so the real content bottom is the tallest
+  // column plus the header offset and one card height. Add that so the last
+  // match in a column isn't clipped (which previously forced a scrollbar).
+  const HEADER_OFFSET = 24;
+  const CARD_HEIGHT = 64;
+  const maxHeight = Math.max(...rounds.map((_, i) => getColumnHeight(i))) + HEADER_OFFSET + CARD_HEIGHT;
 
   return (
-    <div className="overflow-x-auto pb-4">
+    <div className="overflow-x-auto overflow-y-hidden pb-4">
       <div
         className="flex gap-0 relative"
         style={{ minWidth: `${rounds.length * 220}px`, height: `${maxHeight}px` }}
