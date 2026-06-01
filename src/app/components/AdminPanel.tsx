@@ -8,29 +8,31 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
-
-// ─── Auth ─────────────────────────────────────────────────────────────────────
-
-const AUTH_KEY = 'vct_admin_auth';
-const ADMIN_USER = 'admin';
-const ADMIN_PASS = 'vct2026';   // ← change this to your preferred password
+import { supabase, signIn, signOut } from '../services/supabase';
+import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceTopPlayers, replaceStandings, setSiteConfig, migrateFromLocalStorage } from '../services/db';
 
 function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const attempt = () => {
-    if (username === ADMIN_USER && password === ADMIN_PASS) {
-      sessionStorage.setItem(AUTH_KEY, '1');
+  const attempt = async () => {
+    if (!email || !password) return;
+    setLoading(true);
+    setError('');
+    try {
+      await signIn(email, password);
       onSuccess();
-    } else {
-      setError('Invalid username or password');
+    } catch {
+      setError('Invalid email or password');
       setShake(true);
       setTimeout(() => setShake(false), 500);
       setPassword('');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -74,15 +76,16 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
             {/* Form */}
             <div className="space-y-4">
               <div>
-                <label className="block text-xs text-gray-400 font-medium mb-1.5">Username</label>
+                <label className="block text-xs text-gray-400 font-medium mb-1.5">Email</label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
                   <input
                     autoFocus
+                    type="email"
                     className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-xl pl-10 pr-4 py-3 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors placeholder:text-gray-600"
-                    placeholder="Enter username"
-                    value={username}
-                    onChange={e => { setUsername(e.target.value); setError(''); }}
+                    placeholder="Enter email"
+                    value={email}
+                    onChange={e => { setEmail(e.target.value); setError(''); }}
                     onKeyDown={onKey}
                   />
                 </div>
@@ -119,16 +122,12 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
 
               <button
                 onClick={attempt}
-                disabled={!username || !password}
+                disabled={!email || !password || loading}
                 className="w-full bg-[#ff4655] hover:bg-[#ff3344] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all text-sm mt-2 flex items-center justify-center gap-2"
               >
-                <Lock className="w-4 h-4" /> Sign In
+                <Lock className="w-4 h-4" /> {loading ? 'Signing in…' : 'Sign In'}
               </button>
             </div>
-
-            <p className="text-center text-gray-600 text-xs mt-6">
-              Default: <span className="font-mono text-gray-500">admin</span> / <span className="font-mono text-gray-500">vct2026</span>
-            </p>
           </div>
         </div>
       </div>
@@ -205,8 +204,6 @@ interface AdminData {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const uid = () => Math.random().toString(36).slice(2, 9);
-
-const STORAGE_KEY = 'vct_admin_data';
 
 const defaultData: AdminData = {
   matches: [],
@@ -704,19 +701,41 @@ function SideTab({ icon: Icon, label, active, count, onClick }: {
 
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
-type Tab = 'matches' | 'standings' | 'news' | 'players' | 'tournaments' | 'settings';
+type Tab = 'news' | 'players' | 'tournaments' | 'settings';
 
 export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
   onDataChange?: (data: AdminData) => void;
 }) {
   const navigate = useNavigate();
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem(AUTH_KEY) === '1');
+  const [authed, setAuthed] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setAuthed(!!data.session);
+      setChecking(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#0d0f16] flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-[#ff4655] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   if (!authed) {
     return <AdminLogin onSuccess={() => setAuthed(true)} />;
   }
-  return <AdminPanelInner onClose={onClose} onDataChange={onDataChange} onLogout={() => {
-    sessionStorage.removeItem(AUTH_KEY);
+
+  return <AdminPanelInner onClose={onClose} onDataChange={onDataChange} onLogout={async () => {
+    await signOut();
     setAuthed(false);
     navigate('/');
   }} />;
@@ -728,58 +747,30 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>('matches');
+  const [tab, setTab] = useState<Tab>('tournaments');
   const [data, setData] = useState<AdminData>(defaultData);
-  const [editingMatch, setEditingMatch] = useState<Match | null>(null);
-  const [addingMatch, setAddingMatch] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [dbLoading, setDbLoading] = useState(true);
 
-  // Load from localStorage on mount
+  // Load from Supabase on mount
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Migrate old data that lacks players key
-        if (!parsed.players) parsed.players = defaultData.players;
-        // Migrate old data that lacks tournaments key
-        if (!parsed.tournaments) parsed.tournaments = [];
-        setData(parsed);
-      }
-    } catch {}
+    loadAdminData()
+      .then(setData)
+      .catch(() => {})
+      .finally(() => setDbLoading(false));
   }, []);
-
-  const save = (newData: AdminData) => {
-    setData(newData);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newData));
-    } catch {}
-    onDataChange?.(newData);
-    showToast('Changes saved!', 'success');
-  };
 
   const showToast = (msg: string, type: 'success' | 'error') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2500);
   };
 
-  // Matches
-  const saveMatch = (m: Match) => {
-    const exists = data.matches.find(x => x.id === m.id);
-    const matches = exists ? data.matches.map(x => x.id === m.id ? m : x) : [...data.matches, m];
-    save({ ...data, matches });
-    setEditingMatch(null);
-    setAddingMatch(false);
-  };
-  const deleteMatch = (id: string) => {
-    save({ ...data, matches: data.matches.filter(m => m.id !== id) });
-  };
-  const toggleMatchVisible = (id: string) => {
-    save({ ...data, matches: data.matches.map(m => m.id === id ? { ...m, visible: !m.visible } : m) });
+  const save = (newData: AdminData) => {
+    setData(newData);
+    onDataChange?.(newData);
+    showToast('Changes saved!', 'success');
   };
 
-  const liveCount = data.matches.filter(m => m.status === 'live').length;
-  const upcomingCount = data.matches.filter(m => m.status === 'upcoming').length;
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0d0f16] flex flex-col">
@@ -823,9 +814,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
         {/* Sidebar */}
         <aside className="w-56 bg-[#0d0f16] border-r border-[#1e2130] flex flex-col p-4 gap-1 flex-shrink-0">
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Content</p>
-          <SideTab icon={Swords} label="Matches" active={tab === 'matches'} count={data.matches.length} onClick={() => setTab('matches')} />
           <SideTab icon={Trophy} label="Tournaments" active={tab === 'tournaments'} count={data.tournaments.length} onClick={() => setTab('tournaments')} />
-          <SideTab icon={BarChart2} label="Standings" active={tab === 'standings'} count={data.standings.length} onClick={() => setTab('standings')} />
           <SideTab icon={Trophy} label="News" active={tab === 'news'} count={data.news.length} onClick={() => setTab('news')} />
           <SideTab icon={TrendingUp} label="Top Players" active={tab === 'players'} count={(data.players || []).length} onClick={() => setTab('players')} />
 
@@ -833,165 +822,32 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Site Settings</p>
           <SideTab icon={Settings} label="Hero Section" active={tab === 'settings'} onClick={() => setTab('settings')} />
 
-          <div className="mt-auto pt-4 border-t border-[#1e2130] space-y-2">
-            <div className="bg-[#1e2130] rounded-xl p-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-gray-500">Live now</span>
-                <span className="text-xs font-bold text-[#ff4655]">{liveCount}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Upcoming</span>
-                <span className="text-xs font-bold text-[#60a5fa]">{upcomingCount}</span>
-              </div>
-            </div>
-          </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto p-6">
-
-          {/* ── MATCHES TAB ── */}
-          {tab === 'matches' && (
-            <div className="max-w-3xl space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-white font-bold text-lg">Matches</h2>
-                  <p className="text-gray-500 text-sm">Manage live, upcoming, and completed matches</p>
-                </div>
-                {!addingMatch && !editingMatch && (
-                  <button
-                    onClick={() => setAddingMatch(true)}
-                    className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
-                  >
-                    <Plus className="w-4 h-4" /> Add Match
-                  </button>
-                )}
-              </div>
-
-              {addingMatch && (
-                <MatchForm
-                  match={emptyMatch()}
-                  onSave={saveMatch}
-                  onCancel={() => setAddingMatch(false)}
-                  teamNames={Array.from(new Set(data.tournaments.flatMap(t => t.teams.map(tm => tm.name))))}
-                />
-              )}
-
-              {editingMatch && (
-                <MatchForm
-                  match={editingMatch}
-                  onSave={saveMatch}
-                  onCancel={() => setEditingMatch(null)}
-                  teamNames={Array.from(new Set(data.tournaments.flatMap(t => t.teams.map(tm => tm.name))))}
-                />
-              )}
-
-              {/* Match list */}
-              <div className="space-y-3">
-                {data.matches.length === 0 && (
-                  <div className="text-center py-16 text-gray-600">
-                    <Swords className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">No matches yet. Add one above.</p>
-                  </div>
-                )}
-                {data.matches.map(match => (
-                  <div
-                    key={match.id}
-                    className={`bg-[#151821] border rounded-xl p-4 transition-all ${
-                      match.visible ? 'border-[#2a2d3a] hover:border-[#3a3d4a]' : 'border-[#1e2130] opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-2 flex-wrap">
-                          <StatusBadge status={match.status} />
-                          <span className="text-white font-bold text-sm">
-                            {match.team1 || '—'} <span className="text-gray-500 font-normal">vs</span> {match.team2 || '—'}
-                          </span>
-                          {(match.status === 'live' || match.status === 'completed') && (
-                            <span className="text-[#ff4655] font-bold text-sm">{match.score1} – {match.score2}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
-                          <span className="flex items-center gap-1"><Trophy className="w-3 h-3" />{match.tournament}</span>
-                          {match.status === 'upcoming' && match.date && (
-                            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{match.date}</span>
-                          )}
-                          {match.status === 'upcoming' && match.time && (
-                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{match.time}</span>
-                          )}
-                          {match.status === 'live' && match.map && (
-                            <span className="flex items-center gap-1"><Tv className="w-3 h-3" />{match.map}</span>
-                          )}
-                          {match.status === 'live' && match.viewers && (
-                            <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{match.viewers}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <button
-                          onClick={() => toggleMatchVisible(match.id)}
-                          title={match.visible ? 'Hide from site' : 'Show on site'}
-                          className={`p-2 rounded-lg transition-all hover:bg-[#1e2130] ${match.visible ? 'text-gray-400 hover:text-white' : 'text-gray-700 hover:text-gray-400'}`}
-                        >
-                          {match.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                        </button>
-                        <button
-                          onClick={() => { setEditingMatch(match); setAddingMatch(false); }}
-                          className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-[#1e2130] transition-all"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => deleteMatch(match.id)}
-                          className="p-2 rounded-lg text-gray-600 hover:text-[#ff4655] hover:bg-[#1e2130] transition-all"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* ── TOURNAMENTS TAB ── */}
           {tab === 'tournaments' && (
             <div className="max-w-6xl">
               <TournamentManager
                 tournaments={data.tournaments}
-                onTournamentsChange={(tournaments) => {
+                onTournamentsChange={async (tournaments) => {
+                  // Upsert new/changed tournaments to Supabase
+                  const prev = new Set(data.tournaments.map(t => t.id));
+                  const curr = new Set(tournaments.map(t => t.id));
+                  // Deleted ones
+                  const deleted = data.tournaments.filter(t => !curr.has(t.id));
+                  const upserted = tournaments; // upsert all current (new + updated)
+                  try {
+                    await Promise.all([
+                      ...upserted.map(upsertTournament),
+                      ...deleted.map(t => deleteTournament(t.id)),
+                    ]);
+                  } catch { showToast('DB sync failed, saved locally', 'error'); }
                   save({ ...data, tournaments });
                 }}
               />
-            </div>
-          )}
-
-          {tab === 'standings' && (
-            <div className="max-w-3xl space-y-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-white font-bold text-lg">Group Standings</h2>
-                  <p className="text-gray-500 text-sm">Edit team rankings, wins, and losses</p>
-                </div>
-                <button
-                  onClick={() => save({ ...data, standings: [...data.standings].sort((a, b) => b.wins - a.wins).map((t, i) => ({ ...t, rank: i + 1 })) })}
-                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] px-3 py-2 rounded-xl transition-all"
-                >
-                  <BarChart2 className="w-3.5 h-3.5" /> Auto-rank by wins
-                </button>
-              </div>
-              <StandingsEditor
-                teams={data.standings}
-                onChange={standings => setData(d => ({ ...d, standings }))}
-              />
-              <button
-                onClick={() => save(data)}
-                className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
-              >
-                <Save className="w-4 h-4" /> Save Standings
-              </button>
             </div>
           )}
 
@@ -1007,7 +863,12 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                 onChange={news => setData(d => ({ ...d, news }))}
               />
               <button
-                onClick={() => save(data)}
+                onClick={async () => {
+                  try {
+                    await Promise.all(data.news.map(upsertNews));
+                    save(data);
+                  } catch { showToast('Failed to save news', 'error'); }
+                }}
                 className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
               >
                 <Save className="w-4 h-4" /> Save News
@@ -1035,7 +896,12 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                 onChange={players => setData(d => ({ ...d, players }))}
               />
               <button
-                onClick={() => save(data)}
+                onClick={async () => {
+                  try {
+                    await replaceTopPlayers(data.players || []);
+                    save(data);
+                  } catch { showToast('Failed to save players', 'error'); }
+                }}
                 className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
               >
                 <Save className="w-4 h-4" /> Save Players
@@ -1066,7 +932,12 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
               </div>
 
               <button
-                onClick={() => save(data)}
+                onClick={async () => {
+                  try {
+                    await setSiteConfig('hero_link', data.heroLink ?? '');
+                    save(data);
+                  } catch { showToast('Failed to save settings', 'error'); }
+                }}
                 className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
               >
                 <Save className="w-4 h-4" /> Save Settings

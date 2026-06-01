@@ -370,6 +370,66 @@ export async function getCustomGameCandidates(
   return candidates;
 }
 
+// A custom game where BOTH of a match's teams appear (≥ minPerTeam each). Used
+// by the per-match "Fetch Match Stats" flow so the admin only sees relevant
+// games instead of the player's entire custom history.
+export interface BothTeamsCandidate {
+  matchId: string;
+  map: string;
+  startedAt: string;
+  blueScore: number;
+  redScore: number;
+  team1PlayersFound: number;
+  team2PlayersFound: number;
+  team1RosterSize: number;
+  team2RosterSize: number;
+}
+
+// Fetch a player's recent custom games and keep only those where BOTH rosters
+// have at least `minPerTeam` players present. Rosters are "name#tag" Riot IDs
+// and/or bare display names.
+export async function getCustomGamesForBothTeams(
+  playerName: string,
+  playerTag: string,
+  team1Roster: string[],
+  team2Roster: string[],
+  region: string = 'ap',
+  count: number = 15,
+  minPerTeam: number = 2,
+): Promise<BothTeamsCandidate[]> {
+  const history = await getPlayerMatchHistory(playerName, playerTag, region, 'custom', count);
+  const scan = history.slice(0, count);
+  const out: BothTeamsCandidate[] = [];
+
+  for (const h of scan) {
+    if (!h.uuid) continue;
+    let details: MatchDetails;
+    try {
+      details = await getMatchDetails(h.uuid);
+    } catch {
+      continue;
+    }
+
+    const t1 = countRosterMatches(details.players, team1Roster);
+    const t2 = countRosterMatches(details.players, team2Roster);
+    if (t1 < minPerTeam || t2 < minPerTeam) continue; // both teams must be present
+
+    out.push({
+      matchId: h.uuid,
+      map: details.metadata.map || h.metadata.map,
+      startedAt: details.metadata.game_start_patched || h.metadata.game_start_patched,
+      blueScore: details.teams.blue.rounds_won,
+      redScore: details.teams.red.rounds_won,
+      team1PlayersFound: t1,
+      team2PlayersFound: t2,
+      team1RosterSize: team1Roster.length,
+      team2RosterSize: team2Roster.length,
+    });
+  }
+
+  return out;
+}
+
 // Given a specific match ID, fetch its details and build the map result + per
 // player stats keyed to the tournament team IDs. Used by the Edit Match flow
 // when an admin pastes a match ID retrieved from the candidate finder.

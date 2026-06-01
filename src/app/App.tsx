@@ -13,8 +13,8 @@ import { TournamentMatchPage } from './components/TournamentMatchPage';
 import { TeamsPage } from './components/TeamsPage';
 import { TrendingUp } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
+import { loadAdminData } from './services/db';
 
-const STORAGE_KEY = 'vct_admin_data';
 
 // Helper function to determine match status
 function getMatchStatus(date?: string, time?: string) {
@@ -41,10 +41,7 @@ function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setAdminData(JSON.parse(stored));
-    } catch {}
+    loadAdminData().then(setAdminData).catch(() => {});
   }, []);
 
   const handleDataChange = (data: AdminData) => setAdminData(data);

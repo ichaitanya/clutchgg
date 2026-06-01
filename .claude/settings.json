@@ -17,7 +17,8 @@
       "Bash(curl -s -H \"Authorization: HDEV-97d92e1f-2fc9-49c5-9e49-bd959e394385\" \"https://api.henrikdev.xyz/valorant/v3/matches/ap/TsWaGg/6969?mode=custom&size=15\")",
       "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{try{const j=JSON.parse\\(s\\);console.log\\('status',j.status,'count',\\(j.data||[]\\).length\\);for\\(const m of \\(j.data||[]\\)\\)console.log\\(m.metadata?.mode_id,'|',m.metadata?.map,'|',m.metadata?.game_start_patched\\);}catch\\(e\\){console.log\\('ERR',s.slice\\(0,200\\)\\);}}\\)\")",
       "Bash(curl -s -H \"Authorization: HDEV-97d92e1f-2fc9-49c5-9e49-bd959e394385\" \"https://api.henrikdev.xyz/valorant/v3/matches/ap/TsWaGg/6969?mode=custom&size=1\")",
-      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const m=j.data[0];console.log\\('matchid', m.metadata.matchid\\);console.log\\('all_players len', \\(m.players?.all_players||[]\\).length\\);for\\(const p of \\(m.players?.all_players||[]\\)\\)console.log\\(p.team,'|',p.name+'#'+p.tag,'| score', p.stats?.score, '| kills', p.stats?.kills\\);}\\)\")"
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const m=j.data[0];console.log\\('matchid', m.metadata.matchid\\);console.log\\('all_players len', \\(m.players?.all_players||[]\\).length\\);for\\(const p of \\(m.players?.all_players||[]\\)\\)console.log\\(p.team,'|',p.name+'#'+p.tag,'| score', p.stats?.score, '| kills', p.stats?.kills\\);}\\)\")",
+      "Bash(npm install *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\TS ^_^\\. claude\\projects\\s--work-clutchgg-clutchgg\\memory"

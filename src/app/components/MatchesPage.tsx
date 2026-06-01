@@ -5,8 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { TournamentDetailsDisplay } from './TournamentDetailsDisplay';
 import type { AdminData } from './AdminPanel';
 import type { Tournament, BracketMatch } from './TournamentCreation';
-
-const STORAGE_KEY = 'vct_admin_data';
+import { loadAdminData } from '../services/db';
 
 // Helper function to determine match status
 function getMatchStatus(date?: string, time?: string) {
@@ -61,10 +60,7 @@ export function MatchesPage() {
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setAdminData(JSON.parse(stored));
-    } catch {}
+    loadAdminData().then(setAdminData).catch(() => {});
   }, []);
 
   // Derive matches from admin data

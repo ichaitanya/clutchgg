@@ -4,8 +4,7 @@ import { ArrowLeft, Trophy, Users, Shield, Clock, Calendar, Map } from 'lucide-r
 import { Header } from './Header';
 import type { AdminData } from './AdminPanel';
 import type { Tournament, BracketMatch, TeamInTournament, MatchPlayerStat } from './TournamentCreation';
-
-const STORAGE_KEY = 'vct_admin_data';
+import { getTournaments } from '../services/db';
 
 interface MatchContext {
   match: BracketMatch;
@@ -225,17 +224,14 @@ export function TournamentMatchPage() {
   const [selectedMapIndex, setSelectedMapIndex] = useState(0);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) { setNotFound(true); return; }
-      const adminData: AdminData = JSON.parse(stored);
-      if (!matchId) { setNotFound(true); return; }
-      const result = findMatchInTournaments(matchId, adminData.tournaments ?? []);
-      if (result) setCtx(result);
-      else setNotFound(true);
-    } catch {
-      setNotFound(true);
-    }
+    if (!matchId) { setNotFound(true); return; }
+    getTournaments()
+      .then(tournaments => {
+        const result = findMatchInTournaments(matchId, tournaments);
+        if (result) setCtx(result);
+        else setNotFound(true);
+      })
+      .catch(() => setNotFound(true));
   }, [matchId]);
 
   // Default to the aggregated "Total" view when the match has multiple maps

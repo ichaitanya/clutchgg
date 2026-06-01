@@ -2,12 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { ChevronLeft, Users, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { Tournament, TeamInTournament, TournamentPlayer } from './TournamentCreation';
-
-const STORAGE_KEY = 'vct_admin_data';
-
-interface AdminData {
-  tournaments: Tournament[];
-}
+import { getTournaments } from '../services/db';
 
 type ViewMode = 'teams' | 'players';
 
@@ -15,22 +10,16 @@ export function TeamsPage() {
   const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<ViewMode>('teams');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
-  
-  // Load tournaments from localStorage
-  const adminData: AdminData | null = useMemo(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return null;
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+
+  useEffect(() => {
+    getTournaments().then(setTournaments).catch(() => {});
   }, []);
 
   // Get all teams from all tournaments
   const allTeams: (TeamInTournament & { tournamentName: string; tournamentId: string })[] = useMemo(() => {
-    if (!adminData?.tournaments) return [];
-    
     const teams: (TeamInTournament & { tournamentName: string; tournamentId: string })[] = [];
-    adminData.tournaments.forEach(tournament => {
+    tournaments.forEach(tournament => {
       tournament.teams.forEach(team => {
         teams.push({
           ...team,
@@ -40,7 +29,7 @@ export function TeamsPage() {
       });
     });
     return teams;
-  }, [adminData]);
+  }, [tournaments]);
 
   // Get selected team's players
   const selectedTeam = useMemo(() => {
@@ -68,7 +57,7 @@ export function TeamsPage() {
           <div>
             <h1 className="text-white font-bold text-2xl">Teams</h1>
             <p className="text-gray-500 text-sm">
-              {allTeams.length} team{allTeams.length !== 1 ? 's' : ''} across {adminData?.tournaments.length || 0} tournament{adminData?.tournaments.length !== 1 ? 's' : ''}
+              {allTeams.length} team{allTeams.length !== 1 ? 's' : ''} across {tournaments.length} tournament{tournaments.length !== 1 ? 's' : ''}
             </p>
           </div>
         </div>
