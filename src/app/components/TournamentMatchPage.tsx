@@ -99,6 +99,14 @@ function findMatchInTournaments(matchId: string, tournaments: Tournament[]): Mat
   return null;
 }
 
+// A map slot is "played" if it carries real data. Empty placeholder slots
+// (used to preserve map ordering when, e.g., Map 2 is filled before Map 1) have
+// no matchId/stats and 0-0 score, and should be hidden from the UI.
+function isPlayedMap(m: MatchMapResult): boolean {
+  return !!m.matchId || (!!m.playerStats && m.playerStats.length > 0)
+    || !!m.mapName || m.team1Score > 0 || m.team2Score > 0;
+}
+
 // ── Score from maps ──────────────────────────────────────────────────────────
 function deriveScore(match: BracketMatch): { s1: number; s2: number } {
   if (!match.maps || match.maps.length === 0) {
@@ -231,11 +239,15 @@ export function TournamentMatchPage() {
   }, [matchId]);
 
   // Default to the aggregated "Total" view when the match has multiple maps
-  // with stats; otherwise show the single map.
+  // with stats; otherwise select the first map that actually has stats.
   useEffect(() => {
     if (!ctx) return;
-    const mapsWithStatsCount = (ctx.match.maps ?? []).filter(m => m.playerStats && m.playerStats.length > 0).length;
-    setSelectedMapIndex(mapsWithStatsCount > 1 ? -1 : 0);
+    const maps = ctx.match.maps ?? [];
+    const withStats = maps
+      .map((m, i) => ({ i, has: !!m.playerStats && m.playerStats.length > 0 }))
+      .filter(x => x.has);
+    if (withStats.length > 1) setSelectedMapIndex(-1);
+    else setSelectedMapIndex(withStats[0]?.i ?? 0);
   }, [ctx]);
 
   if (notFound) {
@@ -273,7 +285,7 @@ export function TournamentMatchPage() {
 
   const { s1, s2 } = deriveScore(match);
 
-  const hasMaps = match.maps && match.maps.length > 0;
+  const hasMaps = (match.maps ?? []).some(isPlayedMap);
 
   // Build effective stats — use saved stats or generate blank rows from team rosters
   const buildDefaultStats = () => {
@@ -473,6 +485,7 @@ export function TournamentMatchPage() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {match.maps!.map((m, i) => {
+                if (!isPlayedMap(m)) return null; // hide unplayed placeholder slots
                 const t1wins = m.team1Score > m.team2Score;
                 const t2wins = m.team2Score > m.team1Score;
                 const clickable = mapsWithStats && !!m.playerStats && m.playerStats.length > 0;

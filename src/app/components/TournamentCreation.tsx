@@ -1882,11 +1882,15 @@ function CreateTournamentScreen({
     // Merge the new map into the chosen slot, preserving other slots.
     const maxMaps = target.format === 'bo1' ? 1 : target.format === 'bo5' ? 5 : 3;
     const existingMaps = target.maps ?? [];
+    // Keep maps positionally indexed by slot so applying to Map 2 before Map 1
+    // doesn't shift it to Map 1. Empty slots are held with an "unplayed"
+    // placeholder (no matchId/stats, 0-0) so positions are preserved.
     const lastSlot = Math.max(existingMaps.length - 1, mapSlotIndex);
     const mergedMaps: MatchMapResult[] = [];
     for (let i = 0; i <= lastSlot && i < maxMaps; i++) {
       if (i === mapSlotIndex) mergedMaps.push(newMap);
       else if (existingMaps[i]) mergedMaps.push(existingMaps[i]);
+      else mergedMaps.push({ mapName: '', team1Score: 0, team2Score: 0 }); // unplayed placeholder
     }
 
     // Recompute winner from maps (BOn: ceil(maxMaps/2) map wins).
@@ -1901,10 +1905,11 @@ function CreateTournamentScreen({
       : (mergedMaps.length >= maxMaps && w1 !== w2) ? (w1 > w2 ? target.team1Id : target.team2Id)
       : undefined;
 
+    const firstWithStats = mergedMaps.find(m => m.playerStats && m.playerStats.length > 0);
     const updatedMatch: BracketMatch = {
       ...target,
       maps: mergedMaps,
-      playerStats: mergedMaps[0]?.playerStats ?? [],
+      playerStats: firstWithStats?.playerStats ?? [],
       winner,
     };
 
