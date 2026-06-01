@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
-import { LiveMatch } from './components/LiveMatch';
 import { UpcomingMatch } from './components/UpcomingMatch';
 import { Standings } from './components/Standings';
 import { NewsCard } from './components/NewsCard';
@@ -11,6 +10,8 @@ import { MatchScoreboard } from './components/MatchScoreboard';
 import { MatchesPage } from './components/MatchesPage';
 import { TournamentMatchPage } from './components/TournamentMatchPage';
 import { TeamsPage } from './components/TeamsPage';
+import { StatsPage, getTopPlayersByAcs } from './components/StatsPage';
+import { PlayerPage } from './components/PlayerPage';
 import { TrendingUp } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import { loadAdminData } from './services/db';
@@ -61,13 +62,6 @@ function Home() {
     : [];
 
   // Derive display data: first try tournament brackets, then fall back to admin matches
-  const liveMatches =
-    tournamentBracketMatches.length > 0
-      ? tournamentBracketMatches.filter(m => m.status === 'live')
-      : adminData
-      ? adminData.matches.filter(m => m.status === 'live' && m.visible)
-      : null;
-
   const upcomingMatches =
     tournamentBracketMatches.length > 0
       ? tournamentBracketMatches.filter(m => m.status === 'upcoming')
@@ -77,6 +71,10 @@ function Home() {
 
   const standings = adminData ? adminData.standings : null;
   const news = adminData ? adminData.news.filter(n => n.visible) : null;
+
+  // Top players ranked by average ACS, computed from applied tournament match
+  // stats. Falls back to admin-entered / placeholder players when no stats exist.
+  const topByAcs = adminData ? getTopPlayersByAcs(adminData.tournaments, 5) : [];
 
   return (
     <div className="min-h-screen bg-[#0d0f16]">
@@ -88,48 +86,14 @@ function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
           <div className="lg:col-span-2 space-y-6">
 
-            {/* Live Matches */}
+            {/* Matches */}
             <section>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-white text-xl font-bold flex items-center gap-2">
                   <div className="w-1 h-6 bg-[#ff4655] rounded" />
-                  Live Matches
+                  Matches
                 </h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {liveMatches && liveMatches.length > 0 ? (
-                  liveMatches.map(m => {
-                    const team1 = 'team1Name' in m ? m.team1Name : m.team1;
-                    const team2 = 'team2Name' in m ? m.team2Name : m.team2;
-                    return (
-                      <LiveMatch
-                        key={m.id}
-                        team1={team1}
-                        team2={team2}
-                        score1={0}
-                        score2={0}
-                        map=""
-                        viewers=""
-                        matchId={m.id}
-                      />
-                    );
-                  })
-                ) : (
-                  <div className="col-span-2 text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
-                    No live matches right now
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Upcoming Matches */}
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-white text-xl font-bold flex items-center gap-2">
-                  <div className="w-1 h-6 bg-[#ff4655] rounded" />
-                  Upcoming Matches
-                </h2>
-                <button className="text-[#ff4655] text-sm hover:underline">View all</button>
+                <Link to="/matches" className="text-[#ff4655] text-sm hover:underline">View all</Link>
               </div>
               <div className="space-y-3">
                 {upcomingMatches && upcomingMatches.length > 0 ? (
@@ -238,14 +202,47 @@ function Home() {
               <Standings />
             )}
 
-             {/* Top Players — driven by admin data if available */}
+             {/* Top Players — ranked by average ACS from tournament stats */}
                         <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-4">
-                            <TrendingUp className="w-5 h-5 text-[#ff4655]" />
-                            <h3 className="text-white font-semibold">Top Players</h3>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-2">
+                              <TrendingUp className="w-5 h-5 text-[#ff4655]" />
+                              <h3 className="text-white font-semibold">Top Players</h3>
+                            </div>
+                            <span className="text-gray-500 text-xs uppercase tracking-wider">by ACS</span>
                           </div>
                           <div className="space-y-3">
-                            {(adminData?.players && adminData.players.length > 0
+                            {topByAcs.length > 0 ? (
+                              topByAcs.map((player, index) => {
+                                const rowInner = (
+                                  <>
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                                        {index + 1}
+                                      </div>
+                                      <div>
+                                        <div className="text-white text-sm font-semibold">{player.playerName}</div>
+                                        <div className="text-gray-400 text-xs">{player.teamName}</div>
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-[#ff4655] text-sm font-bold">{Math.round(player.acs)}</div>
+                                      <div className="text-gray-400 text-xs">{player.kills}/{player.deaths}/{player.assists}</div>
+                                    </div>
+                                  </>
+                                );
+                                const rowClass = "flex items-center justify-between p-2 rounded hover:bg-[#151821] transition-colors";
+                                return player.tournamentId && player.rosterPlayerId ? (
+                                  <Link key={player.playerId} to={`/player/${player.tournamentId}/${player.rosterPlayerId}`} className={rowClass}>
+                                    {rowInner}
+                                  </Link>
+                                ) : (
+                                  <div key={player.playerId} className={rowClass}>
+                                    {rowInner}
+                                  </div>
+                                );
+                              })
+                            ) : (adminData?.players && adminData.players.length > 0
                               ? [...adminData.players].sort((a, b) => a.rank - b.rank)
                               : [
                                   { id: '1', rank: 1, name: 'jinggg', team: 'PRX', rating: 1.42, kills: 275, deaths: 189 },
@@ -253,7 +250,7 @@ function Home() {
                                   { id: '3', rank: 3, name: 'aspas', team: 'LOUD', rating: 1.35, kills: 261, deaths: 198 },
                                   { id: '4', rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
                                 ]
-                            ).map((player, index) => (
+                            ).map((player) => (
                               <div key={player.id} className="flex items-center justify-between p-2 rounded hover:bg-[#151821] transition-colors">
                                 <div className="flex items-center gap-3">
                                   <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
@@ -294,6 +291,8 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/matches" element={<MatchesPage />} />
         <Route path="/teams" element={<TeamsPage />} />
+        <Route path="/stats" element={<StatsPage />} />
+        <Route path="/player/:tournamentId/:playerId" element={<PlayerPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/match/:matchId" element={<MatchScoreboard />} />
         <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />

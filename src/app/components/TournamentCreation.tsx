@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check, Youtube } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
@@ -31,12 +31,23 @@ export interface TeamInTournament {
   players: TournamentPlayer[];
 }
 
+export interface PrizePoolEntry {
+  position: number; // 1-based placement (1 = 1st place, etc.)
+  prize: string;    // Free-form prize text, e.g. "$25,000"
+}
+
+export interface PrizePool {
+  total?: string;            // Optional total prize pool, e.g. "$50,000"
+  places: PrizePoolEntry[];  // One entry per winning placement, ordered by position
+}
+
 export interface TournamentEvent {
   type: 'online' | 'offline' | 'hybrid';
   location?: string;
   startDate: string;
   maxTeams: number;
   registeredTeams?: string[]; // Array of team IDs
+  prizePool?: PrizePool;
 }
 
 export interface MatchMapResult {
@@ -84,6 +95,16 @@ export interface BracketMatch {
   // Match result details
   maps?: MatchMapResult[];
   playerStats?: MatchPlayerStat[];
+  // Broadcast: a single live/VOD stream and any number of highlight clips.
+  // YouTube links set by the admin in the match edit workflow.
+  streamUrl?: string;
+  clips?: MatchClip[];
+}
+
+export interface MatchClip {
+  id: string;
+  title: string;
+  url: string; // YouTube link
 }
 
 export interface GroupStageTeam {
@@ -1760,6 +1781,69 @@ function MatchEditModal({
                 </div>
               </div>
 
+              {/* Broadcast — stream + highlight clips (YouTube links) */}
+              <div className="pt-4 border-t border-[#2a2d3a]">
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium flex items-center gap-1.5">
+                  <Youtube className="w-3.5 h-3.5 text-[#ff4655]" /> Stream URL
+                </label>
+                <input
+                  type="url"
+                  placeholder="YouTube stream / VOD link"
+                  className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                  value={form.streamUrl || ''}
+                  onChange={e => setForm(f => ({ ...f, streamUrl: e.target.value || undefined }))}
+                />
+
+                <div className="flex items-center justify-between gap-2 mt-4 mb-1.5">
+                  <label className="block text-xs text-gray-400 font-medium flex items-center gap-1.5">
+                    <Youtube className="w-3.5 h-3.5 text-[#ff4655]" /> Clips
+                  </label>
+                  <button
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      clips: [...(f.clips ?? []), { id: Math.random().toString(36).slice(2, 9), title: '', url: '' }],
+                    }))}
+                    className="px-2.5 py-1 text-xs rounded bg-[#ff4655]/20 border border-[#ff4655]/50 text-[#ff4655] hover:bg-[#ff4655]/30 transition-colors font-semibold flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add clip
+                  </button>
+                </div>
+                {(form.clips ?? []).length === 0 ? (
+                  <p className="text-[11px] text-gray-500">No clips added. Paste YouTube highlight links for this match.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(form.clips ?? []).map((clip, i) => (
+                      <div key={clip.id} className="flex items-center gap-2">
+                        <input
+                          placeholder="Clip title"
+                          className="w-1/3 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                          value={clip.title}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setForm(f => ({ ...f, clips: (f.clips ?? []).map((c, idx) => idx === i ? { ...c, title: v } : c) }));
+                          }}
+                        />
+                        <input
+                          placeholder="YouTube link"
+                          className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                          value={clip.url}
+                          onChange={e => {
+                            const v = e.target.value;
+                            setForm(f => ({ ...f, clips: (f.clips ?? []).map((c, idx) => idx === i ? { ...c, url: v } : c) }));
+                          }}
+                        />
+                        <button
+                          onClick={() => setForm(f => ({ ...f, clips: (f.clips ?? []).filter((_, idx) => idx !== i) }))}
+                          className="text-gray-600 hover:text-[#ff4655] transition-colors shrink-0"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Fetch Match Stats — per-match finder scoped to these two teams */}
               <div className="pt-4 border-t border-[#2a2d3a]">
                 <div className="flex items-center justify-between gap-2">
@@ -2810,6 +2894,33 @@ function TournamentForm({
   const [location, setLocation] = useState(initialTournament?.event?.location || '');
   const [startDate, setStartDate] = useState(initialTournament?.event?.startDate || '');
   const [maxTeams, setMaxTeams] = useState(initialTournament?.event?.maxTeams?.toString() || '8');
+  const [prizeTotal, setPrizeTotal] = useState(initialTournament?.event?.prizePool?.total || '');
+  // One prize input per winning placement. Admin first picks how many teams win,
+  // then fills the prize for each. Initialized from any existing prize pool.
+  const [prizePlaces, setPrizePlaces] = useState<string[]>(
+    initialTournament?.event?.prizePool?.places
+      ?.slice()
+      .sort((a, b) => a.position - b.position)
+      .map(p => p.prize) || []
+  );
+
+  const handlePrizeCountChange = (count: number) => {
+    setPrizePlaces(prev => {
+      const next = prev.slice(0, count);
+      while (next.length < count) next.push('');
+      return next;
+    });
+  };
+
+  const handlePrizeChange = (index: number, value: string) => {
+    setPrizePlaces(prev => prev.map((p, i) => (i === index ? value : p)));
+  };
+
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+  };
 
   const isValid = name.trim() !== '' && overview.trim() !== '' && startDate !== '' && maxTeams !== '';
 
@@ -2918,6 +3029,67 @@ function TournamentForm({
               onChange={e => setMaxTeams(e.target.value)}
             />
           </div>
+
+          {/* Prize Pool */}
+          <div className="border-t border-[#2a2d3a] pt-5 mt-5">
+            <h3 className="text-white font-semibold text-sm mb-4">Prize Pool</h3>
+
+            {/* Total Prize Pool (optional) */}
+            <div className="mb-4">
+              <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                Total Prize Pool <span className="text-gray-600">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                placeholder="e.g. $50,000"
+                value={prizeTotal}
+                onChange={e => setPrizeTotal(e.target.value)}
+              />
+            </div>
+
+            {/* Number of winning teams */}
+            <div className="mb-4">
+              <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                Number of Teams Receiving a Prize
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="64"
+                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                placeholder="e.g. 3"
+                value={prizePlaces.length === 0 ? '' : prizePlaces.length.toString()}
+                onChange={e => {
+                  const n = parseInt(e.target.value, 10);
+                  handlePrizeCountChange(Number.isNaN(n) || n < 0 ? 0 : Math.min(n, 64));
+                }}
+              />
+              <p className="text-[11px] text-gray-600 mt-1">
+                Pick how many placements win, then enter each prize below. You can change these any time.
+              </p>
+            </div>
+
+            {/* Prize per placement */}
+            {prizePlaces.length > 0 && (
+              <div className="space-y-3">
+                {prizePlaces.map((prize, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 font-semibold w-16 flex-shrink-0">
+                      {ordinal(i + 1)} Place
+                    </span>
+                    <input
+                      type="text"
+                      className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                      placeholder={`e.g. $${(prizePlaces.length - i) * 10},000`}
+                      value={prize}
+                      onChange={e => handlePrizeChange(i, e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Tournament Format */}
@@ -2990,12 +3162,21 @@ function TournamentForm({
           Cancel
         </button>
         <button
-          onClick={() => onSave(name, overview, tournamentType, {
-            type: eventType,
-            location: location || undefined,
-            startDate,
-            maxTeams: parseInt(maxTeams, 10),
-          })}
+          onClick={() => {
+            const places: PrizePoolEntry[] = prizePlaces
+              .map((prize, i) => ({ position: i + 1, prize: prize.trim() }))
+              .filter(p => p.prize !== '');
+            const hasPrizePool = places.length > 0 || prizeTotal.trim() !== '';
+            onSave(name, overview, tournamentType, {
+              type: eventType,
+              location: location || undefined,
+              startDate,
+              maxTeams: parseInt(maxTeams, 10),
+              prizePool: hasPrizePool
+                ? { total: prizeTotal.trim() || undefined, places }
+                : undefined,
+            });
+          }}
           disabled={!isValid}
           className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >

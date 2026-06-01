@@ -1,10 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trophy, Users, Shield, Clock, Calendar, Map } from 'lucide-react';
+import { ArrowLeft, Trophy, Users, Shield, Clock, Calendar, Map, Youtube, Play, ExternalLink, X } from 'lucide-react';
 import { Header } from './Header';
 import type { AdminData } from './AdminPanel';
-import type { Tournament, BracketMatch, TeamInTournament, MatchPlayerStat } from './TournamentCreation';
+import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult } from './TournamentCreation';
 import { getTournaments } from '../services/db';
+import { statMatchesPlayer } from './StatsPage';
 
 interface MatchContext {
   match: BracketMatch;
@@ -55,6 +56,36 @@ function getRoleColor(role?: string) {
     case 'initiator': return 'text-purple-400 bg-purple-400/10';
     default: return 'text-gray-400 bg-gray-400/10';
   }
+}
+
+// Extract a YouTube video id from the common URL shapes (watch?v=, youtu.be/,
+// /embed/, /live/, /shorts/). Returns null if it can't be parsed.
+function youtubeId(url: string): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url.trim());
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') return u.pathname.slice(1) || null;
+    if (host.endsWith('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v) return v;
+      const m = u.pathname.match(/\/(embed|live|shorts)\/([^/?]+)/);
+      if (m) return m[2];
+    }
+  } catch {
+    // Not a parseable URL.
+  }
+  return null;
+}
+
+function youtubeEmbedUrl(url: string): string | null {
+  const id = youtubeId(url);
+  return id ? `https://www.youtube.com/embed/${id}` : null;
+}
+
+function youtubeThumb(url: string): string | null {
+  const id = youtubeId(url);
+  return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : null;
 }
 
 function findMatchInTournaments(matchId: string, tournaments: Tournament[]): MatchContext | null {
@@ -136,11 +167,14 @@ function TeamLogo({ name, gradient }: { name: string; gradient: string }) {
 
 type SortKey = 'kills' | 'kd' | 'acs' | 'hsPercent';
 
-function StatsTable({ teamName, teamStats, accentColor }: {
+function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlayers }: {
   teamName: string;
   teamStats: MatchPlayerStat[];
   accentColor: string;
+  tournamentId: string;
+  rosterPlayers: TournamentPlayer[];
 }) {
+  const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>('acs');
   if (teamStats.length === 0) return null;
   const maxAcs = Math.max(...teamStats.map(s => s.acs));
@@ -183,10 +217,22 @@ function StatsTable({ teamName, teamStats, accentColor }: {
           <tbody>
             {sortedStats.map((s, i) => {
               const isTopAcs = s.acs === maxAcs && s.acs > 0;
+              // Resolve this stat row to a roster player so the name links to
+              // their profile (stats are keyed by Riot ID, not roster slot id).
+              const rosterPlayer = rosterPlayers.find(p => statMatchesPlayer(s, p));
               return (
                 <tr key={s.playerId} className={`border-b border-[#2a2d3a] last:border-0 ${i % 2 === 0 ? 'bg-[#0d0f16]/40' : ''}`}>
                   <td className="px-5 py-3">
-                    <span className="text-white font-semibold text-sm">{s.playerName}</span>
+                    {rosterPlayer ? (
+                      <button
+                        onClick={() => navigate(`/player/${tournamentId}/${rosterPlayer.id}`)}
+                        className="text-white font-semibold text-sm hover:text-[#ff4655] transition-colors"
+                      >
+                        {s.playerName}
+                      </button>
+                    ) : (
+                      <span className="text-white font-semibold text-sm">{s.playerName}</span>
+                    )}
                   </td>
                   <td className="px-3 py-3 text-gray-400 text-sm">{s.agent || '—'}</td>
                   <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.kills}</td>
@@ -222,6 +268,8 @@ export function TournamentMatchPage() {
   const [ctx, setCtx] = useState<MatchContext | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [selectedMapIndex, setSelectedMapIndex] = useState(0);
+  // When set, a YouTube embed URL to show in the stream popup modal.
+  const [streamPopup, setStreamPopup] = useState<string | null>(null);
 
   useEffect(() => {
     if (!matchId) { setNotFound(true); return; }
@@ -521,6 +569,89 @@ export function TournamentMatchPage() {
           </div>
         )}
 
+        {/* ── Stream ─────────────────────────────────────────────────────── */}
+        {match.streamUrl && (
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Youtube className="w-4 h-4 text-[#ff4655]" />
+              <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Stream</h2>
+            </div>
+            {youtubeEmbedUrl(match.streamUrl) ? (
+              <button
+                onClick={() => setStreamPopup(youtubeEmbedUrl(match.streamUrl!))}
+                className="group relative w-full rounded-xl overflow-hidden border border-[#2a2d3a] bg-black hover:border-[#ff4655]/50 transition-colors"
+                style={{ aspectRatio: '16 / 9' }}
+              >
+                {youtubeThumb(match.streamUrl) ? (
+                  <img
+                    src={youtubeThumb(match.streamUrl)!}
+                    alt="Match stream"
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                ) : (
+                  <Youtube className="absolute inset-0 m-auto w-12 h-12 text-gray-600" />
+                )}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/30 transition-colors">
+                  <div className="w-16 h-16 rounded-full bg-[#ff4655] flex items-center justify-center shadow-lg">
+                    <Play className="w-7 h-7 text-white fill-white ml-1" />
+                  </div>
+                </div>
+              </button>
+            ) : (
+              <a
+                href={match.streamUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 bg-[#151821] border border-[#2a2d3a] rounded-xl px-4 py-3 text-[#ff4655] text-sm hover:border-[#ff4655]/50 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" /> Watch stream
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* ── Clips ──────────────────────────────────────────────────────── */}
+        {(match.clips ?? []).length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Play className="w-4 h-4 text-[#ff4655]" />
+              <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Clips</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(match.clips ?? []).filter(c => c.url).map(clip => {
+                const thumb = youtubeThumb(clip.url);
+                return (
+                  <a
+                    key={clip.id}
+                    href={clip.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden hover:border-[#ff4655]/50 transition-colors"
+                  >
+                    <div className="relative bg-black flex items-center justify-center" style={{ aspectRatio: '16 / 9' }}>
+                      {thumb ? (
+                        <img src={thumb} alt={clip.title || 'Clip'} className="w-full h-full object-cover" />
+                      ) : (
+                        <Youtube className="w-10 h-10 text-gray-600" />
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="w-12 h-12 rounded-full bg-[#ff4655] flex items-center justify-center">
+                          <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="px-3 py-2.5">
+                      <p className="text-white text-sm font-semibold truncate">
+                        {clip.title || 'Untitled clip'}
+                      </p>
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ── Player Stats ───────────────────────────────────────────────── */}
         {hasAnyTeamPlayers && (
           <div>
@@ -568,11 +699,15 @@ export function TournamentMatchPage() {
                 teamName={team1Name}
                 teamStats={team1Stats}
                 accentColor="#ff4655"
+                tournamentId={tournament.id}
+                rosterPlayers={team1?.players ?? []}
               />
               <StatsTable
                 teamName={team2Name}
                 teamStats={team2Stats}
                 accentColor="#a78bfa"
+                tournamentId={tournament.id}
+                rosterPlayers={team2?.players ?? []}
               />
             </div>
           </div>
@@ -594,7 +729,7 @@ export function TournamentMatchPage() {
               </div>
               {team1 && team1.players.length > 0 ? (
                 team1.players.map((player, i) => (
-                  <div key={player.id} className="flex items-center gap-3 px-4 py-3 border-b border-[#2a2d3a] last:border-0 hover:bg-[#0d0f16] transition-colors">
+                  <div key={player.id} onClick={() => navigate(`/player/${tournament.id}/${player.id}`)} className="flex items-center gap-3 px-4 py-3 border-b border-[#2a2d3a] last:border-0 hover:bg-[#0d0f16] transition-colors cursor-pointer">
                     <span className="text-gray-600 text-xs w-4 text-center">{i + 1}</span>
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#ff4655]/30 to-[#ff4655]/10 flex items-center justify-center text-[#ff4655] text-xs font-bold flex-shrink-0">
                       {player.name.substring(0, 1).toUpperCase()}
@@ -621,7 +756,7 @@ export function TournamentMatchPage() {
               </div>
               {team2 && team2.players.length > 0 ? (
                 team2.players.map((player, i) => (
-                  <div key={player.id} className="flex items-center gap-3 px-4 py-3 border-b border-[#2a2d3a] last:border-0 hover:bg-[#0d0f16] transition-colors">
+                  <div key={player.id} onClick={() => navigate(`/player/${tournament.id}/${player.id}`)} className="flex items-center gap-3 px-4 py-3 border-b border-[#2a2d3a] last:border-0 hover:bg-[#0d0f16] transition-colors cursor-pointer">
                     <span className="text-gray-600 text-xs w-4 text-center">{i + 1}</span>
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#8b5cf6]/30 to-[#8b5cf6]/10 flex items-center justify-center text-[#8b5cf6] text-xs font-bold flex-shrink-0">
                       {player.name.substring(0, 1).toUpperCase()}
@@ -641,6 +776,35 @@ export function TournamentMatchPage() {
           </div>
         </div>
       </main>
+
+      {/* Stream popup modal */}
+      {streamPopup && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setStreamPopup(null)}
+        >
+          <div className="w-full max-w-4xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-end mb-2">
+              <button
+                onClick={() => setStreamPopup(null)}
+                className="text-gray-300 hover:text-white transition-colors p-2"
+                aria-label="Close stream"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="relative w-full rounded-xl overflow-hidden border border-[#2a2d3a] bg-black" style={{ aspectRatio: '16 / 9' }}>
+              <iframe
+                src={`${streamPopup}?autoplay=1`}
+                title="Match stream"
+                className="absolute inset-0 w-full h-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

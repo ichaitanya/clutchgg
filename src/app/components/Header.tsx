@@ -22,7 +22,7 @@ export function Header() {
                 <Users className="w-4 h-4" />
                 <span className="text-sm">Teams</span>
               </a>
-              <a href="#" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
+              <a href="/stats" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
                 <BarChart3 className="w-4 h-4" />
                 <span className="text-sm">Stats</span>
               </a>

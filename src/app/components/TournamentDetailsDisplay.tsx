@@ -59,14 +59,18 @@ function BracketViewer({ bracket }: { bracket: BracketGenerated }) {
   );
 }
 
+const PLACE_COLORS = ['#4ade80', '#60a5fa', '#f59e0b'];
+
+function ordinal(n: number) {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
 export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDetailsProps) {
-  // Mock prize pool data - in a real app, this would come from tournament data
-  const prizePool = {
-    total: '$50,000',
-    first: '$25,000',
-    second: '$15,000',
-    third: '$10,000',
-  };
+  const prizePool = tournament.event?.prizePool;
+  const prizePlaces = (prizePool?.places ?? []).slice().sort((a, b) => a.position - b.position);
+  const hasPrizePool = !!prizePool && (prizePlaces.length > 0 || !!prizePool.total);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto">
@@ -161,24 +165,34 @@ export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDeta
                 Prize Pool
               </h3>
               
-              <div className="space-y-2">
-                <div className="flex items-center justify-between py-2 border-b border-[#2a2d3a]">
-                  <span className="text-gray-400 text-sm">Total Prize Pool</span>
-                  <span className="text-white font-bold text-lg">{prizePool.total}</span>
+              {hasPrizePool ? (
+                <div className="space-y-2">
+                  {prizePool!.total && (
+                    <div className="flex items-center justify-between py-2 border-b border-[#2a2d3a]">
+                      <span className="text-gray-400 text-sm">Total Prize Pool</span>
+                      <span className="text-white font-bold text-lg">{prizePool!.total}</span>
+                    </div>
+                  )}
+                  {prizePlaces.map((place, i) => (
+                    <div
+                      key={place.position}
+                      className={`flex items-center justify-between py-2 ${
+                        i < prizePlaces.length - 1 ? 'border-b border-[#2a2d3a]' : ''
+                      }`}
+                    >
+                      <span className="text-gray-400 text-sm">{ordinal(place.position)} Place</span>
+                      <span
+                        className="font-bold"
+                        style={{ color: PLACE_COLORS[i] || '#e5e7eb' }}
+                      >
+                        {place.prize}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center justify-between py-2 border-b border-[#2a2d3a]">
-                  <span className="text-gray-400 text-sm">1st Place</span>
-                  <span className="text-[#4ade80] font-bold">{prizePool.first}</span>
-                </div>
-                <div className="flex items-center justify-between py-2 border-b border-[#2a2d3a]">
-                  <span className="text-gray-400 text-sm">2nd Place</span>
-                  <span className="text-[#60a5fa] font-bold">{prizePool.second}</span>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-gray-400 text-sm">3rd Place</span>
-                  <span className="text-[#f59e0b] font-bold">{prizePool.third}</span>
-                </div>
-              </div>
+              ) : (
+                <p className="text-gray-500 text-sm">No prize pool has been set for this tournament.</p>
+              )}
             </div>
           </div>
 

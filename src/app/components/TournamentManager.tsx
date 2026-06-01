@@ -386,12 +386,6 @@ export function TournamentManager({
                 <Calendar className="w-4 h-4 text-[#ff4655]" />
                 Event Details
               </h3>
-              <button
-                onClick={() => setEditingEventDetails(t.id)}
-                className="px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors"
-              >
-                Edit
-              </button>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -413,7 +407,7 @@ export function TournamentManager({
               <div>
                 <p className="text-gray-500 text-xs mb-1">Max Teams</p>
                 <p className="text-white text-sm font-semibold">
-                  {t.event.registeredTeams?.length || 0} / {t.event.maxTeams}
+                  {t.teams.length} / {t.event.maxTeams}
                 </p>
               </div>
             </div>

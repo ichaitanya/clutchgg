@@ -16,11 +16,31 @@ export function TeamsPage() {
     getTournaments().then(setTournaments).catch(() => {});
   }, []);
 
-  // Get all teams from all tournaments
+  // Get all teams from all tournaments — deduplicated.
+  // A team that appears in multiple tournaments is only listed once. Two teams
+  // are considered the same when they share the same (normalized) name AND the
+  // same set of players. If the name matches but the rosters differ, both are
+  // kept (they're treated as distinct teams that happen to share a name).
   const allTeams: (TeamInTournament & { tournamentName: string; tournamentId: string })[] = useMemo(() => {
+    const norm = (s: string) => s.trim().toLowerCase();
+
+    // A roster fingerprint: sorted, normalized player names. Same players in any
+    // order produce the same signature.
+    const rosterSignature = (players: TournamentPlayer[]) =>
+      players
+        .map(p => norm(p.name))
+        .filter(Boolean)
+        .sort()
+        .join('|');
+
     const teams: (TeamInTournament & { tournamentName: string; tournamentId: string })[] = [];
+    const seen = new Set<string>(); // `${name}::${rosterSignature}`
+
     tournaments.forEach(tournament => {
       tournament.teams.forEach(team => {
+        const key = `${norm(team.name)}::${rosterSignature(team.players)}`;
+        if (seen.has(key)) return; // same name + same players → already added
+        seen.add(key);
         teams.push({
           ...team,
           tournamentName: tournament.name,
@@ -44,7 +64,7 @@ export function TeamsPage() {
   }, [allTeams.length]);
 
   return (
-    <div className="min-h-screen bg-[#0d0f16] pb-24">
+    <div className="min-h-screen bg-[#0d0f16] pb-12">
       {/* Header */}
       <div className="bg-[#151821] border-b border-[#2a2d3a] sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-4">
@@ -161,7 +181,8 @@ export function TeamsPage() {
                 {selectedTeam.players.map(player => (
                   <div
                     key={player.id}
-                    className="bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden hover:border-[#ff4655] transition-all group"
+                    onClick={() => navigate(`/player/${selectedTeam.tournamentId}/${player.id}`)}
+                    className="bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden hover:border-[#ff4655] transition-all group cursor-pointer"
                   >
                     {/* Player Photo */}
                     {player.photo ? (
@@ -194,35 +215,6 @@ export function TeamsPage() {
           </div>
         ) : null}
       </main>
-
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-[#151821] border-t border-[#2a2d3a]">
-        <div className="max-w-7xl mx-auto px-4 flex gap-3 py-3">
-          <button
-            onClick={() => setViewMode('teams')}
-            className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-              viewMode === 'teams'
-                ? 'bg-[#ff4655] text-white'
-                : 'bg-[#0d0f16] border border-[#2a2d3a] text-gray-400 hover:text-white hover:border-gray-500'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            All Teams
-          </button>
-          <button
-            onClick={() => setViewMode('players')}
-            disabled={allTeams.length === 0}
-            className={`flex-1 py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-              viewMode === 'players'
-                ? 'bg-[#ff4655] text-white'
-                : 'bg-[#0d0f16] border border-[#2a2d3a] text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            Players
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

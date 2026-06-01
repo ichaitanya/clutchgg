@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Shield, Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronRight,
@@ -203,7 +203,20 @@ interface AdminData {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const uid = () => Math.random().toString(36).slice(2, 9);
+// Generate a real UUID. Several tables (news_items, top_players) key on a
+// Postgres `uuid` column, so IDs must be valid UUIDs or the upsert is rejected
+// with "invalid input syntax for type uuid". Falls back to a manual v4 builder
+// for older environments without crypto.randomUUID.
+const uid = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 const defaultData: AdminData = {
   matches: [],
@@ -751,11 +764,17 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   const [data, setData] = useState<AdminData>(defaultData);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [dbLoading, setDbLoading] = useState(true);
+  // IDs of news items currently persisted in the DB. Used on save to delete any
+  // items the admin removed from the editor (the upsert pass alone can't remove).
+  const persistedNewsIds = useRef<Set<string>>(new Set());
 
   // Load from Supabase on mount
   useEffect(() => {
     loadAdminData()
-      .then(setData)
+      .then(d => {
+        setData(d);
+        persistedNewsIds.current = new Set(d.news.map(n => n.id));
+      })
       .catch(() => {})
       .finally(() => setDbLoading(false));
   }, []);
@@ -865,9 +884,20 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
               <button
                 onClick={async () => {
                   try {
-                    await Promise.all(data.news.map(upsertNews));
+                    // Persist current items, and remove any that were deleted
+                    // from the editor since the last load/save.
+                    const currentIds = new Set(data.news.map(n => n.id));
+                    const removed = [...persistedNewsIds.current].filter(id => !currentIds.has(id));
+                    await Promise.all([
+                      ...data.news.map(upsertNews),
+                      ...removed.map(deleteNews),
+                    ]);
+                    persistedNewsIds.current = currentIds;
                     save(data);
-                  } catch { showToast('Failed to save news', 'error'); }
+                  } catch (e) {
+                    console.error('[Admin] Failed to save news:', e);
+                    showToast(e instanceof Error ? `Failed to save news: ${e.message}` : 'Failed to save news', 'error');
+                  }
                 }}
                 className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-all"
               >

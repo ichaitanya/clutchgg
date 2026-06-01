@@ -170,8 +170,8 @@ function TeamSlotSelect({
       }}
     >
       <option value="">— Select Team —</option>
-      {teams.map(t => (
-        <option key={t.id} value={t.id} disabled={usedIds.has(t.id) && t.id !== value}>
+      {teams.filter(t => !usedIds.has(t.id) || t.id === value).map(t => (
+        <option key={t.id} value={t.id}>
           {t.name}
         </option>
       ))}
