@@ -66,17 +66,20 @@ export interface PlayerMatchStats {
 }
 
 // Get player's match history (most recent first), filtered by game mode.
-// Note: Henrikdev's `mode` query does not surface custom games, so when
-// mode === 'custom' we omit the filter and post-filter to custom games below.
+// Henrikdev's v3 `mode=custom` query does surface custom games, so we pass it
+// through directly. `size` caps how many matches the API returns.
 export async function getPlayerMatchHistory(
   playerName: string,
   playerTag: string,
   region: string = 'na',
-  mode: string = 'competitive'
+  mode: string = 'competitive',
+  size: number = 15
 ): Promise<MatchHistory[]> {
   try {
-    const isCustom = mode === 'custom';
-    const query = isCustom ? '' : `?mode=${encodeURIComponent(mode)}`;
+    const params = new URLSearchParams();
+    if (mode) params.set('mode', mode);
+    if (size) params.set('size', String(size));
+    const query = params.toString() ? `?${params.toString()}` : '';
     const response = await fetch(
       `${BASE_URL}/v3/matches/${region}/${encodeURIComponent(playerName)}/${encodeURIComponent(playerTag)}${query}`,
       {
@@ -100,7 +103,9 @@ export async function getPlayerMatchHistory(
         mode_id: m.metadata?.mode_id ?? '',
       },
     }));
-    return isCustom ? mapped.filter(m => m.metadata.mode_id === 'custom') : mapped;
+    // Safety net: if mode=custom, keep only custom games (the API already filters,
+    // but this guards against any non-custom leaking through).
+    return mode === 'custom' ? mapped.filter(m => m.metadata.mode_id === 'custom') : mapped;
   } catch (error) {
     console.error('Failed to fetch player match history:', error);
     throw error;
@@ -164,6 +169,17 @@ export function findLatestMatchOnMap(
   mapName: string
 ): MatchHistory | null {
   return history.find(m => m.metadata.map.toLowerCase() === mapName.toLowerCase()) ?? null;
+}
+
+// Count how many of `playerRiotIds` (each "name#tag") match a roster entry.
+// Roster entries may be "name#tag" or a bare display name (matched on name).
+export function countRiotIdOverlap(playerRiotIds: string[], roster: string[]): number {
+  const rosterLc = roster.map(r => r.toLowerCase());
+  return playerRiotIds.filter(rid => {
+    const lc = rid.toLowerCase();
+    const name = lc.split('#')[0];
+    return rosterLc.some(r => r === lc || r === name);
+  }).length;
 }
 
 // Does an API player match any roster entry? Roster entries may be "name#tag"
@@ -299,4 +315,147 @@ export function buildPlayerStatsFromAPI(
       hsPercent: Math.round(hsPercent),
     };
   });
+}
+
+// ── Manual match-finding flow ──────────────────────────────────────────────
+// A candidate custom game shown to the admin so they can pick the right match
+// ID. Carries the score and how many of the queried team's roster appeared, so
+// the admin can spot the right match even if a few players differ between the
+// website roster and the Valorant lobby.
+export interface CustomGameCandidate {
+  matchId: string;
+  map: string;
+  startedAt: string;      // game_start_patched
+  blueScore: number;      // rounds won by Blue side
+  redScore: number;       // rounds won by Red side
+  rosterPlayersFound: number; // how many of the queried team's roster appeared
+  rosterSize: number;
+}
+
+// Fetch a player's last N custom games and, for each, fetch full details so we
+// can show the score and roster overlap against a single team's roster.
+// `roster` is an array of "name#tag" Riot IDs and/or bare display names; it is
+// only used for the informational overlap count — games are never filtered out.
+export async function getCustomGameCandidates(
+  playerName: string,
+  playerTag: string,
+  roster: string[],
+  region: string = 'ap',
+  count: number = 15
+): Promise<CustomGameCandidate[]> {
+  const history = await getPlayerMatchHistory(playerName, playerTag, region, 'custom', count);
+  const scan = history.slice(0, count);
+  const candidates: CustomGameCandidate[] = [];
+
+  for (const h of scan) {
+    if (!h.uuid) continue;
+    let details: MatchDetails;
+    try {
+      details = await getMatchDetails(h.uuid);
+    } catch {
+      continue;
+    }
+
+    candidates.push({
+      matchId: h.uuid,
+      map: details.metadata.map || h.metadata.map,
+      startedAt: details.metadata.game_start_patched || h.metadata.game_start_patched,
+      blueScore: details.teams.blue.rounds_won,
+      redScore: details.teams.red.rounds_won,
+      rosterPlayersFound: countRosterMatches(details.players, roster),
+      rosterSize: roster.length,
+    });
+  }
+
+  return candidates;
+}
+
+// Given a specific match ID, fetch its details and build the map result + per
+// player stats keyed to the tournament team IDs. Used by the Edit Match flow
+// when an admin pastes a match ID retrieved from the candidate finder.
+export async function buildMatchResultFromId(
+  matchId: string,
+  team1Roster: string[],
+  team2Roster: string[],
+  team1Id: string,
+  team2Id: string,
+  displayNameByRiotId: Record<string, string> = {}
+): Promise<{
+  mapName: string;
+  team1Score: number;
+  team2Score: number;
+  playerStats: ReturnType<typeof buildPlayerStatsFromAPI>;
+}> {
+  const details = await getMatchDetails(matchId);
+  const mapping = mapPlayersToTeams(details.players, team1Roster, team2Roster);
+  const team1Rounds = mapping.team1Name === 'Blue' ? details.teams.blue.rounds_won : details.teams.red.rounds_won;
+  const team2Rounds = mapping.team1Name === 'Blue' ? details.teams.red.rounds_won : details.teams.blue.rounds_won;
+  const playerStats = buildPlayerStatsFromAPI(
+    details.players,
+    mapping.team1Name,
+    mapping.team2Name,
+    team1Id,
+    team2Id,
+    details.metadata.rounds_played,
+    displayNameByRiotId
+  );
+  return {
+    mapName: details.metadata.map,
+    team1Score: team1Rounds,
+    team2Score: team2Rounds,
+    playerStats,
+  };
+}
+
+// A raw per-side scoreboard for previewing a custom game (no tournament team
+// mapping). Used by the Find Match ID "view scoreboard" UI.
+export interface ScoreboardRow {
+  riotId: string;       // name#tag
+  name: string;
+  agent: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd: number;
+  acs: number;
+  hsPercent: number;
+}
+
+export interface MatchScoreboard {
+  matchId: string;
+  map: string;
+  startedAt: string;
+  blueScore: number;
+  redScore: number;
+  blue: ScoreboardRow[];
+  red: ScoreboardRow[];
+}
+
+export async function getMatchScoreboard(matchId: string): Promise<MatchScoreboard> {
+  const details = await getMatchDetails(matchId);
+  const rounds = details.metadata.rounds_played;
+  const toRow = (p: PlayerMatchStats): ScoreboardRow => {
+    const totalShots = p.stats.headshots + p.stats.bodyshots + p.stats.legshots;
+    const hsPercent = totalShots > 0 ? (p.stats.headshots / totalShots) * 100 : 0;
+    return {
+      riotId: `${p.name}#${p.tag}`,
+      name: p.name,
+      agent: p.character,
+      kills: p.stats.kills,
+      deaths: p.stats.deaths,
+      assists: p.stats.assists,
+      kd: p.stats.deaths > 0 ? parseFloat((p.stats.kills / p.stats.deaths).toFixed(2)) : p.stats.kills,
+      acs: rounds > 0 ? Math.floor(p.stats.score / rounds) : 0,
+      hsPercent: Math.round(hsPercent),
+    };
+  };
+  return {
+    matchId,
+    map: details.metadata.map,
+    startedAt: details.metadata.game_start_patched,
+    blueScore: details.teams.blue.rounds_won,
+    redScore: details.teams.red.rounds_won,
+    blue: details.players.filter(p => p.team === 'Blue').map(toRow),
+    red: details.players.filter(p => p.team === 'Red').map(toRow),
+  };
 }

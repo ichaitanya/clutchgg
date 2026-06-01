@@ -4,20 +4,20 @@ import { LiveMatch } from './LiveMatch';
 import { useNavigate } from 'react-router-dom';
 import { TournamentDetailsDisplay } from './TournamentDetailsDisplay';
 import type { AdminData } from './AdminPanel';
-import type { Tournament } from './TournamentCreation';
+import type { Tournament, BracketMatch } from './TournamentCreation';
 
 const STORAGE_KEY = 'vct_admin_data';
 
 // Helper function to determine match status
 function getMatchStatus(date?: string, time?: string) {
   if (!date) return 'upcoming';
-  
+
   try {
     const matchDateTime = new Date(`${date}T${time || '00:00'}`);
     const now = new Date();
     const diffMs = matchDateTime.getTime() - now.getTime();
     const diffHours = diffMs / (1000 * 60 * 60);
-    
+
     // Match is live if within 3 hours
     if (diffHours > -3 && diffHours < 3) return 'live';
     // Match is past if more than 3 hours ago
@@ -27,6 +27,32 @@ function getMatchStatus(date?: string, time?: string) {
   } catch {
     return 'upcoming';
   }
+}
+
+// Has the series been decided by map results? In a BOn, a team needs
+// ceil(maxMaps/2) map wins (e.g. 2 in a BO3). Also treats an all-maps-played
+// result as decided. Returns true when the match is effectively over.
+function isMatchDecidedByMaps(match: BracketMatch): boolean {
+  const maps = match.maps ?? [];
+  if (maps.length === 0) return false;
+  const maxMaps = match.format === 'bo1' ? 1 : match.format === 'bo5' ? 5 : 3;
+  let w1 = 0, w2 = 0;
+  for (const m of maps) {
+    if (m.team1Score > m.team2Score) w1++;
+    else if (m.team2Score > m.team1Score) w2++;
+  }
+  const needed = Math.ceil(maxMaps / 2);
+  if (w1 >= needed || w2 >= needed) return true;
+  // All maps played and someone is ahead
+  if (maps.length >= maxMaps && w1 !== w2) return true;
+  return false;
+}
+
+// Winner-aware status: a match with a recorded winner or a map-decided result
+// is completed regardless of its scheduled date. Otherwise fall back to date.
+function getEffectiveStatus(match: BracketMatch) {
+  if (match.winner || isMatchDecidedByMaps(match)) return 'completed';
+  return getMatchStatus(match.date, match.time);
 }
 
 export function MatchesPage() {
@@ -63,7 +89,7 @@ export function MatchesPage() {
         // Single-stage: generatedBracket
         if (tournament.generatedBracket) {
           tournament.generatedBracket.rounds.flat().forEach(match => {
-            matchList.push({ ...match, status: getMatchStatus(match.date, match.time), stage: 'Main Bracket' });
+            matchList.push({ ...match, status: getEffectiveStatus(match), stage: 'Main Bracket' });
           });
         }
 
@@ -72,20 +98,19 @@ export function MatchesPage() {
           const groups = tournament.stage1Config.groups ?? [];
           tournament.stage1Bracket.rounds.flat().forEach(match => {
             const group = groups.find(g => match.id.startsWith(`gs_${g.id}_`));
-            const status = match.winner ? 'completed' : 'upcoming';
-            matchList.push({ ...match, status, stage: group?.name ?? 'Group Stage' });
+            matchList.push({ ...match, status: getEffectiveStatus(match), stage: group?.name ?? 'Group Stage' });
           });
         } else if (tournament.stage1Bracket) {
           // Two-stage non-groupstage: stage1Bracket
           tournament.stage1Bracket.rounds.flat().forEach(match => {
-            matchList.push({ ...match, status: getMatchStatus(match.date, match.time), stage: 'Stage 1' });
+            matchList.push({ ...match, status: getEffectiveStatus(match), stage: 'Stage 1' });
           });
         }
 
         // Two-stage: stage2Bracket
         if (tournament.stage2Bracket) {
           tournament.stage2Bracket.rounds.flat().forEach(match => {
-            matchList.push({ ...match, status: getMatchStatus(match.date, match.time), stage: 'Stage 2' });
+            matchList.push({ ...match, status: getEffectiveStatus(match), stage: 'Stage 2' });
           });
         }
 

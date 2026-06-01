@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
@@ -43,6 +43,7 @@ export interface MatchMapResult {
   team1Score: number;
   team2Score: number;
   playerStats?: MatchPlayerStat[];
+  matchId?: string; // Valorant match ID this map was populated from (Segment 2)
 }
 
 export interface MatchPlayerStat {
@@ -147,6 +148,36 @@ export interface Tournament {
   groupStage?: GroupStage;
   knockoutBracket?: BracketGenerated;
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
+}
+
+const ADMIN_STORAGE_KEY = 'vct_admin_data';
+
+// Replace a single match (by id) wherever it lives across the tournament's
+// brackets, returning a new Tournament. Used to persist an applied scoreboard.
+function applyMatchToTournament(tournament: Tournament, updatedMatch: BracketMatch): Tournament {
+  const replaceIn = (b?: BracketGenerated): BracketGenerated | undefined =>
+    b ? { ...b, rounds: b.rounds.map(r => r.map(m => m.id === updatedMatch.id ? updatedMatch : m)) } : b;
+  return {
+    ...tournament,
+    generatedBracket: replaceIn(tournament.generatedBracket),
+    stage1Bracket: replaceIn(tournament.stage1Bracket),
+    stage2Bracket: replaceIn(tournament.stage2Bracket),
+  };
+}
+
+// Write an updated tournament into the shared admin localStorage blob so the
+// public match page (which reads localStorage) reflects changes immediately.
+function persistTournament(updated: Tournament): void {
+  try {
+    const stored = localStorage.getItem(ADMIN_STORAGE_KEY);
+    if (!stored) return;
+    const data = JSON.parse(stored);
+    if (!Array.isArray(data.tournaments)) return;
+    data.tournaments = data.tournaments.map((t: Tournament) => t.id === updated.id ? updated : t);
+    localStorage.setItem(ADMIN_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Non-fatal: in-memory state still updated; manual save will persist later.
+  }
 }
 
 export interface BracketData {
@@ -616,120 +647,533 @@ function AddTeamScreen({
   );
 }
 
-// ── API Fetch Helper ──────────────────────────────────────────────────────
-// Extracts the roster-matching fetch logic for reuse across components.
-export async function fetchMatchDataFromAPI(
-  team1: TeamInTournament | undefined,
-  team2: TeamInTournament | undefined,
-  match: BracketMatch
-): Promise<{ maps: MatchMapResult[]; playerStats: MatchPlayerStat[] } | null> {
-  const region = 'ap';
-  const mode = 'competitive'; // default; will be configurable later
+// A tournament match an admin can apply a fetched scoreboard to.
+export interface ApplyTarget {
+  matchId: string;
+  team1Name: string;
+  team2Name: string;
+  stage: string;
+  format: 'bo1' | 'bo3' | 'bo5';
+  maxMaps: number;
+  maps: MatchMapResult[];
+  // Rosters (Riot IDs and/or bare display names) used to suggest this match for
+  // a given game based on player overlap.
+  team1Roster: string[];
+  team2Roster: string[];
+}
 
-  // Build source players list.
-  const iglOf = (t?: TeamInTournament) => t?.players.find(p => p.role === 'igl' && p.riotId);
-  const anyOf = (t?: TeamInTournament) => t?.players.filter(p => p.riotId && p.role !== 'igl') ?? [];
-  const seen = new Set<string>();
-  const sources: { riotId: string }[] = [];
-  for (const cand of [iglOf(team1), iglOf(team2), ...anyOf(team1), ...anyOf(team2)]) {
-    if (cand?.riotId && !seen.has(cand.riotId.toLowerCase())) {
-      seen.add(cand.riotId.toLowerCase());
-      sources.push({ riotId: cand.riotId });
+// Upcoming (not decided) matches with both teams assigned to real teams, across
+// all bracket sections — the eligible targets for applying a scoreboard.
+function getApplyTargetMatches(tournament: Tournament): ApplyTarget[] {
+  const out: ApplyTarget[] = [];
+  const sections: { bracket?: BracketGenerated; stage: string }[] = [
+    { bracket: tournament.generatedBracket, stage: 'Main Bracket' },
+    { bracket: tournament.stage1Bracket, stage: tournament.stage1Config?.format === 'groupstage' ? 'Group Stage' : 'Stage 1' },
+    { bracket: tournament.stage2Bracket, stage: 'Stage 2' },
+  ];
+  for (const { bracket, stage } of sections) {
+    if (!bracket) continue;
+    for (const m of bracket.rounds.flat()) {
+      if (isTeamSlotName(m.team1Name) || isTeamSlotName(m.team2Name)) continue; // both teams real
+      const format = (m.format ?? 'bo3') as 'bo1' | 'bo3' | 'bo5';
+      const maxMaps = format === 'bo1' ? 1 : format === 'bo5' ? 5 : 3;
+      // Skip if already decided (a team reached the needed map wins).
+      let w1 = 0, w2 = 0;
+      for (const mp of m.maps ?? []) {
+        if (mp.team1Score > mp.team2Score) w1++;
+        else if (mp.team2Score > mp.team1Score) w2++;
+      }
+      const needed = Math.ceil(maxMaps / 2);
+      if (m.winner || w1 >= needed || w2 >= needed) continue;
+      const t1 = tournament.teams.find(t => t.id === m.team1Id);
+      const t2 = tournament.teams.find(t => t.id === m.team2Id);
+      out.push({
+        matchId: m.id,
+        team1Name: m.team1Name,
+        team2Name: m.team2Name,
+        stage,
+        format,
+        maxMaps,
+        maps: m.maps ?? [],
+        team1Roster: (t1?.players ?? []).map(p => p.riotId || p.name),
+        team2Roster: (t2?.players ?? []).map(p => p.riotId || p.name),
+      });
     }
   }
+  return out;
+}
 
-  if (sources.length === 0) throw new Error('No players with Riot IDs found on either team.');
+// ── Match Finder Modal (Segment 1) ─────────────────────────────────────────
+// Admin picks one team + a player whose Riot ID we query, fetches that player's
+// last 15 custom games, and lists each (score + roster overlap). Each game can
+// be expanded to view its scoreboard and applied to a map slot of an upcoming
+// tournament match.
+function MatchFinderModal({
+  teams,
+  applyTargets,
+  onApply,
+  onClose,
+}: {
+  teams: TeamInTournament[];
+  applyTargets: ApplyTarget[];
+  onApply: (targetMatchId: string, mapSlotIndex: number, apiMatchId: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [teamId, setTeamId] = useState('');
+  const [playerRiotId, setPlayerRiotId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<ValorantAPI.CustomGameCandidate[] | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Build rosters for matching.
-  const team1Players = team1?.players.map(p => p.riotId || p.name) || [];
-  const team2Players = team2?.players.map(p => p.riotId || p.name) || [];
-  const displayNameByRiotId: Record<string, string> = {};
-  for (const p of [...(team1?.players ?? []), ...(team2?.players ?? [])]) {
-    if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
-  }
+  // Scoreboard preview state (per expanded game).
+  const [openScoreboardId, setOpenScoreboardId] = useState<string | null>(null);
+  const [scoreboard, setScoreboard] = useState<ValorantAPI.MatchScoreboard | null>(null);
+  const [scoreboardLoading, setScoreboardLoading] = useState(false);
+  const [scoreboardError, setScoreboardError] = useState<string | null>(null);
 
-  // Find match with both rosters.
-  let matchDetails: ValorantAPI.MatchDetails | null = null;
-  for (const src of sources) {
-    const [n, t] = src.riotId.split('#');
-    if (!n || !t) continue;
-    const history = await ValorantAPI.getPlayerMatchHistory(n, t, region, mode);
-    if (history.length === 0) continue;
-    matchDetails = await ValorantAPI.findMatchWithBothRosters(
-      history,
-      team1Players,
-      team2Players,
-      ValorantAPI.getMatchDetails,
-    );
-    if (matchDetails) break;
-  }
+  // Apply state.
+  const [applyForId, setApplyForId] = useState<string | null>(null); // which game is being applied
+  const [applyTargetId, setApplyTargetId] = useState('');
+  const [applySlot, setApplySlot] = useState(0);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applyDone, setApplyDone] = useState<string | null>(null); // success message
 
-  if (!matchDetails) {
-    throw new Error('No recent match found containing players from both teams. Verify Riot IDs and that the match has been played.');
-  }
+  // Per-game cache of player Riot IDs (from the scoreboard) for suggestion scoring.
+  const [playersByGame, setPlayersByGame] = useState<Record<string, string[]>>({});
+  const [suggestLoading, setSuggestLoading] = useState(false);
 
-  // Build map + stats.
-  const mapping = ValorantAPI.mapPlayersToTeams(matchDetails.players, team1Players, team2Players);
-  const team1Rounds = mapping.team1Name === 'Blue' ? matchDetails.teams.blue.rounds_won : matchDetails.teams.red.rounds_won;
-  const team2Rounds = mapping.team1Name === 'Blue' ? matchDetails.teams.red.rounds_won : matchDetails.teams.blue.rounds_won;
-  const mapStats = ValorantAPI.buildPlayerStatsFromAPI(
-    matchDetails.players,
-    mapping.team1Name,
-    mapping.team2Name,
-    match.team1Id,
-    match.team2Id,
-    matchDetails.metadata.rounds_played,
-    displayNameByRiotId
-  );
-  const apiMap: MatchMapResult = {
-    mapName: matchDetails.metadata.map,
-    team1Score: team1Rounds,
-    team2Score: team2Rounds,
-    playerStats: mapStats,
+  const team = teams.find(t => t.id === teamId);
+  const sourcePlayers = (team?.players ?? []).filter(p => p.riotId);
+  const applyTarget = applyTargets.find(t => t.matchId === applyTargetId);
+
+  // Suggested targets for the game being applied: matches where BOTH teams have
+  // >= 3 of their roster appearing among the game's players. Sorted by overlap.
+  const SUGGEST_MIN = 3;
+  const suggestions: { target: ApplyTarget; t1Found: number; t2Found: number }[] = (() => {
+    if (!applyForId) return [];
+    const gamePlayers = playersByGame[applyForId];
+    if (!gamePlayers) return [];
+    return applyTargets
+      .map(target => ({
+        target,
+        t1Found: ValorantAPI.countRiotIdOverlap(gamePlayers, target.team1Roster),
+        t2Found: ValorantAPI.countRiotIdOverlap(gamePlayers, target.team2Roster),
+      }))
+      .filter(s => s.t1Found >= SUGGEST_MIN && s.t2Found >= SUGGEST_MIN)
+      .sort((a, b) => (b.t1Found + b.t2Found) - (a.t1Found + a.t2Found));
+  })();
+  const suggestedIds = new Set(suggestions.map(s => s.target.matchId));
+
+  const handleViewScoreboard = async (matchId: string) => {
+    if (openScoreboardId === matchId) { setOpenScoreboardId(null); return; }
+    setOpenScoreboardId(matchId);
+    setScoreboard(null);
+    setScoreboardError(null);
+    setScoreboardLoading(true);
+    try {
+      const sb = await ValorantAPI.getMatchScoreboard(matchId);
+      setScoreboard(sb);
+      const ids = [...sb.blue, ...sb.red].map(r => r.riotId);
+      setPlayersByGame(prev => ({ ...prev, [matchId]: ids }));
+    } catch (e) {
+      setScoreboardError(e instanceof Error ? e.message : 'Failed to load scoreboard.');
+    } finally {
+      setScoreboardLoading(false);
+    }
   };
 
-  return { maps: [apiMap], playerStats: mapStats };
+  const openApply = async (matchId: string) => {
+    setApplyForId(matchId);
+    setApplyTargetId('');
+    setApplySlot(0);
+    setApplyError(null);
+    setApplyDone(null);
+
+    // Ensure we have this game's player list for suggestion scoring.
+    if (!playersByGame[matchId]) {
+      // Reuse the already-open scoreboard if it's this game.
+      if (scoreboard && openScoreboardId === matchId) {
+        const ids = [...scoreboard.blue, ...scoreboard.red].map(r => r.riotId);
+        setPlayersByGame(prev => ({ ...prev, [matchId]: ids }));
+      } else {
+        setSuggestLoading(true);
+        try {
+          const sb = await ValorantAPI.getMatchScoreboard(matchId);
+          const ids = [...sb.blue, ...sb.red].map(r => r.riotId);
+          setPlayersByGame(prev => ({ ...prev, [matchId]: ids }));
+        } catch {
+          // Suggestions just won't show; the full list is still available.
+        } finally {
+          setSuggestLoading(false);
+        }
+      }
+    }
+  };
+
+  const handleApply = async () => {
+    setApplyError(null);
+    if (!applyForId) return;
+    if (!applyTargetId) { setApplyError('Select a target match.'); return; }
+    setApplying(true);
+    try {
+      await onApply(applyTargetId, applySlot, applyForId);
+      const tgt = applyTargets.find(t => t.matchId === applyTargetId);
+      setApplyDone(`Applied to ${tgt?.team1Name} vs ${tgt?.team2Name} — Map ${applySlot + 1}.`);
+      setApplyForId(null);
+    } catch (e) {
+      setApplyError(e instanceof Error ? e.message : 'Failed to apply scoreboard.');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleFetch = async () => {
+    setError(null);
+    setCandidates(null);
+    if (!team) { setError('Select a team first.'); return; }
+    if (!playerRiotId) { setError('Select a player to query.'); return; }
+    const [name, tag] = playerRiotId.split('#');
+    if (!name || !tag) { setError('Selected player has an invalid Riot ID (expected name#tag).'); return; }
+
+    const roster = team.players.map(p => p.riotId || p.name);
+
+    setLoading(true);
+    try {
+      const result = await ValorantAPI.getCustomGameCandidates(name, tag, roster, 'ap', 15);
+      setCandidates(result);
+      if (result.length === 0) setError('No custom games found for this player in their recent history.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to fetch custom games.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(c => (c === id ? null : c)), 1500);
+    } catch {
+      // Clipboard may be unavailable; selection fallback is the visible text.
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2d3a] flex-shrink-0">
+          <h2 className="text-white font-bold text-lg flex items-center gap-2">
+            <Search className="w-5 h-5 text-[#ff4655]" /> Find Match ID
+          </h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-6 space-y-5">
+          <p className="text-xs text-gray-500">
+            Pick a team, then a player whose Riot ID we'll query for their last 15 custom games.
+            The overlap count shows how many of that team's roster appeared — use it (and the map/score/time) to spot the right match, then copy its ID.
+          </p>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Team</label>
+            <select
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              value={teamId}
+              onChange={e => { setTeamId(e.target.value); setPlayerRiotId(''); setCandidates(null); }}
+            >
+              <option value="">Select team…</option>
+              {teams.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Player to query (must have a Riot ID)</label>
+            <select
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors disabled:opacity-50"
+              value={playerRiotId}
+              disabled={!team}
+              onChange={e => setPlayerRiotId(e.target.value)}
+            >
+              <option value="">{!team ? 'Select a team first…' : 'Select player…'}</option>
+              {sourcePlayers.map(p => (
+                <option key={p.id} value={p.riotId}>{p.name} ({p.riotId})</option>
+              ))}
+            </select>
+            {team && sourcePlayers.length === 0 && (
+              <p className="text-xs text-yellow-500 mt-1.5">No players on this team have a Riot ID set. Add Riot IDs to query.</p>
+            )}
+          </div>
+
+          <button
+            onClick={handleFetch}
+            disabled={loading || !team || !playerRiotId}
+            className="w-full py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading && <Loader className="w-4 h-4 animate-spin" />}
+            {loading ? 'Fetching custom games…' : 'Fetch Last 15 Custom Games'}
+          </button>
+
+          {error && (
+            <p className="text-xs text-[#ff4655] bg-[#ff4655]/10 px-3 py-2 rounded border border-[#ff4655]/30">{error}</p>
+          )}
+
+          {candidates && candidates.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Custom Games</p>
+              {candidates.map(c => {
+                const present = c.rosterPlayersFound >= 2;
+                const tone = c.rosterPlayersFound >= Math.min(c.rosterSize || 5, 5)
+                  ? 'border-green-600/50 bg-green-900/10'
+                  : present
+                  ? 'border-yellow-600/40 bg-yellow-900/10'
+                  : 'border-[#2a2d3a]';
+                return (
+                  <div key={c.matchId} className={`rounded-lg border p-3 ${tone}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-white text-sm font-semibold">
+                          {c.map || 'Unknown map'} <span className="text-gray-500 font-normal">· {c.blueScore}–{c.redScore}</span>
+                        </p>
+                        <p className="text-gray-500 text-xs mt-0.5">{c.startedAt || '—'}</p>
+                      </div>
+                      <button
+                        onClick={() => handleCopy(c.matchId)}
+                        className="shrink-0 px-2.5 py-1.5 text-xs rounded border border-[#2a2d3a] text-gray-300 hover:border-[#ff4655]/50 hover:text-white transition-colors flex items-center gap-1.5"
+                      >
+                        {copiedId === c.matchId ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedId === c.matchId ? 'Copied' : 'Copy ID'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3 mt-2">
+                      <span className="text-[11px] text-gray-400">
+                        {team?.name ?? 'Team'} players found: <span className="text-white font-semibold">{c.rosterPlayersFound}/{c.rosterSize}</span>
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-600 font-mono mt-1.5 truncate" title={c.matchId}>{c.matchId}</p>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 mt-2.5">
+                      <button
+                        onClick={() => handleViewScoreboard(c.matchId)}
+                        className="px-2.5 py-1.5 text-xs rounded border border-[#2a2d3a] text-gray-300 hover:border-[#ff4655]/50 hover:text-white transition-colors"
+                      >
+                        {openScoreboardId === c.matchId ? 'Hide scoreboard' : 'View scoreboard'}
+                      </button>
+                      <button
+                        onClick={() => openApply(c.matchId)}
+                        className="px-2.5 py-1.5 text-xs rounded bg-[#ff4655]/20 border border-[#ff4655]/50 text-[#ff4655] hover:bg-[#ff4655]/30 transition-colors font-semibold"
+                      >
+                        Apply this scoreboard to match
+                      </button>
+                    </div>
+
+                    {/* Scoreboard preview */}
+                    {openScoreboardId === c.matchId && (
+                      <div className="mt-3 border-t border-[#2a2d3a] pt-3">
+                        {scoreboardLoading && (
+                          <p className="text-xs text-gray-400 flex items-center gap-1.5"><Loader className="w-3.5 h-3.5 animate-spin" /> Loading scoreboard…</p>
+                        )}
+                        {scoreboardError && (
+                          <p className="text-xs text-[#ff4655]">{scoreboardError}</p>
+                        )}
+                        {scoreboard && !scoreboardLoading && (
+                          <div className="space-y-3">
+                            <p className="text-xs text-gray-400 font-semibold">
+                              {scoreboard.map} · <span className="text-blue-400">Blue {scoreboard.blueScore}</span> – <span className="text-red-400">{scoreboard.redScore} Red</span>
+                            </p>
+                            {([['Blue', scoreboard.blue, 'text-blue-400'], ['Red', scoreboard.red, 'text-red-400']] as const).map(([label, rows, color]) => (
+                              <div key={label}>
+                                <p className={`text-[11px] font-bold mb-1 ${color}`}>{label}</p>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-[11px]">
+                                    <thead>
+                                      <tr className="text-gray-500">
+                                        <th className="text-left py-1 pr-2">Player</th>
+                                        <th className="text-left py-1 pr-2">Agent</th>
+                                        <th className="text-center py-1 px-1">K</th>
+                                        <th className="text-center py-1 px-1">D</th>
+                                        <th className="text-center py-1 px-1">A</th>
+                                        <th className="text-center py-1 px-1">ACS</th>
+                                        <th className="text-center py-1 px-1">HS%</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {rows.map(r => (
+                                        <tr key={r.riotId} className="border-t border-[#2a2d3a]/60">
+                                          <td className="py-1 pr-2 text-white">{r.name}</td>
+                                          <td className="py-1 pr-2 text-gray-400">{r.agent || '—'}</td>
+                                          <td className="py-1 px-1 text-center text-white">{r.kills}</td>
+                                          <td className="py-1 px-1 text-center text-white">{r.deaths}</td>
+                                          <td className="py-1 px-1 text-center text-white">{r.assists}</td>
+                                          <td className="py-1 px-1 text-center text-white">{r.acs}</td>
+                                          <td className="py-1 px-1 text-center text-gray-300">{r.hsPercent}%</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Apply picker */}
+                    {applyForId === c.matchId && (
+                      <div className="mt-3 border-t border-[#2a2d3a] pt-3 space-y-2">
+                        <p className="text-xs text-gray-400 font-semibold">Apply to an upcoming match</p>
+                        {applyTargets.length === 0 ? (
+                          <p className="text-[11px] text-yellow-500">No upcoming matches with both teams assigned.</p>
+                        ) : (
+                          <>
+                            {/* Suggested matches — both teams have ≥3/5 of their roster in this game */}
+                            {suggestLoading && !playersByGame[c.matchId] && (
+                              <p className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                                <Loader className="w-3 h-3 animate-spin" /> Finding suggested matches…
+                              </p>
+                            )}
+                            {suggestions.length > 0 && (
+                              <div className="space-y-1.5">
+                                <p className="text-[11px] text-green-400 font-semibold uppercase tracking-wider">Suggested</p>
+                                {suggestions.map(s => (
+                                  <button
+                                    key={s.target.matchId}
+                                    onClick={() => { setApplyTargetId(s.target.matchId); setApplySlot(0); }}
+                                    className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                                      applyTargetId === s.target.matchId
+                                        ? 'border-green-500 bg-green-900/20'
+                                        : 'border-green-700/40 bg-green-900/10 hover:border-green-500/70'
+                                    }`}
+                                  >
+                                    <p className="text-xs text-white font-semibold">
+                                      {s.target.team1Name} vs {s.target.team2Name}
+                                      <span className="text-gray-400 font-normal"> · {s.target.stage} · {s.target.format.toUpperCase()}</span>
+                                    </p>
+                                    <p className="text-[10px] text-green-400 mt-0.5">
+                                      {s.target.team1Name}: {s.t1Found}/{s.target.team1Roster.length} · {s.target.team2Name}: {s.t2Found}/{s.target.team2Roster.length} matched
+                                    </p>
+                                  </button>
+                                ))}
+                                <p className="text-[10px] text-gray-500">Or choose any match below.</p>
+                              </div>
+                            )}
+                            {playersByGame[c.matchId] && suggestions.length === 0 && !suggestLoading && (
+                              <p className="text-[11px] text-gray-500">No strong match found (need ≥3 players from each team). Choose manually below.</p>
+                            )}
+
+                            <select
+                              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-xs focus:border-[#ff4655] focus:outline-none"
+                              value={applyTargetId}
+                              onChange={e => { setApplyTargetId(e.target.value); setApplySlot(0); }}
+                            >
+                              <option value="">Select match…</option>
+                              {applyTargets.map(t => (
+                                <option key={t.matchId} value={t.matchId}>
+                                  {suggestedIds.has(t.matchId) ? '★ ' : ''}{t.stage}: {t.team1Name} vs {t.team2Name} ({t.format.toUpperCase()})
+                                </option>
+                              ))}
+                            </select>
+                            {applyTarget && (
+                              <div>
+                                <label className="block text-[11px] text-gray-500 mb-1">Apply to map slot</label>
+                                <select
+                                  className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-xs focus:border-[#ff4655] focus:outline-none"
+                                  value={applySlot}
+                                  onChange={e => setApplySlot(Number(e.target.value))}
+                                >
+                                  {Array.from({ length: applyTarget.maxMaps }).map((_, i) => {
+                                    const existing = applyTarget.maps[i];
+                                    const filled = existing && existing.matchId ? ' — currently filled (will overwrite)' : '';
+                                    return <option key={i} value={i}>Map {i + 1}{filled}</option>;
+                                  })}
+                                </select>
+                              </div>
+                            )}
+                            {applyError && <p className="text-[11px] text-[#ff4655]">{applyError}</p>}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={handleApply}
+                                disabled={applying || !applyTargetId}
+                                className="flex-1 py-2 rounded-lg bg-[#ff4655] text-white text-xs font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {applying && <Loader className="w-3.5 h-3.5 animate-spin" />}
+                                {applying ? 'Applying…' : 'Confirm Apply'}
+                              </button>
+                              <button
+                                onClick={() => setApplyForId(null)}
+                                className="px-3 py-2 rounded-lg border border-[#2a2d3a] text-gray-400 text-xs hover:text-white transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                  </div>
+                );
+              })}
+              {applyDone && (
+                <p className="text-xs text-green-400 bg-green-900/10 px-3 py-2 rounded border border-green-700/40 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" /> {applyDone}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-[#2a2d3a] flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm hover:border-gray-500 hover:text-white transition-all"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Match Edit Modal ───────────────────────────────────────────────────────
 
-function MatchEditModal({
-  match,
-  teams,
-  onSave,
-  onCancel,
-}: {
-  match: BracketMatch;
-  teams: TeamInTournament[];
-  onSave: (match: BracketMatch) => void;
-  onCancel: () => void;
-}) {
-  const [form, setForm] = useState<BracketMatch>(match);
-  const [tab, setTab] = useState<'details' | 'maps' | 'stats'>('details');
-
-  const isFirstRound = (match.round === 0 || match.needsAssignment === true) && !match.autoPopulated;
-
-  const isSlot = (name: string) =>
-    name === 'Select Team' || name.startsWith('Team Slot') || name === 'TBD' ||
+// Module-level so its identity is stable across MatchEditModal re-renders.
+// (Defining it inside the modal remounted the whole Details tab on every
+// keystroke, blurring inputs and making fields appear not to retain text.)
+function isTeamSlotName(name: string) {
+  return name === 'Select Team' || name.startsWith('Team Slot') || name === 'TBD' ||
     name.startsWith('Winner') || name.startsWith('Loser') ||
     name === 'LB TBD' || name === 'WB Champion' || name === 'LB Champion';
+}
 
-  const TeamSelect = ({
-    label,
-    teamId,
-    teamName,
-    excludeId,
-    onChange,
-  }: {
-    label: string;
-    teamId: string;
-    teamName: string;
-    excludeId: string;
-    onChange: (id: string, name: string) => void;
-  }) => (
+function MatchEditTeamSelect({
+  label,
+  teamId,
+  teamName,
+  excludeId,
+  teams,
+  onChange,
+}: {
+  label: string;
+  teamId: string;
+  teamName: string;
+  excludeId: string;
+  teams: TeamInTournament[];
+  onChange: (id: string, name: string) => void;
+}) {
+  return (
     <div>
       <label className="block text-xs text-gray-400 mb-1.5 font-medium">{label}</label>
-      {isSlot(teamName) ? (
+      {isTeamSlotName(teamName) ? (
         <select
           className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
           value={teamId}
@@ -753,6 +1197,32 @@ function MatchEditModal({
       )}
     </div>
   );
+}
+
+function MatchEditModal({
+  match,
+  teams,
+  onSave,
+  onCancel,
+}: {
+  match: BracketMatch;
+  teams: TeamInTournament[];
+  onSave: (match: BracketMatch) => void;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<BracketMatch>(match);
+  const [tab, setTab] = useState<'details' | 'maps' | 'stats'>('details');
+  // Segment 2: populate from per-map Valorant match IDs (one per map in the BO format).
+  // Seed from any match IDs already saved on the maps so reopening Edit retains them.
+  const [matchIdInputs, setMatchIdInputs] = useState<string[]>(
+    () => (match.maps ?? []).map(m => m.matchId ?? '')
+  );
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  // True if any map currently carries API-populated data (locks manual editing).
+  const populatedFromApi = (form.maps ?? []).some(m => !!m.matchId);
+
+  const isFirstRound = (match.round === 0 || match.needsAssignment === true) && !match.autoPopulated;
 
   // ── Maps tab helpers ──
   const boFormat = form.format ?? 'bo3';
@@ -826,6 +1296,66 @@ function MatchEditModal({
       ),
     }));
 
+  // Segment 2: fetch one match ID per map and populate maps + stats (locked once pulled).
+  // Entries are optional — a BO3/BO5 may end 2-0, so trailing IDs can be left blank.
+  const handlePopulateFromMatchId = async () => {
+    setFetchError(null);
+    // Keep the original slot index so each fetched map lands in map order.
+    // Only consider slots valid for the current BO format.
+    const filled = matchIdInputs
+      .slice(0, maxMaps)
+      .map((id, i) => ({ id: (id || '').trim(), index: i }))
+      .filter(e => e.id);
+    if (filled.length === 0) { setFetchError('Enter at least one match ID first.'); return; }
+    if (!team1 || !team2) { setFetchError('Both teams must be assigned before fetching.'); return; }
+
+    const team1Roster = team1.players.map(p => p.riotId || p.name);
+    const team2Roster = team2.players.map(p => p.riotId || p.name);
+    const displayNameByRiotId: Record<string, string> = {};
+    for (const p of [...team1.players, ...team2.players]) {
+      if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
+    }
+
+    setFetching(true);
+    try {
+      // Fetch only the slots that have an ID; keep results keyed by slot index so
+      // we can merge them into the existing maps without disturbing other slots.
+      // (Plain object, not a Map — `Map` here is the lucide-react icon import.)
+      const fetchedBySlot: Record<number, MatchMapResult> = {};
+      for (const entry of filled) {
+        const result = await ValorantAPI.buildMatchResultFromId(
+          entry.id, team1Roster, team2Roster, form.team1Id, form.team2Id, displayNameByRiotId
+        );
+        fetchedBySlot[entry.index] = {
+          mapName: result.mapName,
+          team1Score: result.team1Score,
+          team2Score: result.team2Score,
+          playerStats: result.playerStats,
+          matchId: entry.id,
+        };
+      }
+
+      setForm(f => {
+        // Build a slot-indexed array up to the last populated slot. Each slot is:
+        // a freshly fetched map, else the existing map at that slot (preserved).
+        const existing = f.maps ?? [];
+        const fetchedSlots = Object.keys(fetchedBySlot).map(Number);
+        const lastSlot = Math.max(existing.length - 1, ...fetchedSlots);
+        const merged: MatchMapResult[] = [];
+        for (let i = 0; i <= lastSlot && i < maxMaps; i++) {
+          const fetched = fetchedBySlot[i];
+          if (fetched) merged.push(fetched);
+          else if (existing[i]) merged.push(existing[i]);
+        }
+        return { ...f, maps: merged, playerStats: merged[0]?.playerStats ?? [] };
+      });
+    } catch (e) {
+      setFetchError(e instanceof Error ? e.message : 'Failed to fetch match data for one of the IDs.');
+    } finally {
+      setFetching(false);
+    }
+  };
+
   const tabs = [
     { id: 'details', label: 'Details' },
     { id: 'maps', label: `Maps${maps.length > 0 ? ` (${maps.length}/${maxMaps})` : ` (${boFormat.toUpperCase()})`}` },
@@ -864,18 +1394,20 @@ function MatchEditModal({
             <div className="space-y-5">
               {isFirstRound ? (
                 <>
-                  <TeamSelect
+                  <MatchEditTeamSelect
                     label="Team 1"
                     teamId={form.team1Id}
                     teamName={form.team1Name}
                     excludeId={form.team2Id}
+                    teams={teams}
                     onChange={(id, name) => setForm(f => ({ ...f, team1Id: id, team1Name: name }))}
                   />
-                  <TeamSelect
+                  <MatchEditTeamSelect
                     label="Team 2"
                     teamId={form.team2Id}
                     teamName={form.team2Name}
                     excludeId={form.team1Id}
+                    teams={teams}
                     onChange={(id, name) => setForm(f => ({ ...f, team2Id: id, team2Name: name }))}
                   />
                 </>
@@ -938,11 +1470,65 @@ function MatchEditModal({
                   ))}
                 </div>
               </div>
+
+              {/* Populate from Valorant match IDs (Segment 2) — one per map */}
+              <div className="pt-4 border-t border-[#2a2d3a]">
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium flex items-center gap-1.5">
+                  <Map className="w-3.5 h-3.5 text-[#ff4655]" /> Match IDs (from Find Match Data)
+                </label>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  Paste one Valorant match ID per map played for this {boFormat.toUpperCase()}.
+                  Entries are optional — leave trailing maps blank if the series ended early (e.g. 2-0).
+                  Fetched data is read-only.
+                </p>
+                <div className="space-y-2">
+                  {Array.from({ length: maxMaps }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-[11px] text-gray-500 font-semibold w-12 shrink-0">Map {i + 1}</span>
+                      <input
+                        placeholder={`Match ID for map ${i + 1}${i > 0 ? ' (optional)' : ''}`}
+                        className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm font-mono focus:border-[#ff4655] focus:outline-none transition-colors"
+                        value={matchIdInputs[i] ?? ''}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setMatchIdInputs(prev => {
+                            const next = [...prev];
+                            while (next.length < maxMaps) next.push('');
+                            next[i] = v;
+                            return next.slice(0, maxMaps);
+                          });
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handlePopulateFromMatchId}
+                  disabled={fetching || !matchIdInputs.some(id => (id || '').trim())}
+                  className="w-full mt-3 px-4 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {fetching && <Loader className="w-4 h-4 animate-spin" />}
+                  {fetching ? 'Fetching…' : 'Fetch & Populate'}
+                </button>
+                {fetchError && (
+                  <p className="text-xs text-[#ff4655] bg-[#ff4655]/10 px-3 py-2 rounded border border-[#ff4655]/30 mt-2">{fetchError}</p>
+                )}
+                {populatedFromApi && (
+                  <p className="text-xs text-green-400 bg-green-900/10 px-3 py-2 rounded border border-green-700/40 mt-2 flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5" /> {(form.maps ?? []).filter(m => m.matchId).length} map(s) populated from match IDs. Add the next map's ID and Fetch again to append it, then Save.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
           {tab === 'maps' && (
-            <div className="space-y-4">
+            <fieldset disabled={populatedFromApi} className="space-y-4 disabled:opacity-90">
+              {populatedFromApi && (
+                <p className="text-xs text-green-400 bg-green-900/10 px-3 py-2 rounded border border-green-700/40 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" /> Read-only — these maps were populated from Valorant match IDs.
+                </p>
+              )}
               <div className="flex items-center justify-between">
                 <p className="text-xs text-gray-500">Enter the result of each map played.</p>
                 <span className="text-xs text-gray-500 font-semibold">{maps.length}/{maxMaps} maps · {boFormat.toUpperCase()}</span>
@@ -993,11 +1579,16 @@ function MatchEditModal({
               >
                 <Plus className="w-4 h-4" /> Add Map {maps.length >= maxMaps ? `(max ${maxMaps} for ${boFormat.toUpperCase()})` : ''}
               </button>
-            </div>
+            </fieldset>
           )}
 
           {tab === 'stats' && (
-            <div className="space-y-6">
+            <fieldset disabled={populatedFromApi} className="space-y-6 disabled:opacity-90">
+              {populatedFromApi && (
+                <p className="text-xs text-green-400 bg-green-900/10 px-3 py-2 rounded border border-green-700/40 flex items-center gap-1.5">
+                  <Check className="w-3.5 h-3.5" /> Read-only — these maps were populated from Valorant match IDs.
+                </p>
+              )}
               {allPlayers.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-6">No players found for these teams. Add players to the teams first.</p>
               ) : (
@@ -1053,7 +1644,7 @@ function MatchEditModal({
                   );
                 })
               )}
-            </div>
+            </fieldset>
           )}
         </div>
 
@@ -1116,6 +1707,7 @@ function CreateTournamentScreen({
   const [showTwoStageTournamentModal, setShowTwoStageTournamentModal] = useState(false);
   const [showExcelImportModal, setShowExcelImportModal] = useState(false);
   const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
+  const [showMatchFinder, setShowMatchFinder] = useState(false);
   const [isGeneratingSecondStage, setIsGeneratingSecondStage] = useState(false);
 
   const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent) => {
@@ -1241,6 +1833,99 @@ function CreateTournamentScreen({
 
     setTournament(t => ({ ...t, generatedBracket: newBracket }));
     setEditingMatch(null);
+  };
+
+  // Apply a fetched custom-game scoreboard to one map slot of a target match.
+  // Reuses handleMatchEdit for generatedBracket (so winner propagation runs),
+  // and updates stage1/stage2 brackets in place otherwise.
+  const handleApplyScoreboardToMatch = async (
+    targetMatchId: string,
+    mapSlotIndex: number,
+    apiMatchId: string,
+  ): Promise<void> => {
+    // Locate the target match and which bracket it lives in.
+    const brackets: { key: 'generatedBracket' | 'stage1Bracket' | 'stage2Bracket'; bracket?: BracketGenerated }[] = [
+      { key: 'generatedBracket', bracket: tournament.generatedBracket },
+      { key: 'stage1Bracket', bracket: tournament.stage1Bracket },
+      { key: 'stage2Bracket', bracket: tournament.stage2Bracket },
+    ];
+    let found: { key: typeof brackets[number]['key']; match: BracketMatch } | null = null;
+    for (const b of brackets) {
+      const m = b.bracket?.rounds.flat().find(mm => mm.id === targetMatchId);
+      if (m) { found = { key: b.key, match: m }; break; }
+    }
+    if (!found) throw new Error('Target match not found.');
+
+    const target = found.match;
+    const team1 = tournament.teams.find(t => t.id === target.team1Id);
+    const team2 = tournament.teams.find(t => t.id === target.team2Id);
+    if (!team1 || !team2) throw new Error('Target match teams are not fully assigned.');
+
+    const team1Roster = team1.players.map(p => p.riotId || p.name);
+    const team2Roster = team2.players.map(p => p.riotId || p.name);
+    const displayNameByRiotId: Record<string, string> = {};
+    for (const p of [...team1.players, ...team2.players]) {
+      if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
+    }
+
+    const result = await ValorantAPI.buildMatchResultFromId(
+      apiMatchId, team1Roster, team2Roster, target.team1Id, target.team2Id, displayNameByRiotId
+    );
+    const newMap: MatchMapResult = {
+      mapName: result.mapName,
+      team1Score: result.team1Score,
+      team2Score: result.team2Score,
+      playerStats: result.playerStats,
+      matchId: apiMatchId,
+    };
+
+    // Merge the new map into the chosen slot, preserving other slots.
+    const maxMaps = target.format === 'bo1' ? 1 : target.format === 'bo5' ? 5 : 3;
+    const existingMaps = target.maps ?? [];
+    const lastSlot = Math.max(existingMaps.length - 1, mapSlotIndex);
+    const mergedMaps: MatchMapResult[] = [];
+    for (let i = 0; i <= lastSlot && i < maxMaps; i++) {
+      if (i === mapSlotIndex) mergedMaps.push(newMap);
+      else if (existingMaps[i]) mergedMaps.push(existingMaps[i]);
+    }
+
+    // Recompute winner from maps (BOn: ceil(maxMaps/2) map wins).
+    let w1 = 0, w2 = 0;
+    for (const m of mergedMaps) {
+      if (m.team1Score > m.team2Score) w1++;
+      else if (m.team2Score > m.team1Score) w2++;
+    }
+    const needed = Math.ceil(maxMaps / 2);
+    const winner = w1 >= needed ? target.team1Id
+      : w2 >= needed ? target.team2Id
+      : (mergedMaps.length >= maxMaps && w1 !== w2) ? (w1 > w2 ? target.team1Id : target.team2Id)
+      : undefined;
+
+    const updatedMatch: BracketMatch = {
+      ...target,
+      maps: mergedMaps,
+      playerStats: mergedMaps[0]?.playerStats ?? [],
+      winner,
+    };
+
+    if (found.key === 'generatedBracket') {
+      handleMatchEdit(updatedMatch); // runs winner propagation; clears editingMatch (no-op here)
+      // Persist immediately so the public match page (which reads localStorage)
+      // reflects the applied stats without waiting for a manual tournament save.
+      persistTournament(applyMatchToTournament(tournament, updatedMatch));
+      return;
+    }
+
+    // stage1/stage2: replace the match in place.
+    const bracketKey = found.key;
+    const current = bracketKey === 'stage1Bracket' ? tournament.stage1Bracket : tournament.stage2Bracket;
+    if (!current) return;
+    const newRounds = current.rounds.map(round =>
+      round.map(m => m.id === targetMatchId ? updatedMatch : m)
+    );
+    const updatedTournament = { ...tournament, [bracketKey]: { ...current, rounds: newRounds } };
+    setTournament(updatedTournament);
+    persistTournament(updatedTournament);
   };
 
   const handleTwoStageTournamentComplete = (config: Stage1Config) => {
@@ -1449,6 +2134,26 @@ function CreateTournamentScreen({
           )}
 
           {/* Generated Bracket Matches Section */}
+          {/* Find Match Data panel — Segment 1: locate a Valorant custom-game match ID */}
+          {(tournament.generatedBracket || tournament.stage1Bracket || tournament.stage2Bracket) && tournament.teams.length > 0 && (
+            <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6 flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-white font-semibold flex items-center gap-2">
+                  <Map className="w-4 h-4 text-[#ff4655]" /> Find Match Data
+                </h3>
+                <p className="text-gray-500 text-xs mt-1">
+                  Look up a player's recent custom games to get the Valorant match ID, then paste it into Edit Match → Match ID to populate stats.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMatchFinder(true)}
+                className="shrink-0 px-4 py-2 text-sm bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] border border-[#ff4655]/50 rounded-lg transition-colors font-semibold"
+              >
+                Find Match ID
+              </button>
+            </div>
+          )}
+
           {tournament.generatedBracket && (
             <div className="bg-[#151821] border border-[#ff4655]/50 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
@@ -1744,6 +2449,16 @@ function CreateTournamentScreen({
           teams={tournament.teams}
           onSave={handleMatchEdit}
           onCancel={() => setEditingMatch(null)}
+        />
+      )}
+
+      {/* Match Finder Modal — Segment 1 */}
+      {showMatchFinder && (
+        <MatchFinderModal
+          teams={tournament.teams}
+          applyTargets={getApplyTargetMatches(tournament)}
+          onApply={handleApplyScoreboardToMatch}
+          onClose={() => setShowMatchFinder(false)}
         />
       )}
 

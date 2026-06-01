@@ -1,10 +1,9 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trophy, Users, Shield, Clock, Calendar, Map, Loader } from 'lucide-react';
+import { ArrowLeft, Trophy, Users, Shield, Clock, Calendar, Map } from 'lucide-react';
 import { Header } from './Header';
 import type { AdminData } from './AdminPanel';
-import type { Tournament, BracketMatch, TeamInTournament, MatchPlayerStat, MatchMapResult } from './TournamentCreation';
-import { fetchMatchDataFromAPI } from './TournamentCreation';
+import type { Tournament, BracketMatch, TeamInTournament, MatchPlayerStat } from './TournamentCreation';
 
 const STORAGE_KEY = 'vct_admin_data';
 
@@ -29,6 +28,23 @@ function getMatchStatus(date?: string, time?: string): 'upcoming' | 'live' | 'co
   } catch {
     return 'upcoming';
   }
+}
+
+// A series is decided once a team reaches ceil(maxMaps/2) map wins (2 in a BO3),
+// or all maps are played and someone is ahead.
+function isMatchDecidedByMaps(match: BracketMatch): boolean {
+  const maps = match.maps ?? [];
+  if (maps.length === 0) return false;
+  const maxMaps = match.format === 'bo1' ? 1 : match.format === 'bo5' ? 5 : 3;
+  let w1 = 0, w2 = 0;
+  for (const m of maps) {
+    if (m.team1Score > m.team2Score) w1++;
+    else if (m.team2Score > m.team1Score) w2++;
+  }
+  const needed = Math.ceil(maxMaps / 2);
+  if (w1 >= needed || w2 >= needed) return true;
+  if (maps.length >= maxMaps && w1 !== w2) return true;
+  return false;
 }
 
 function getRoleColor(role?: string) {
@@ -75,7 +91,7 @@ function findMatchInTournaments(matchId: string, tournaments: Tournament[]): Mat
           team1,
           team2,
           stage: stageLabel,
-          status: match.winner ? 'completed' : getMatchStatus(match.date, match.time),
+          status: (match.winner || isMatchDecidedByMaps(match)) ? 'completed' : getMatchStatus(match.date, match.time),
         };
       }
     }
@@ -113,14 +129,12 @@ function TeamLogo({ name, gradient }: { name: string; gradient: string }) {
 
 type SortKey = 'kills' | 'kd' | 'acs' | 'hsPercent';
 
-function StatsTable({ teamName, teamId, stats, accentColor }: {
+function StatsTable({ teamName, teamStats, accentColor }: {
   teamName: string;
-  teamId: string;
-  stats: MatchPlayerStat[];
+  teamStats: MatchPlayerStat[];
   accentColor: string;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('acs');
-  const teamStats = stats.filter(s => s.teamId === teamId);
   if (teamStats.length === 0) return null;
   const maxAcs = Math.max(...teamStats.map(s => s.acs));
 
@@ -201,8 +215,6 @@ export function TournamentMatchPage() {
   const [ctx, setCtx] = useState<MatchContext | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [selectedMapIndex, setSelectedMapIndex] = useState(0);
-  const [isFetching, setIsFetching] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -217,6 +229,14 @@ export function TournamentMatchPage() {
       setNotFound(true);
     }
   }, [matchId]);
+
+  // Default to the aggregated "Total" view when the match has multiple maps
+  // with stats; otherwise show the single map.
+  useEffect(() => {
+    if (!ctx) return;
+    const mapsWithStatsCount = (ctx.match.maps ?? []).filter(m => m.playerStats && m.playerStats.length > 0).length;
+    setSelectedMapIndex(mapsWithStatsCount > 1 ? -1 : 0);
+  }, [ctx]);
 
   if (notFound) {
     return (
@@ -245,50 +265,6 @@ export function TournamentMatchPage() {
 
   const { match, tournament, team1, team2, stage, status } = ctx;
 
-  const handleFetchMatchData = async () => {
-    setIsFetching(true);
-    setFetchError(null);
-    try {
-      const result = await fetchMatchDataFromAPI(team1, team2, match);
-      if (!result) {
-        setFetchError('No recent match found with both teams.');
-        setIsFetching(false);
-        return;
-      }
-
-      // Update match with fetched data
-      const adminData: AdminData = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      const updatedTournaments = adminData.tournaments?.map(t => {
-        if (t.id !== tournament.id) return t;
-        return {
-          ...t,
-          generatedBracket: t.generatedBracket ? updateBracketMatch(t.generatedBracket, match.id, result) : undefined,
-          stage1Bracket: t.stage1Bracket ? updateBracketMatch(t.stage1Bracket, match.id, result) : undefined,
-          stage2Bracket: t.stage2Bracket ? updateBracketMatch(t.stage2Bracket, match.id, result) : undefined,
-        };
-      }) ?? [];
-
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...adminData, tournaments: updatedTournaments }));
-
-      // Update context
-      const updated = findMatchInTournaments(match.id, updatedTournaments);
-      if (updated) setCtx(updated);
-
-      setIsFetching(false);
-    } catch (err) {
-      setFetchError(err instanceof Error ? err.message : 'Failed to fetch match data');
-      setIsFetching(false);
-    }
-  };
-
-  const updateBracketMatch = (bracket: { rounds: BracketMatch[][] }, matchId: string, result: { maps: MatchMapResult[]; playerStats: MatchPlayerStat[] }) => {
-    return {
-      rounds: bracket.rounds.map(round =>
-        round.map(m => m.id === matchId ? { ...m, maps: result.maps, playerStats: result.playerStats } : m)
-      ),
-    };
-  };
-
   const team1Name = team1?.name ?? match.team1Name;
   const team2Name = team2?.name ?? match.team2Name;
   const isCompleted = status === 'completed' || !!match.winner;
@@ -310,10 +286,59 @@ export function TournamentMatchPage() {
     }
     return rows;
   };
-  // Per-map stats: if maps carry their own playerStats, use the selected map's stats.
+  // Aggregate stats across every map. Players are unioned by playerId, so if
+  // rosters differ between maps, all unique players appear. K/D/A are summed;
+  // ACS and HS% are averaged over the maps that player actually played; K/D is
+  // recomputed from summed kills/deaths.
+  const buildTotalStats = (): MatchPlayerStat[] => {
+    // Plain object keyed by playerId — `Map` here is the lucide-react icon import,
+    // not the global constructor.
+    type Agg = { row: MatchPlayerStat; agents: Set<string>; mapsPlayed: number; acsSum: number; hsSum: number };
+    const acc: Record<string, Agg> = {};
+    const order: string[] = [];
+    for (const m of match.maps ?? []) {
+      for (const s of m.playerStats ?? []) {
+        const cur = acc[s.playerId];
+        if (!cur) {
+          order.push(s.playerId);
+          acc[s.playerId] = {
+            row: { ...s },
+            agents: new Set(s.agent ? [s.agent] : []),
+            mapsPlayed: 1,
+            acsSum: s.acs,
+            hsSum: s.hsPercent,
+          };
+        } else {
+          cur.row.kills += s.kills;
+          cur.row.deaths += s.deaths;
+          cur.row.assists += s.assists;
+          if (s.agent) cur.agents.add(s.agent);
+          cur.mapsPlayed += 1;
+          cur.acsSum += s.acs;
+          cur.hsSum += s.hsPercent;
+        }
+      }
+    }
+    return order.map(id => {
+      const { row, agents, mapsPlayed, acsSum, hsSum } = acc[id];
+      return {
+        ...row,
+        agent: Array.from(agents).join(', '),
+        kd: row.deaths > 0 ? parseFloat((row.kills / row.deaths).toFixed(2)) : row.kills,
+        acs: mapsPlayed > 0 ? Math.round(acsSum / mapsPlayed) : 0,
+        hsPercent: mapsPlayed > 0 ? Math.round(hsSum / mapsPlayed) : 0,
+      };
+    });
+  };
+
+  // Per-map stats: if maps carry their own playerStats, use the selected map's
+  // stats. selectedMapIndex === -1 means the aggregated "Total" view.
   const mapsWithStats = (match.maps ?? []).some(m => m.playerStats && m.playerStats.length > 0);
-  const safeMapIndex = Math.min(selectedMapIndex, (match.maps?.length ?? 1) - 1);
-  const selectedMapStats = mapsWithStats ? match.maps?.[safeMapIndex]?.playerStats : undefined;
+  const isTotalView = selectedMapIndex === -1;
+  const safeMapIndex = isTotalView ? -1 : Math.min(selectedMapIndex, (match.maps?.length ?? 1) - 1);
+  const selectedMapStats = !mapsWithStats ? undefined
+    : isTotalView ? buildTotalStats()
+    : match.maps?.[safeMapIndex]?.playerStats;
   const effectiveStats: MatchPlayerStat[] =
     (selectedMapStats && selectedMapStats.length > 0)
       ? selectedMapStats
@@ -321,6 +346,20 @@ export function TournamentMatchPage() {
       ? match.playerStats
       : buildDefaultStats();
   const hasAnyTeamPlayers = (team1?.players.length ?? 0) > 0 || (team2?.players.length ?? 0) > 0;
+
+  // Split stats per team. Normally filter by teamId; but when both bracket slots
+  // are the SAME team (team1Id === team2Id), filtering can't separate the two
+  // sides, so split the rows in half (API stats come ordered Blue then Red).
+  let team1Stats: MatchPlayerStat[];
+  let team2Stats: MatchPlayerStat[];
+  if (match.team1Id === match.team2Id) {
+    const mid = Math.ceil(effectiveStats.length / 2);
+    team1Stats = effectiveStats.slice(0, mid);
+    team2Stats = effectiveStats.slice(mid);
+  } else {
+    team1Stats = effectiveStats.filter(s => s.teamId === match.team1Id);
+    team2Stats = effectiveStats.filter(s => s.teamId === match.team2Id);
+  }
 
   const statusBadge = {
     live: { label: 'LIVE', cls: 'bg-red-500/20 text-red-400 border border-red-500/50' },
@@ -423,22 +462,6 @@ export function TournamentMatchPage() {
             <span className="text-gray-500 text-xs">Round {match.round + 1}</span>
           </div>
 
-          {/* Fetch Match Data button */}
-          <div className="border-t border-[#2a2d3a] px-6 py-3 flex flex-col gap-3 items-center">
-            <button
-              onClick={handleFetchMatchData}
-              disabled={isFetching}
-              className="px-4 py-2 text-sm bg-[#ff4655]/20 hover:bg-[#ff4655]/30 disabled:opacity-50 disabled:cursor-not-allowed text-[#ff4655] border border-[#ff4655]/50 rounded-lg transition-colors font-semibold flex items-center gap-2"
-            >
-              {isFetching && <Loader className="w-4 h-4 animate-spin" />}
-              {isFetching ? 'Fetching...' : 'Fetch Match Data'}
-            </button>
-            {fetchError && (
-              <p className="text-xs text-[#ff4655] bg-[#ff4655]/10 px-3 py-2 rounded border border-[#ff4655]/30">
-                {fetchError}
-              </p>
-            )}
-          </div>
         </div>
 
         {/* ── Map Results ────────────────────────────────────────────────── */}
@@ -497,21 +520,49 @@ export function TournamentMatchPage() {
               <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Player Stats</h2>
               {mapsWithStats && (match.maps?.length ?? 0) > 1 && (
                 <span className="ml-2 text-[#ff4655] text-xs font-bold uppercase tracking-wider">
-                  · {match.maps?.[safeMapIndex]?.mapName || `Map ${safeMapIndex + 1}`}
+                  · {isTotalView ? 'Total' : (match.maps?.[safeMapIndex]?.mapName || `Map ${safeMapIndex + 1}`)}
                 </span>
               )}
             </div>
+
+            {/* Map / Total selector — only when multiple maps carry stats */}
+            {mapsWithStats && (match.maps?.length ?? 0) > 1 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={() => setSelectedMapIndex(-1)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    isTotalView ? 'bg-[#ff4655] text-white' : 'bg-[#151821] border border-[#2a2d3a] text-gray-400 hover:text-white hover:border-[#ff4655]/50'
+                  }`}
+                >
+                  Total
+                </button>
+                {(match.maps ?? []).map((m, i) => {
+                  const hasStats = !!m.playerStats && m.playerStats.length > 0;
+                  if (!hasStats) return null;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedMapIndex(i)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                        !isTotalView && safeMapIndex === i ? 'bg-[#ff4655] text-white' : 'bg-[#151821] border border-[#2a2d3a] text-gray-400 hover:text-white hover:border-[#ff4655]/50'
+                      }`}
+                    >
+                      {m.mapName || `Map ${i + 1}`}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="space-y-4">
               <StatsTable
                 teamName={team1Name}
-                teamId={match.team1Id}
-                stats={effectiveStats}
+                teamStats={team1Stats}
                 accentColor="#ff4655"
               />
               <StatsTable
                 teamName={team2Name}
-                teamId={match.team2Id}
-                stats={effectiveStats}
+                teamStats={team2Stats}
                 accentColor="#a78bfa"
               />
             </div>
