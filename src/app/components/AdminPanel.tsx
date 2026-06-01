@@ -753,10 +753,11 @@ function ArticleBodyEditor({ blocks, onChange, mentionIndex }: { blocks: NewsBlo
   );
 }
 
-function NewsEditor({ items, onChange, onSaveArticle, onDeleteArticle, savingId, tournaments }: {
+function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteArticle, savingId, tournaments }: {
   items: NewsItem[];
   onChange: (n: NewsItem[]) => void;
   onSaveArticle: (item: NewsItem) => void;
+  onToggleVisible: (item: NewsItem) => void;
   onDeleteArticle: (id: string) => void;
   savingId: string | null;
   tournaments: Tournament[];
@@ -768,6 +769,8 @@ function NewsEditor({ items, onChange, onSaveArticle, onDeleteArticle, savingId,
   const update = (id: string, patch: Partial<NewsItem>) => {
     onChange(items.map(n => n.id === id ? { ...n, ...patch } : n));
   };
+  // Flip visibility and persist immediately.
+  const toggleVisible = (item: NewsItem) => onToggleVisible({ ...item, visible: !item.visible });
   const addItem = () => {
     const id = uid();
     onChange([...items, { id, title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true, author: '', body: [] }]);
@@ -808,9 +811,9 @@ function NewsEditor({ items, onChange, onSaveArticle, onDeleteArticle, savingId,
                 </div>
               </div>
               <button
-                onClick={() => update(item.id, { visible: !item.visible })}
+                onClick={() => toggleVisible(item)}
                 className={`flex items-center gap-1 text-xs transition-colors ${item.visible ? 'text-[#ff4655]' : 'text-gray-600 hover:text-gray-400'}`}
-                title={item.visible ? 'Visible' : 'Hidden'}
+                title={item.visible ? 'Visible — click to hide' : 'Hidden — click to show'}
               >
                 {item.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
               </button>
@@ -835,7 +838,7 @@ function NewsEditor({ items, onChange, onSaveArticle, onDeleteArticle, savingId,
               <ChevronUp className="w-3.5 h-3.5" /> Collapse
             </button>
             <div className="flex items-center gap-3">
-              <button onClick={() => update(item.id, { visible: !item.visible })} className={`flex items-center gap-1 text-xs transition-colors ${item.visible ? 'text-[#ff4655]' : 'text-gray-600 hover:text-gray-400'}`}>
+              <button onClick={() => toggleVisible(item)} className={`flex items-center gap-1 text-xs transition-colors ${item.visible ? 'text-[#ff4655]' : 'text-gray-600 hover:text-gray-400'}`}>
                 {item.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                 {item.visible ? 'Visible' : 'Hidden'}
               </button>
@@ -1153,6 +1156,24 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                     showToast(e instanceof Error ? `Failed to save article: ${e.message}` : 'Failed to save article', 'error');
                   } finally {
                     setSavingNewsId(null);
+                  }
+                }}
+                onToggleVisible={async (item) => {
+                  // Apply the flipped visibility locally, then persist just this
+                  // article immediately so the change saves on click.
+                  setData(d => {
+                    const news = d.news.map(n => n.id === item.id ? item : n);
+                    const next = { ...d, news };
+                    onDataChange?.(next);
+                    return next;
+                  });
+                  try {
+                    await upsertNews(item);
+                    persistedNewsIds.current.add(item.id);
+                    showToast(item.visible ? 'Article shown' : 'Article hidden', 'success');
+                  } catch (e) {
+                    console.error('[Admin] Failed to update visibility:', e);
+                    showToast('Failed to save visibility', 'error');
                   }
                 }}
                 onDeleteArticle={async (id) => {
