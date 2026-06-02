@@ -15,7 +15,7 @@ import { computeRRStandings } from './components/BracketDisplay';
 import { PlayerPage } from './components/PlayerPage';
 import { ArticlePage } from './components/ArticlePage';
 import { TournamentPage } from './components/TournamentPage';
-import { TrendingUp } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import { loadAdminData } from './services/db';
 
@@ -117,252 +117,248 @@ function Home() {
   // stats. Falls back to admin-entered / placeholder players when no stats exist.
   const topByAcs = adminData ? getTopPlayersByAcs(adminData.tournaments, 5) : [];
 
+  // First paragraph of an article body, used as the Editorial card excerpt.
+  const newsExcerpt = (n: { body?: { type: string; text?: string }[] }) => {
+    const para = n.body?.find(b => b.type === 'paragraph' && b.text);
+    return para?.text ?? '';
+  };
+
+  // Editorial fallback cards when the app data hasn't loaded yet.
+  const fallbackNews = [
+    { id: 'f1', title: 'Paper Rex dominate in opening match with flawless attacking rounds', category: 'MATCH RECAP', timeAgo: '2 hours ago', imageUrl: 'https://images.unsplash.com/photo-1558008258-7ff8888b42b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080', excerpt: '' },
+    { id: 'f2', title: 'Masters playoffs bracket revealed: Top seeds face tough competition', category: 'TOURNAMENT', timeAgo: '5 hours ago', imageUrl: 'https://images.unsplash.com/photo-1548686304-5c3be888a00b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080', excerpt: '' },
+    { id: 'f3', title: 'Roster shuffle: Star duelist joins championship contender', category: 'BREAKING', timeAgo: '8 hours ago', imageUrl: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080', excerpt: '' },
+  ];
+
+  // Standings table (shared markup for auto-standings groups and manual standings).
+  const StandingsTable = ({ rows, highlightTop }: { rows: StandRow[]; highlightTop: number }) => (
+    <table className="w-full">
+      <thead>
+        <tr className="border-b border-[#2b2b2b]">
+          <th className="px-2 py-2 text-left text-[#f5f3f3] text-[10px] font-inter font-bold">#</th>
+          <th className="px-2 py-2 text-left text-[#f5f3f3] text-[10px] font-inter font-bold">Team</th>
+          <th className="px-2 py-2 text-right text-[#f5f3f3] text-[10px] font-inter font-bold">W</th>
+          <th className="px-2 py-2 text-right text-[#f5f3f3] text-[10px] font-inter font-bold">L</th>
+          <th className="px-2 py-2 text-right text-[#f5f3f3] text-[10px] font-inter font-bold">Win%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(team => {
+          const total = team.wins + team.losses;
+          const wr = total === 0 ? '0%' : `${Math.round((team.wins / total) * 100)}%`;
+          const top = team.rank <= highlightTop;
+          return (
+            <tr key={team.id} className="border-b border-[#2b2b2b]/60">
+              <td className={`px-2 py-3 text-sm font-inter font-bold ${top ? 'text-[#ff4655]' : 'text-white'}`}>
+                {String(team.rank).padStart(2, '0')}
+              </td>
+              <td className="px-2 py-3 text-sm font-inter font-bold">
+                <Link to={`/teams/${team.id}`} className="text-white hover:text-[#ff4655] transition-colors">{team.name}</Link>
+              </td>
+              <td className="px-2 py-3 text-right text-sm font-inter font-bold text-green-400">{team.wins}</td>
+              <td className="px-2 py-3 text-right text-sm font-inter font-bold text-red-400">{team.losses}</td>
+              <td className="px-2 py-3 text-right text-sm font-inter text-[#e5e2e1]">{wr}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  // Normalize manual standings into the same shape used by StandingsTable.
+  const manualRows: StandRow[] | null = standings
+    ? standings.map(t => ({ id: t.id, rank: t.rank, name: t.name, wins: t.wins, losses: t.losses }))
+    : null;
+
   return (
-    <div className="min-h-screen bg-[#0d0f16]">
+    <div className="min-h-screen bg-[#0e0e0e] font-inter">
       <Header />
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <HeroSection heroLink={adminData?.heroLink} />
+      {/* Hero */}
+      <HeroSection heroLink={adminData?.heroLink} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-          <div className="lg:col-span-2 space-y-6">
-
-            {/* Matches */}
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-white text-xl font-bold flex items-center gap-2">
-                  <div className="w-1 h-6 bg-[#ff4655] rounded" />
-                  Matches
-                </h2>
-                <Link to="/matches" className="text-[#ff4655] text-sm hover:underline">View all</Link>
-              </div>
-              <div className="space-y-3">
-                {upcomingMatches && upcomingMatches.length > 0 ? (
-                  upcomingMatches.map(m => {
-                    const isTournamentMatch = 'team1Name' in m;
-                    const team1 = 'team1Name' in m ? m.team1Name : m.team1;
-                    const team2 = 'team2Name' in m ? m.team2Name : m.team2;
-                    const tournament = 'tournamentName' in m ? m.tournamentName : m.tournament;
-                    const date = 'date' in m ? m.date : '';
-                    const time = 'time' in m ? m.time : '';
-                    return (
-                      <UpcomingMatch
-                        key={m.id}
-                        team1={team1}
-                        team2={team2}
-                        tournament={tournament || ''}
-                        date={date || ''}
-                        time={time || ''}
-                        matchId={m.id}
-                        isTournamentMatch={isTournamentMatch}
-                      />
-                    );
-                  })
-                ) : (
-                  <div className="text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
-                    No upcoming matches scheduled
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Latest News */}
-            <section>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-white text-xl font-bold flex items-center gap-2">
-                  <div className="w-1 h-6 bg-[#ff4655] rounded" />
-                  Latest News
-                </h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {news && news.length > 0 ? (
-                  news.map(n => (
-                    <NewsCard key={n.id} id={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} link={n.link} />
-                  ))
-                ) : !adminData ? (
-                  <>
-                    <NewsCard title="Paper Rex dominate in opening match with flawless attacking rounds" category="MATCH RECAP" timeAgo="2 hours ago" imageUrl="https://images.unsplash.com/photo-1558008258-7ff8888b42b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080" />
-                    <NewsCard title="Masters playoffs bracket revealed: Top seeds face tough competition" category="TOURNAMENT" timeAgo="5 hours ago" imageUrl="https://images.unsplash.com/photo-1548686304-5c3be888a00b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080" />
-                  </>
-                ) : (
-                  <div className="col-span-2 text-center py-8 text-gray-600 text-sm bg-[#151821] rounded-xl border border-[#2a2d3a]">
-                    No news articles
-                  </div>
-                )}
-              </div>
-            </section>
+      {/* Upcoming Matches + Standings */}
+      <section className="max-w-[1436px] mx-auto px-6 py-16">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Upcoming Matches */}
+          <div className="lg:col-span-2 flex flex-col gap-6">
+            <div className="flex items-end justify-between border-b-2 border-[#2b2b2b] pb-4">
+              <h2 className="font-chivo text-2xl">
+                <span className="text-white">Upcoming </span>
+                <span className="text-[#ff4655]">Matches</span>
+              </h2>
+              <Link to="/matches" className="text-[#ff4655] text-[11px] font-inter hover:underline">Full Schedule</Link>
+            </div>
+            <div className="flex flex-col gap-4">
+              {upcomingMatches && upcomingMatches.length > 0 ? (
+                upcomingMatches.map(m => {
+                  const isTournamentMatch = 'team1Name' in m;
+                  const team1 = 'team1Name' in m ? m.team1Name : m.team1;
+                  const team2 = 'team2Name' in m ? m.team2Name : m.team2;
+                  const tournament = 'tournamentName' in m ? m.tournamentName : m.tournament;
+                  const date = 'date' in m ? m.date : '';
+                  const time = 'time' in m ? m.time : '';
+                  return (
+                    <UpcomingMatch
+                      key={m.id}
+                      team1={team1}
+                      team2={team2}
+                      tournament={tournament || ''}
+                      date={date || ''}
+                      time={time || ''}
+                      matchId={m.id}
+                      isTournamentMatch={isTournamentMatch}
+                    />
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-gray-500 text-sm bg-[#1c1b1b] border border-[#2b2b2b]">
+                  No upcoming matches scheduled
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Right column */}
-          <div className="space-y-6">
+          {/* Standings */}
+          <div className="flex flex-col gap-6">
+            <div className="border-b-2 border-[#2b2b2b] pb-4">
+              <h2 className="font-chivo text-2xl text-white">Standings</h2>
+            </div>
             {autoStandings ? (
-              <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden">
-                <div className="bg-[#151821] px-4 py-3 border-b border-[#2a2d3a]">
-                  <h3 className="text-white font-semibold">Standings</h3>
-                  <p className="text-gray-500 text-xs mt-0.5">{autoStandings.tournamentName}</p>
-                </div>
-                <div className="divide-y divide-[#2a2d3a]">
-                  {autoStandings.groups.map(group => (
-                    <div key={group.title}>
-                      {autoStandings.groups.length > 1 && (
-                        <p className="px-4 pt-3 pb-1 text-xs font-bold text-[#ff4655] uppercase tracking-wider">{group.title}</p>
-                      )}
-                      <table className="w-full">
-                        <thead className="bg-[#151821]">
-                          <tr className="text-gray-400 text-xs uppercase">
-                            <th className="px-4 py-2.5 text-left">#</th>
-                            <th className="px-4 py-2.5 text-left">Team</th>
-                            <th className="px-4 py-2.5 text-center">W</th>
-                            <th className="px-4 py-2.5 text-center">L</th>
-                            <th className="px-4 py-2.5 text-center">Win%</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {group.rows.map(team => {
-                            const total = team.wins + team.losses;
-                            const wr = total === 0 ? '0%' : `${Math.round((team.wins / total) * 100)}%`;
-                            return (
-                              <tr key={team.id} className="border-t border-[#2a2d3a] hover:bg-[#151821] transition-colors">
-                                <td className="px-4 py-2.5">
-                                  <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${team.rank <= 2 ? 'bg-[#ff4655] text-white' : 'bg-[#2a2d3a] text-gray-400'}`}>
-                                    {team.rank}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5 text-sm">
-                                  <Link to={`/teams/${team.id}`} className="text-white hover:text-[#ff4655] transition-colors">{team.name}</Link>
-                                </td>
-                                <td className="px-4 py-2.5 text-center text-green-400 text-sm font-semibold">{team.wins}</td>
-                                <td className="px-4 py-2.5 text-center text-red-400 text-sm font-semibold">{team.losses}</td>
-                                <td className="px-4 py-2.5 text-center text-gray-300 text-sm">{wr}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))}
-                </div>
+              <div className="bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-6">
+                <p className="text-[#ff4655] text-[10px] font-inter">{autoStandings.tournamentName}</p>
+                {autoStandings.groups.map(group => (
+                  <div key={group.title} className="flex flex-col gap-2">
+                    {autoStandings.groups.length > 1 && (
+                      <p className="text-[#ff4655] text-[10px] font-inter font-bold uppercase tracking-wider">{group.title}</p>
+                    )}
+                    <StandingsTable rows={group.rows} highlightTop={2} />
+                  </div>
+                ))}
               </div>
-            ) : standings ? (
-              <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden">
-                <div className="bg-[#151821] px-4 py-3 border-b border-[#2a2d3a]">
-                  <h3 className="text-white font-semibold">Group Standings</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-[#151821]">
-                      <tr className="text-gray-400 text-xs uppercase">
-                        <th className="px-4 py-3 text-left">Rank</th>
-                        <th className="px-4 py-3 text-left">Team</th>
-                        <th className="px-4 py-3 text-center">W</th>
-                        <th className="px-4 py-3 text-center">L</th>
-                        <th className="px-4 py-3 text-center">Win%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {standings.map((team, index) => {
-                        const total = team.wins + team.losses;
-                        const wr = total === 0 ? '0%' : `${Math.round((team.wins / total) * 100)}%`;
-                        return (
-                          <tr key={team.id} className="border-t border-[#2a2d3a] hover:bg-[#151821] transition-colors">
-                            <td className="px-4 py-3">
-                              <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${team.rank <= 3 ? 'bg-[#ff4655] text-white' : 'bg-[#2a2d3a] text-gray-400'}`}>
-                                {team.rank}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-6 h-6 rounded bg-gradient-to-br ${index % 3 === 0 ? 'from-blue-500 to-blue-700' : index % 3 === 1 ? 'from-red-500 to-red-700' : 'from-purple-500 to-purple-700'} flex items-center justify-center text-white text-xs font-bold`}>
-                                  {team.name.substring(0, 2)}
-                                </div>
-                                <span className="text-white text-sm">{team.name}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-center text-green-400 text-sm font-semibold">{team.wins}</td>
-                            <td className="px-4 py-3 text-center text-red-400 text-sm font-semibold">{team.losses}</td>
-                            <td className="px-4 py-3 text-center text-gray-300 text-sm">{wr}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+            ) : manualRows ? (
+              <div className="bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-6">
+                <p className="text-[#ff4655] text-[10px] font-inter">Group Standings</p>
+                <StandingsTable rows={manualRows} highlightTop={3} />
               </div>
             ) : (
               <Standings />
             )}
+          </div>
+        </div>
+      </section>
 
-             {/* Top Players — ranked by average ACS from tournament stats */}
-                        <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-2">
-                              <TrendingUp className="w-5 h-5 text-[#ff4655]" />
-                              <h3 className="text-white font-semibold">Top Players</h3>
-                            </div>
-                            <span className="text-gray-500 text-xs uppercase tracking-wider">by ACS</span>
-                          </div>
-                          <div className="space-y-3">
-                            {topByAcs.length > 0 ? (
-                              topByAcs.map((player, index) => {
-                                const rowInner = (
-                                  <>
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                                        {index + 1}
-                                      </div>
-                                      <div>
-                                        <div className="text-white text-sm font-semibold">{player.playerName}</div>
-                                        <div className="text-gray-400 text-xs">{player.teamName}</div>
-                                      </div>
-                                    </div>
-                                    <div className="text-right">
-                                      <div className="text-[#ff4655] text-sm font-bold">{Math.round(player.acs)}</div>
-                                      <div className="text-gray-400 text-xs">{player.kills}/{player.deaths}/{player.assists}</div>
-                                    </div>
-                                  </>
-                                );
-                                const rowClass = "flex items-center justify-between p-2 rounded hover:bg-[#151821] transition-colors";
-                                return player.tournamentId && player.rosterPlayerId ? (
-                                  <Link key={player.playerId} to={`/player/${player.tournamentId}/${player.rosterPlayerId}`} className={rowClass}>
-                                    {rowInner}
-                                  </Link>
-                                ) : (
-                                  <div key={player.playerId} className={rowClass}>
-                                    {rowInner}
-                                  </div>
-                                );
-                              })
-                            ) : (adminData?.players && adminData.players.length > 0
-                              ? [...adminData.players].sort((a, b) => a.rank - b.rank)
-                              : [
-                                  { id: '1', rank: 1, name: 'jinggg', team: 'PRX', rating: 1.42, kills: 275, deaths: 189 },
-                                  { id: '2', rank: 2, name: 'Derke', team: 'FNC', rating: 1.38, kills: 268, deaths: 195 },
-                                  { id: '3', rank: 3, name: 'aspas', team: 'LOUD', rating: 1.35, kills: 261, deaths: 198 },
-                                  { id: '4', rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
-                                ]
-                            ).map((player) => (
-                              <div key={player.id} className="flex items-center justify-between p-2 rounded hover:bg-[#151821] transition-colors">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
-                                    {player.rank}
-                                  </div>
-                                  <div>
-                                    <div className="text-white text-sm font-semibold">{player.name}</div>
-                                    <div className="text-gray-400 text-xs">{player.team}</div>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <div className="text-[#ff4655] text-sm font-bold">{player.rating.toFixed(2)}</div>
-                                  <div className="text-gray-400 text-xs">{player.kills}/{player.deaths}</div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+      {/* Top Performance — ranked by average ACS from tournament stats */}
+      <section className="bg-[#0e0e0e] border-t border-b border-[#2b2b2b] py-20">
+        <div className="max-w-[1436px] mx-auto px-6 flex flex-col gap-12">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <p className="text-[#ff4655] text-[11px] font-inter">Season Leaders</p>
+            <h2 className="font-chivo text-3xl text-white">Top Performance</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {topByAcs.length > 0 ? (
+              topByAcs.slice(0, 4).map(player => {
+                const card = (
+                  <>
+                    <p className="text-[#f5f3f3] text-[9px] font-inter uppercase tracking-wide">{player.teamName}</p>
+                    <p className="text-[#e5e2e1] text-xl font-chivo">{player.playerName}</p>
+                    <div className="grid grid-cols-2 gap-4 border-t border-[#2b2b2b] pt-4">
+                      <div>
+                        <p className="text-[#f5f3f3] text-[9px] font-inter">ACS</p>
+                        <p className="text-white text-lg font-chivo">{Math.round(player.acs)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[#f5f3f3] text-[9px] font-inter">K/D/A</p>
+                        <p className="text-white text-lg font-chivo">{player.kills}/{player.deaths}/{player.assists}</p>
                       </div>
                     </div>
-                  </main>
+                  </>
+                );
+                const cls = "bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-4 hover:border-[#ff4655]/40 transition-colors";
+                return player.tournamentId && player.rosterPlayerId ? (
+                  <Link key={player.playerId} to={`/player/${player.tournamentId}/${player.rosterPlayerId}`} className={cls}>
+                    {card}
+                  </Link>
+                ) : (
+                  <div key={player.playerId} className={cls}>{card}</div>
+                );
+              })
+            ) : (
+              (adminData?.players && adminData.players.length > 0
+                ? [...adminData.players].sort((a, b) => a.rank - b.rank)
+                : [
+                    { id: '1', rank: 1, name: 'jinggg', team: 'PRX', rating: 1.42, kills: 275, deaths: 189 },
+                    { id: '2', rank: 2, name: 'Derke', team: 'FNC', rating: 1.38, kills: 268, deaths: 195 },
+                    { id: '3', rank: 3, name: 'aspas', team: 'LOUD', rating: 1.35, kills: 261, deaths: 198 },
+                    { id: '4', rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
+                  ]
+              ).slice(0, 4).map(player => (
+                <div key={player.id} className="bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-4">
+                  <p className="text-[#f5f3f3] text-[9px] font-inter uppercase tracking-wide">{player.team}</p>
+                  <p className="text-[#e5e2e1] text-xl font-chivo">{player.name}</p>
+                  <div className="grid grid-cols-2 gap-4 border-t border-[#2b2b2b] pt-4">
+                    <div>
+                      <p className="text-[#f5f3f3] text-[9px] font-inter">Rating</p>
+                      <p className="text-white text-lg font-chivo">{player.rating.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#f5f3f3] text-[9px] font-inter">K/D</p>
+                      <p className="text-white text-lg font-chivo">{player.kills}/{player.deaths}</p>
+                    </div>
+                  </div>
                 </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Editorial */}
+      <section className="py-20">
+        <div className="max-w-[1436px] mx-auto px-6 flex flex-col gap-10">
+          <div className="flex items-end justify-between border-b-2 border-[#2b2b2b] pb-6">
+            <div className="flex flex-col gap-1">
+              <h2 className="font-chivo text-2xl text-white">Editorial</h2>
+              <p className="text-[#efeeed] text-sm font-inter">High-performance analysis and intel.</p>
+            </div>
+            <Link to="/matches" className="flex items-center gap-2 text-[#ff4655] text-[11px] font-inter hover:underline">
+              Archives <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {news && news.length > 0 ? (
+              news.slice(0, 3).map(n => (
+                <NewsCard key={n.id} id={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} link={n.link} excerpt={newsExcerpt(n)} />
+              ))
+            ) : !adminData ? (
+              fallbackNews.map(n => (
+                <NewsCard key={n.id} title={n.title} category={n.category} timeAgo={n.timeAgo} imageUrl={n.imageUrl} excerpt={n.excerpt} />
+              ))
+            ) : (
+              <div className="md:col-span-3 text-center py-8 text-gray-500 text-sm bg-[#1c1b1b] border border-[#2b2b2b]">
+                No news articles
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Enter the Arena CTA */}
+      <section className="bg-[#111] border-t border-[#2b2b2b] py-24">
+        <div className="max-w-[1436px] mx-auto px-4 flex flex-col items-center gap-10 text-center">
+          <h2 className="font-chivo text-5xl md:text-6xl">
+            <span className="text-white">Enter the </span>
+            <span className="text-[#ff4655]">Arena</span>
+          </h2>
+          <Link
+            to="/matches"
+            className="bg-[#ff4655] hover:bg-[#ff3344] text-white text-[13px] font-inter px-14 py-5 transition-colors"
+          >
+            View Tournaments
+          </Link>
+        </div>
+      </section>
+    </div>
   );
 }
 

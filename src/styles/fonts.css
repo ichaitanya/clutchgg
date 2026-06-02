@@ -1,0 +1,12 @@
+/* Figma homepage design fonts: Chivo (display/headings) + Inter (body/UI).
+   The font files are loaded via <link> tags in index.html; these utilities
+   expose the families to the redesigned homepage. */
+html, body { height: 100%; margin: 0; }
+#root { height: 100%; }
+
+.font-chivo {
+  font-family: 'Chivo', system-ui, -apple-system, sans-serif;
+}
+.font-inter {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
