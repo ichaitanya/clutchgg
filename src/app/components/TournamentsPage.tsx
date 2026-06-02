@@ -7,6 +7,7 @@ import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { AdminData } from './AdminPanel';
 import type { Tournament } from './TournamentCreation';
 import { loadAdminData } from '../services/db';
+import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
 // Total teams across a tournament (single-stage or grouped).
 function teamCount(t: Tournament): number {
@@ -56,7 +57,11 @@ export function TournamentsPage() {
     loadAdminData().then(setAdminData).catch(() => {});
   }, []);
 
-  const all = adminData?.tournaments ?? [];
+  // Override each tournament's stored status with the live, data-derived status.
+  const all = (adminData?.tournaments ?? []).map(t => ({
+    ...t,
+    status: deriveTournamentStatus(t),
+  }));
 
   // Featured = first in-progress, else first overall. Spotlight = next upcoming.
   const featured = all.find(t => t.status === 'in-progress') || all[0] || null;

@@ -9,6 +9,7 @@ import type { NewsItem } from './AdminPanel';
 import { getTournaments, getNews } from '../services/db';
 import { getStageOptions } from './StatsPage';
 import { BracketDisplay } from './BracketDisplay';
+import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
 type TabKey = 'overview' | 'matches' | 'bracket' | 'teams' | 'news';
 
@@ -66,7 +67,7 @@ export function TournamentPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<TabKey>('overview');
+  const [tab, setTab] = useState<TabKey>('bracket');
 
   useEffect(() => {
     Promise.all([getTournaments(), getNews()])
@@ -183,7 +184,7 @@ export function TournamentPage() {
                     {prizePool.total}
                   </span>
                 )}
-                <span className="text-[#ff4655] capitalize font-semibold">{tournament.status}</span>
+                <span className="text-[#ff4655] capitalize font-semibold">{deriveTournamentStatus(tournament)}</span>
               </div>
             </div>
           </div>

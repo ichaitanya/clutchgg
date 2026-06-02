@@ -5,6 +5,7 @@ import { ImageWithFallback } from './figma/ImageWithFallback';
 interface HeroSectionProps {
   heroLink?: string;
   heroVideo?: string;
+  standingsTournamentId?: string;
 }
 
 // Extract YouTube video ID from any youtube.com / youtu.be URL.
@@ -122,7 +123,7 @@ function YouTubeBackground({ videoId }: { videoId: string }) {
   );
 }
 
-export function HeroSection({ heroLink, heroVideo }: HeroSectionProps) {
+export function HeroSection({ heroLink, heroVideo, standingsTournamentId }: HeroSectionProps) {
   const navigate = useNavigate();
 
   const ytId = heroVideo ? getYouTubeId(heroVideo) : null;
@@ -186,7 +187,7 @@ export function HeroSection({ heroLink, heroVideo }: HeroSectionProps) {
               Watch Broadcast
             </button>
             <button
-              onClick={() => navigate('/matches')}
+              onClick={() => navigate(standingsTournamentId ? `/tournament/${standingsTournamentId}` : '/matches')}
               className="arena-btn arena-btn--outline"
               style={{ minWidth: '160px' }}
             >

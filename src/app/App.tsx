@@ -192,7 +192,7 @@ function Home() {
       <Header />
 
       {/* Hero */}
-      <HeroSection heroLink={adminData?.heroLink} heroVideo={adminData?.heroVideo} />
+      <HeroSection heroLink={adminData?.heroLink} heroVideo={adminData?.heroVideo} standingsTournamentId={autoStandings?.tournamentId} />
 
       {/* Upcoming Matches + Standings */}
       <section className="arena-section">
