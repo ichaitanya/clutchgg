@@ -210,6 +210,8 @@ interface AdminData {
   players: TopPlayer[];
   tournaments: Tournament[];
   heroLink: string;
+  // Tournament id whose round-robin/group standings show on the homepage.
+  standingsTournamentId?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1215,10 +1217,34 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                 </div>
               </div>
 
+              {/* Homepage standings selector — round-robin / group-stage tournaments */}
+              <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6 space-y-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-2 font-medium">Homepage Standings</label>
+                  <p className="text-xs text-gray-600 mb-3">Pick a round-robin or group-stage tournament to show its standings on the homepage.</p>
+                  <select
+                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-4 py-3 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                    value={data.standingsTournamentId || ''}
+                    onChange={e => setData(d => ({ ...d, standingsTournamentId: e.target.value || undefined }))}
+                  >
+                    <option value="">Auto (first available)</option>
+                    {data.tournaments
+                      .filter(t =>
+                        t.stage1Config?.format === 'groupstage' ||
+                        t.generatedBracket?.bracketType === 'roundrobin' ||
+                        t.stage1Bracket?.bracketType === 'roundrobin')
+                      .map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
               <button
                 onClick={async () => {
                   try {
                     await setSiteConfig('hero_link', data.heroLink ?? '');
+                    await setSiteConfig('standings_tournament_id', data.standingsTournamentId ?? '');
                     save(data);
                   } catch { showToast('Failed to save settings', 'error'); }
                 }}

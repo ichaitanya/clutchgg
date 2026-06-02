@@ -464,13 +464,27 @@ export function TournamentMatchPage() {
           <div className="flex items-center justify-center gap-0 px-8 py-6">
             {/* Team 1 */}
             <div className={`flex flex-col items-center gap-3 flex-1 ${isCompleted && !team1Won ? 'opacity-40' : ''}`}>
-              <TeamLogo name={team1Name} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
-              <div className="text-center">
-                <p className={`font-black text-xl tracking-wide ${team1Won ? 'text-[#ff4655]' : 'text-white'}`}>
-                  {team1Name.toUpperCase().substring(0, 6)}
-                </p>
-                <p className="text-gray-500 text-xs mt-0.5">{team1Name}</p>
-              </div>
+              {team1 ? (
+                <button onClick={() => navigate(`/teams/${team1.id}`)} className="flex flex-col items-center gap-3 group">
+                  <TeamLogo name={team1Name} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
+                  <div className="text-center">
+                    <p className={`font-black text-xl tracking-wide group-hover:text-[#ff4655] transition-colors ${team1Won ? 'text-[#ff4655]' : 'text-white'}`}>
+                      {team1Name.toUpperCase().substring(0, 6)}
+                    </p>
+                    <p className="text-gray-500 text-xs mt-0.5 group-hover:text-gray-300 transition-colors">{team1Name}</p>
+                  </div>
+                </button>
+              ) : (
+                <>
+                  <TeamLogo name={team1Name} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
+                  <div className="text-center">
+                    <p className={`font-black text-xl tracking-wide ${team1Won ? 'text-[#ff4655]' : 'text-white'}`}>
+                      {team1Name.toUpperCase().substring(0, 6)}
+                    </p>
+                    <p className="text-gray-500 text-xs mt-0.5">{team1Name}</p>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Score */}
@@ -516,13 +530,27 @@ export function TournamentMatchPage() {
 
             {/* Team 2 */}
             <div className={`flex flex-col items-center gap-3 flex-1 ${isCompleted && !team2Won ? 'opacity-40' : ''}`}>
-              <TeamLogo name={team2Name} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
-              <div className="text-center">
-                <p className={`font-black text-xl tracking-wide ${team2Won ? 'text-[#ff4655]' : 'text-white'}`}>
-                  {team2Name.toUpperCase().substring(0, 6)}
-                </p>
-                <p className="text-gray-500 text-xs mt-0.5">{team2Name}</p>
-              </div>
+              {team2 ? (
+                <button onClick={() => navigate(`/teams/${team2.id}`)} className="flex flex-col items-center gap-3 group">
+                  <TeamLogo name={team2Name} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
+                  <div className="text-center">
+                    <p className={`font-black text-xl tracking-wide group-hover:text-[#ff4655] transition-colors ${team2Won ? 'text-[#ff4655]' : 'text-white'}`}>
+                      {team2Name.toUpperCase().substring(0, 6)}
+                    </p>
+                    <p className="text-gray-500 text-xs mt-0.5 group-hover:text-gray-300 transition-colors">{team2Name}</p>
+                  </div>
+                </button>
+              ) : (
+                <>
+                  <TeamLogo name={team2Name} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
+                  <div className="text-center">
+                    <p className={`font-black text-xl tracking-wide ${team2Won ? 'text-[#ff4655]' : 'text-white'}`}>
+                      {team2Name.toUpperCase().substring(0, 6)}
+                    </p>
+                    <p className="text-gray-500 text-xs mt-0.5">{team2Name}</p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

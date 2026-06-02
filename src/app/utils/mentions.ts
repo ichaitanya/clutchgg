@@ -56,8 +56,12 @@ export function buildMentionIndex(tournaments: Tournament[]): MentionEntity[] {
 
 const TOKEN_RE = /@\[([^\]]+)\]\((team|player):([^:]+):([^)]+)\)/g;
 
+// Inserted by the @-picker. We insert the plain display name (no noisy token):
+// the renderer's name-based auto-linking turns it into the right link, and the
+// mention index is deduped by name so there's no ambiguity. (Legacy explicit
+// @[..](..) tokens are still parsed by parseMentions for older articles.)
 export function makeMentionToken(e: MentionEntity): string {
-  return `@[${e.name}](${e.kind}:${e.tournamentId}:${e.id})`;
+  return e.name;
 }
 
 // A rendered segment: either plain text or a link.

@@ -466,27 +466,52 @@ function BracketTab({ tournament, stages }: {
   stages: { id: string; label: string; brackets: BracketGenerated[] }[];
 }) {
   const bracketStages = stages.filter(s => s.brackets.length > 0);
+
+  // Show the latest stage first: Stage 2 (knockout) leads when its bracket exists.
+  const orderedStages = [...bracketStages].sort((a, b) => {
+    const rank = (id: string) => (id === 'stage2' ? 0 : id === 'stage1' ? 1 : 2);
+    return rank(a.id) - rank(b.id);
+  });
+
+  // Default the dropdown to the first (latest) stage.
+  const [selectedId, setSelectedId] = useState<string>(orderedStages[0]?.id ?? '');
+
   if (bracketStages.length === 0) {
     return <p className="text-gray-500 text-sm">No bracket has been generated for this tournament.</p>;
   }
+
+  const active = orderedStages.find(s => s.id === selectedId) ?? orderedStages[0];
+
   return (
-    <div className="space-y-8">
-      {bracketStages.map(stage => (
-        <div key={stage.id}>
-          {stages.length > 1 && (
-            <h3 className="text-white font-bold text-sm uppercase tracking-wider mb-3">{stage.label}</h3>
-          )}
-          {stage.brackets.map((bracket, i) => (
-            <BracketDisplay
-              key={i}
-              bracket={bracket}
-              teams={tournament.teams}
-              editable={false}
-              onBracketChange={() => {}}
-            />
-          ))}
+    <div className="space-y-4">
+      {/* Stage selector — only when more than one stage has a bracket */}
+      {orderedStages.length > 1 && (
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-gray-400 font-medium">Stage</label>
+          <select
+            className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+            value={active.id}
+            onChange={e => setSelectedId(e.target.value)}
+          >
+            {orderedStages.map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
         </div>
-      ))}
+      )}
+
+      <div>
+        <h3 className="text-white font-bold text-sm uppercase tracking-wider mb-3">{active.label}</h3>
+        {active.brackets.map((bracket, i) => (
+          <BracketDisplay
+            key={i}
+            bracket={bracket}
+            teams={tournament.teams}
+            editable={false}
+            onBracketChange={() => {}}
+          />
+        ))}
+      </div>
     </div>
   );
 }

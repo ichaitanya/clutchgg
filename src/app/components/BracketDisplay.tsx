@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { BracketGenerated, BracketMatch, TeamInTournament, RRTeamEntry } from './TournamentCreation';
 
 interface BracketDisplayProps {
@@ -56,9 +57,26 @@ function deriveQualifiedTeams(
   return result;
 }
 
-/** Check whether all matches in a bracket have a winner (stage complete). */
+/** Has a match been decided by map results (a team reached ceil(maxMaps/2) wins)? */
+function matchDecidedByMaps(m: BracketMatch): boolean {
+  const maps = m.maps ?? [];
+  if (maps.length === 0) return false;
+  const maxMaps = m.format === 'bo1' ? 1 : m.format === 'bo5' ? 5 : 3;
+  let w1 = 0, w2 = 0;
+  for (const mp of maps) {
+    if (mp.team1Score > mp.team2Score) w1++;
+    else if (mp.team2Score > mp.team1Score) w2++;
+  }
+  const needed = Math.ceil(maxMaps / 2);
+  if (w1 >= needed || w2 >= needed) return true;
+  if (maps.length >= maxMaps && w1 !== w2) return true;
+  return false;
+}
+
+/** Check whether all matches in a bracket are decided (stage complete). A match
+ *  counts as done when it has an explicit winner OR is decided by map results. */
 function isBracketComplete(bracket: BracketGenerated): boolean {
-  return bracket.rounds.every(round => round.every(m => !!m.winner));
+  return bracket.rounds.every(round => round.every(m => !!m.winner || matchDecidedByMaps(m)));
 }
 
 // Propagate a winner through the bracket using winnerGoesTo / loserGoesTo routing fields.
@@ -388,7 +406,7 @@ function BracketTree({
   );
 }
 
-interface RRStandingsRow {
+export interface RRStandingsRow {
   teamId: string;
   teamName: string;
   wins: number;
@@ -408,7 +426,7 @@ interface RRStandingsRow {
  * since each match has one winner — so roundDiff equals wl for match-based scoring.
  * We expose it separately so it can be extended to best-of-N series later.
  */
-function computeRRStandings(rounds: BracketMatch[][], rrTeams: RRTeamEntry[]): RRStandingsRow[] {
+export function computeRRStandings(rounds: BracketMatch[][], rrTeams: RRTeamEntry[]): RRStandingsRow[] {
   const map: Record<string, RRStandingsRow> = {};
 
   for (const team of rrTeams) {
@@ -755,7 +773,9 @@ export function BracketDisplay({
                         {idx + 1}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-white font-medium">{row.teamName}</td>
+                    <td className="px-3 py-2.5 font-medium">
+                      <Link to={`/teams/${row.teamId}`} className="text-white hover:text-[#ff4655] transition-colors">{row.teamName}</Link>
+                    </td>
                     <td className="px-3 py-2.5 text-center text-green-400 font-semibold">{row.wins}</td>
                     <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{row.losses}</td>
                     <td className="px-3 py-2.5 text-center font-bold">

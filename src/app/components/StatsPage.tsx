@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, BarChart3, Users } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Header } from './Header';
 import type { Tournament, BracketGenerated, MatchPlayerStat, TournamentPlayer } from './TournamentCreation';
 import { getTournaments } from '../services/db';
@@ -244,6 +244,23 @@ export function StatsPage() {
 
   const metricDef = METRICS.find(m => m.key === metric)!;
 
+  // Resolve a leaderboard row's player to a roster slot id (for the profile link)
+  // and a team name to a team id (for the team page link).
+  const resolvePlayerHref = (row: PlayerRow): string | null => {
+    if (!tournament) return null;
+    const synthetic = { playerId: row.playerId, playerName: row.playerName } as MatchPlayerStat;
+    for (const team of tournament.teams) {
+      const p = team.players.find(pl => statMatchesPlayer(synthetic, pl));
+      if (p) return `/player/${tournament.id}/${p.id}`;
+    }
+    return null;
+  };
+  const resolveTeamHref = (teamName: string): string | null => {
+    if (!tournament) return null;
+    const t = tournament.teams.find(tm => tm.name.toLowerCase() === teamName.toLowerCase());
+    return t ? `/teams/${t.id}` : null;
+  };
+
   return (
     <div className="min-h-screen bg-[#0d0f16] pb-16">
       <Header />
@@ -360,8 +377,26 @@ export function StatsPage() {
                     className="border-t border-[#2a2d3a] bg-[#0d0f16] hover:bg-[#151821] transition-colors"
                   >
                     <td className="px-4 py-3 text-gray-500 font-semibold">{i + 1}</td>
-                    <td className="px-4 py-3 text-white font-semibold">{row.playerName}</td>
-                    <td className="px-4 py-3 text-gray-400">{row.teamName}</td>
+                    <td className="px-4 py-3 font-semibold">
+                      {(() => {
+                        const href = resolvePlayerHref(row);
+                        return href ? (
+                          <Link to={href} className="text-white hover:text-[#ff4655] transition-colors">{row.playerName}</Link>
+                        ) : (
+                          <span className="text-white">{row.playerName}</span>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const href = resolveTeamHref(row.teamName);
+                        return href ? (
+                          <Link to={href} className="text-gray-400 hover:text-[#ff4655] transition-colors">{row.teamName}</Link>
+                        ) : (
+                          <span className="text-gray-400">{row.teamName}</span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-4 py-3 text-center text-gray-400">{row.mapsPlayed}</td>
                     {METRICS.map(m => (
                       <td

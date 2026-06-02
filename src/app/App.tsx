@@ -11,6 +11,7 @@ import { MatchesPage } from './components/MatchesPage';
 import { TournamentMatchPage } from './components/TournamentMatchPage';
 import { TeamsPage } from './components/TeamsPage';
 import { StatsPage, getTopPlayersByAcs } from './components/StatsPage';
+import { computeRRStandings } from './components/BracketDisplay';
 import { PlayerPage } from './components/PlayerPage';
 import { ArticlePage } from './components/ArticlePage';
 import { TournamentPage } from './components/TournamentPage';
@@ -73,6 +74,42 @@ function Home() {
 
   const standings = adminData ? adminData.standings : null;
   const news = adminData ? adminData.news.filter(n => n.visible) : null;
+
+  // Auto-standings: if a tournament is round-robin or group-based, compute its
+  // standings tables directly for the homepage (instead of manual standings).
+  type StandRow = { id: string; rank: number; name: string; wins: number; losses: number };
+  const autoStandings: { tournamentName: string; groups: { title: string; rows: StandRow[] }[] } | null = (() => {
+    if (!adminData) return null;
+    // If the admin picked a tournament for homepage standings, consider only it;
+    // otherwise fall back to the first round-robin / group-stage tournament.
+    const selectedId = adminData.standingsTournamentId;
+    const candidates = selectedId
+      ? adminData.tournaments.filter(t => t.id === selectedId)
+      : adminData.tournaments;
+    for (const t of candidates) {
+      // Group stage: one table per group.
+      if (t.stage1Config?.format === 'groupstage' && t.stage1Bracket && (t.stage1Config.groups?.length ?? 0) > 0) {
+        const groups = (t.stage1Config.groups ?? []).map(g => {
+          const matches = t.stage1Bracket!.rounds.flat().filter(m => m.id.includes(`gs_${g.id}_`));
+          const rrTeams = g.teams.map(tm => ({ id: tm.id, name: tm.name }));
+          const rows = computeRRStandings([matches], rrTeams).map((r, i) => ({
+            id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses,
+          }));
+          return { title: g.name, rows };
+        }).filter(g => g.rows.length > 0);
+        if (groups.length > 0) return { tournamentName: t.name, groups };
+      }
+      // Round robin (single-stage generatedBracket or stage1Bracket).
+      const rr = [t.generatedBracket, t.stage1Bracket].find(b => b?.bracketType === 'roundrobin');
+      if (rr) {
+        const rows = computeRRStandings(rr.rounds, rr.rrTeams ?? []).map((r, i) => ({
+          id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses,
+        }));
+        if (rows.length > 0) return { tournamentName: t.name, groups: [{ title: 'Standings', rows }] };
+      }
+    }
+    return null;
+  })();
 
   // Top players ranked by average ACS, computed from applied tournament match
   // stats. Falls back to admin-entered / placeholder players when no stats exist.
@@ -156,7 +193,55 @@ function Home() {
 
           {/* Right column */}
           <div className="space-y-6">
-            {standings ? (
+            {autoStandings ? (
+              <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden">
+                <div className="bg-[#151821] px-4 py-3 border-b border-[#2a2d3a]">
+                  <h3 className="text-white font-semibold">Standings</h3>
+                  <p className="text-gray-500 text-xs mt-0.5">{autoStandings.tournamentName}</p>
+                </div>
+                <div className="divide-y divide-[#2a2d3a]">
+                  {autoStandings.groups.map(group => (
+                    <div key={group.title}>
+                      {autoStandings.groups.length > 1 && (
+                        <p className="px-4 pt-3 pb-1 text-xs font-bold text-[#ff4655] uppercase tracking-wider">{group.title}</p>
+                      )}
+                      <table className="w-full">
+                        <thead className="bg-[#151821]">
+                          <tr className="text-gray-400 text-xs uppercase">
+                            <th className="px-4 py-2.5 text-left">#</th>
+                            <th className="px-4 py-2.5 text-left">Team</th>
+                            <th className="px-4 py-2.5 text-center">W</th>
+                            <th className="px-4 py-2.5 text-center">L</th>
+                            <th className="px-4 py-2.5 text-center">Win%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.rows.map(team => {
+                            const total = team.wins + team.losses;
+                            const wr = total === 0 ? '0%' : `${Math.round((team.wins / total) * 100)}%`;
+                            return (
+                              <tr key={team.id} className="border-t border-[#2a2d3a] hover:bg-[#151821] transition-colors">
+                                <td className="px-4 py-2.5">
+                                  <div className={`w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${team.rank <= 2 ? 'bg-[#ff4655] text-white' : 'bg-[#2a2d3a] text-gray-400'}`}>
+                                    {team.rank}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2.5 text-sm">
+                                  <Link to={`/teams/${team.id}`} className="text-white hover:text-[#ff4655] transition-colors">{team.name}</Link>
+                                </td>
+                                <td className="px-4 py-2.5 text-center text-green-400 text-sm font-semibold">{team.wins}</td>
+                                <td className="px-4 py-2.5 text-center text-red-400 text-sm font-semibold">{team.losses}</td>
+                                <td className="px-4 py-2.5 text-center text-gray-300 text-sm">{wr}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : standings ? (
               <div className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg overflow-hidden">
                 <div className="bg-[#151821] px-4 py-3 border-b border-[#2a2d3a]">
                   <h3 className="text-white font-semibold">Group Standings</h3>

@@ -82,7 +82,7 @@ export function MatchesPage() {
         if (tournament.stage1Config?.format === 'groupstage' && tournament.stage1Bracket) {
           const groups = tournament.stage1Config.groups ?? [];
           tournament.stage1Bracket.rounds.flat().forEach(match => {
-            const group = groups.find(g => match.id.startsWith(`gs_${g.id}_`));
+            const group = groups.find(g => match.id.includes(`gs_${g.id}_`));
             matchList.push({ ...match, status: getEffectiveStatus(match), stage: group?.name ?? 'Group Stage' });
           });
         } else if (tournament.stage1Bracket) {

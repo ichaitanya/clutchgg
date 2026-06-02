@@ -11,6 +11,7 @@ import {
 } from '../utils/bracketUtils';
 import * as ValorantAPI from '../services/valorantApi';
 import { upsertTournament } from '../services/db';
+import { computeRRStandings } from './BracketDisplay';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -2391,7 +2392,12 @@ function CreateTournamentScreen({
     setTournament(t => ({
       ...t,
       stage1Config: config,
-      stage1Bracket: stage1Bracket ? scopeBracketIds(stage1Bracket, t.id) : undefined,
+      // Group-stage match ids carry a `gs_<groupId>_…` prefix that the UI filters
+      // on, so they must NOT be re-prefixed by scopeBracketIds. Other formats get
+      // scoped for global uniqueness.
+      stage1Bracket: stage1Bracket
+        ? (config.format === 'groupstage' ? stage1Bracket : scopeBracketIds(stage1Bracket, t.id))
+        : undefined,
     }));
     setShowTwoStageTournamentModal(false);
   };
@@ -2400,6 +2406,42 @@ function CreateTournamentScreen({
     setTournament(t => ({ ...t, stage2Bracket: scopeBracketIds(bracket, t.id) }));
     setShowBracketModal(false);
     setIsGeneratingSecondStage(false);
+  };
+
+  // Derive the teams that qualify from a non-groupstage Stage 1 (round robin /
+  // single / double) by ranking, then open the Stage 2 bracket modal for them.
+  const deriveStage1Qualifiers = (): TeamInTournament[] => {
+    const b = tournament.stage1Bracket;
+    const n = tournament.stage1Config?.qualifiersCount ?? 0;
+    if (!b || n <= 0) return [];
+    const teamById = (id: string) => tournament.teams.find(t => t.id === id);
+
+    if (b.bracketType === 'roundrobin') {
+      const standings = computeRRStandings(b.rounds, b.rrTeams ?? []);
+      return standings.slice(0, n)
+        .map(r => teamById(r.teamId))
+        .filter((t): t is TeamInTournament => !!t);
+    }
+    // Single / double elim: take winners from the latest rounds down.
+    const decided = b.rounds.flat().filter(m => m.winner);
+    decided.sort((a, c) => c.round - a.round);
+    const seen = new Set<string>();
+    const out: TeamInTournament[] = [];
+    for (const m of decided) {
+      for (const id of [m.winner!, m.winner === m.team1Id ? m.team2Id : m.team1Id]) {
+        if (out.length >= n || seen.has(id)) continue;
+        const t = teamById(id);
+        if (t) { seen.add(id); out.push(t); }
+      }
+    }
+    return out;
+  };
+
+  const handleAdvanceToStage2 = () => {
+    const qualified = deriveStage1Qualifiers();
+    setTournament(t => ({ ...t, qualifiedTeams: qualified }));
+    setIsGeneratingSecondStage(true);
+    setShowBracketModal(true);
   };
 
   const handleExcelImport = (importedTeams: TeamInTournament[]) => {
@@ -2619,27 +2661,196 @@ function CreateTournamentScreen({
                   </p>
                 </div>
               </div>
-              {/* Group details if groupstage */}
+              {/* Group details + editable matches if groupstage */}
               {tournament.stage1Config.format === 'groupstage' && tournament.stage1Config.groups && (
                 <div className="space-y-3 mb-4">
-                  {tournament.stage1Config.groups.map(group => (
-                    <div key={group.id} className="bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a]">
-                      <h4 className="text-white font-semibold text-xs mb-2">{group.name}</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {group.teams.map(t => (
-                          <span key={t.id} className="px-2 py-0.5 bg-[#1e2130] text-gray-300 text-xs rounded">{t.name}</span>
+                  {tournament.stage1Config.groups.map(group => {
+                    const groupMatches = (tournament.stage1Bracket?.rounds.flat() ?? [])
+                      .filter(m => m.id.includes(`gs_${group.id}_`));
+                    return (
+                      <div key={group.id} className="bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a]">
+                        <h4 className="text-white font-semibold text-xs mb-2">{group.name}</h4>
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {group.teams.map(t => (
+                            <span key={t.id} className="px-2 py-0.5 bg-[#1e2130] text-gray-300 text-xs rounded">{t.name}</span>
+                          ))}
+                        </div>
+
+                        {/* Editable matches for this group */}
+                        {groupMatches.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-gray-500 text-[11px] uppercase tracking-wider">Matches</p>
+                            {groupMatches.map(match => (
+                              <div
+                                key={match.id}
+                                className="flex items-center justify-between bg-[#151821] rounded-lg p-2.5 border border-[#2a2d3a] hover:border-[#ff4655]/30 transition-colors"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-white text-sm font-semibold truncate">
+                                    {match.team1Name} vs {match.team2Name}
+                                  </p>
+                                  {(match.date || match.time) && (
+                                    <p className="text-gray-500 text-xs mt-0.5">
+                                      {match.date}{match.date && match.time && ' • '}{match.time}
+                                    </p>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={() => setEditingMatch(match)}
+                                  className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors flex-shrink-0"
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Editable matches for round-robin / single / double Stage 1 */}
+              {tournament.stage1Config.format !== 'groupstage' && tournament.stage1Bracket && (
+                <div className="space-y-4 mb-4">
+                  {tournament.stage1Bracket.rounds.map((round, roundIdx) => (
+                    <div key={roundIdx}>
+                      <p className="text-gray-400 text-xs font-semibold mb-2">Round {roundIdx + 1}</p>
+                      <div className="space-y-2">
+                        {round.map(match => (
+                          <div
+                            key={match.id}
+                            className="flex items-center justify-between bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a] hover:border-[#ff4655]/30 transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-sm font-semibold truncate">
+                                {match.team1Name} vs {match.team2Name}
+                              </p>
+                              {(match.date || match.time) && (
+                                <p className="text-gray-500 text-xs mt-0.5">
+                                  {match.date}{match.date && match.time && ' • '}{match.time}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => setEditingMatch(match)}
+                              className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors flex-shrink-0"
+                            >
+                              Edit
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+
+              {/* Advance to Stage 2 (non-groupstage). Shows once Stage 1 is fully
+                  scored and Stage 2 hasn't been generated yet. */}
+              {tournament.stage1Config.format !== 'groupstage' && tournament.stage1Bracket && !tournament.stage2Bracket && (() => {
+                const allDecided = tournament.stage1Bracket.rounds.flat().every(m => {
+                  if (m.winner) return true;
+                  const maps = m.maps ?? [];
+                  if (maps.length === 0) return false;
+                  const maxMaps = m.format === 'bo1' ? 1 : m.format === 'bo5' ? 5 : 3;
+                  let w1 = 0, w2 = 0;
+                  for (const mp of maps) { if (mp.team1Score > mp.team2Score) w1++; else if (mp.team2Score > mp.team1Score) w2++; }
+                  return w1 >= Math.ceil(maxMaps / 2) || w2 >= Math.ceil(maxMaps / 2) || (maps.length >= maxMaps && w1 !== w2);
+                });
+                return (
+                  <div className={`border rounded-xl p-4 mb-4 ${allDecided ? 'bg-green-900/20 border-green-700/40' : 'bg-blue-900/20 border-blue-700/40'}`}>
+                    <p className={`text-sm mb-3 ${allDecided ? 'text-green-300' : 'text-blue-300'}`}>
+                      {allDecided
+                        ? `Stage 1 complete! Top ${tournament.stage1Config.qualifiersCount} teams advance to Stage 2.`
+                        : `Top ${tournament.stage1Config.qualifiersCount} teams advance. Score all Stage 1 matches to continue.`}
+                    </p>
+                    <button
+                      onClick={handleAdvanceToStage2}
+                      disabled={!allDecided}
+                      className="w-full py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      Advance to Stage 2 <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* Qualified teams banner (after advancing) */}
+              {tournament.qualifiedTeams && tournament.qualifiedTeams.length > 0 && tournament.stage2Bracket && (
+                <div className="bg-green-900/20 border border-green-700/40 rounded-xl p-4 mb-4">
+                  <p className="text-green-300 font-semibold text-sm mb-2">Qualified for Stage 2</p>
+                  <div className="flex flex-wrap gap-2">
+                    {tournament.qualifiedTeams.map((qt, i) => (
+                      <span key={qt.id} className="px-3 py-1 bg-green-900/40 border border-green-700/50 text-green-200 text-xs rounded-lg font-semibold">
+                        #{i + 1} {qt.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {!isEditing && (
                 <button
                   onClick={() => setTournament(t => ({ ...t, stage1Config: undefined, stage1Bracket: undefined, qualifiedTeams: undefined, stage2Bracket: undefined }))}
                   className="w-full py-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-semibold transition-all"
                 >
                   Reset Stage 1 Configuration
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Stage 2 (knockout) — show generated matches with Edit buttons */}
+          {tournament.stage1Config && tournament.stage2Bracket && (
+            <div className="bg-[#151821] border border-purple-700/50 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">Stage 2 · Knockout</h3>
+                <div className="px-2.5 py-1 rounded-lg bg-purple-900/30 border border-purple-700/50">
+                  <p className="text-xs text-purple-400 font-semibold">
+                    {tournament.stage2Bracket.rounds.reduce((s, r) => s + r.length, 0)} matches
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {tournament.stage2Bracket.rounds.map((round, roundIdx) => (
+                  <div key={roundIdx}>
+                    <p className="text-gray-400 text-xs font-semibold mb-2">Round {roundIdx + 1}</p>
+                    <div className="space-y-2">
+                      {round.map(match => (
+                        <div
+                          key={match.id}
+                          className="flex items-center justify-between bg-[#0d0f16] rounded-lg p-3 border border-[#2a2d3a] hover:border-purple-500/40 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm font-semibold truncate">
+                              {match.team1Name} vs {match.team2Name}
+                            </p>
+                            {(match.date || match.time) && (
+                              <p className="text-gray-500 text-xs mt-0.5">
+                                {match.date}{match.date && match.time && ' • '}{match.time}
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setEditingMatch(match)}
+                            className="ml-3 px-3 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded transition-colors flex-shrink-0"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {!isEditing && (
+                <button
+                  onClick={() => setTournament(t => ({ ...t, stage2Bracket: undefined }))}
+                  className="w-full mt-4 py-2 rounded-lg bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-semibold transition-all"
+                >
+                  Reset Stage 2 Bracket
                 </button>
               )}
             </div>
@@ -2844,8 +3055,14 @@ function CreateTournamentScreen({
           }}
           onGenerate={isGeneratingSecondStage ? handleSecondStageBracketGenerated : handleBracketConfigurationGenerated}
           isSecondStage={isGeneratingSecondStage}
-          qualifiedTeamsCount={isGeneratingSecondStage && tournament.groupStage ? tournament.groupStage.groups.length * tournament.groupStage.teamsQualifyingPerGroup : undefined}
-          teams={tournament.teams}
+          qualifiedTeamsCount={
+            isGeneratingSecondStage
+              ? (tournament.qualifiedTeams?.length
+                  ?? tournament.stage1Config?.qualifiersCount
+                  ?? (tournament.groupStage ? tournament.groupStage.groups.length * tournament.groupStage.teamsQualifyingPerGroup : undefined))
+              : undefined
+          }
+          teams={isGeneratingSecondStage && tournament.qualifiedTeams?.length ? tournament.qualifiedTeams : tournament.teams}
         />
       )}
 

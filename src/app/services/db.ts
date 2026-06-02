@@ -184,14 +184,15 @@ export async function setSiteConfig(key: string, value: string): Promise<void> {
 // ─── Load all admin data ──────────────────────────────────────────────────────
 
 export async function loadAdminData(): Promise<AdminData> {
-  const [tournaments, news, players, standings, heroLink] = await Promise.all([
+  const [tournaments, news, players, standings, heroLink, standingsTournamentId] = await Promise.all([
     getTournaments().catch(() => [] as Tournament[]),
     getNews().catch(() => [] as NewsItem[]),
     getTopPlayers().catch(() => [] as TopPlayer[]),
     getStandings().catch(() => [] as StandingTeam[]),
     getSiteConfig('hero_link').catch(() => ''),
+    getSiteConfig('standings_tournament_id').catch(() => ''),
   ]);
-  return { matches: [], standings, news, players, tournaments, heroLink };
+  return { matches: [], standings, news, players, tournaments, heroLink, standingsTournamentId };
 }
 
 // ─── Migrate from localStorage ────────────────────────────────────────────────
