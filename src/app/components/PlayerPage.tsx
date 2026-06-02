@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, User, Trophy, Shield } from 'lucide-react';
+import { ChevronLeft, Trophy, Shield } from 'lucide-react';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import type {
   Tournament,
   TeamInTournament,
@@ -14,17 +15,17 @@ import { agentIconUrl } from '../utils/valorantAssets';
 
 // Render an agent name with its official icon (falls back to a 2-letter chip).
 function AgentTag({ agent }: { agent?: string }) {
-  if (!agent) return <span className="text-gray-500">—</span>;
+  if (!agent) return <span className="arena-md-table__dim">—</span>;
   return (
-    <span className="inline-flex items-center gap-1.5 flex-wrap">
+    <span className="arena-pp-agents">
       {agent.split(',').map(a => a.trim()).filter(Boolean).map((a, i) => {
         const url = agentIconUrl(a);
         return (
-          <span key={i} className="inline-flex items-center gap-1" title={a}>
+          <span key={i} className="arena-pp-agent" title={a}>
             {url
-              ? <img src={url} alt={a} className="w-5 h-5 rounded object-cover bg-[#0d0f16] flex-shrink-0" />
-              : <span className="w-5 h-5 rounded bg-[#0d0f16] border border-[#2a2d3a] flex items-center justify-center text-[8px] text-gray-500 flex-shrink-0">{a.slice(0, 2).toUpperCase()}</span>}
-            <span>{a}</span>
+              ? <img src={url} alt={a} className="arena-pp-agent__icon" />
+              : <span className="arena-pp-agent__fallback">{a.slice(0, 2).toUpperCase()}</span>}
+            <span className="arena-pp-agent__name">{a}</span>
           </span>
         );
       })}
@@ -41,15 +42,23 @@ interface PlayerMapStat extends MatchPlayerStat {
   date?: string;
 }
 
-function getRoleColor(role?: string) {
+// Role badge color (text + background) tuned for the dark editorial surface.
+function getRoleStyle(role?: string): { color: string; background: string } {
   switch (role) {
-    case 'igl': return 'text-yellow-400 bg-yellow-400/10';
-    case 'duelist': return 'text-red-400 bg-red-400/10';
-    case 'controller': return 'text-blue-400 bg-blue-400/10';
-    case 'sentinel': return 'text-green-400 bg-green-400/10';
-    case 'initiator': return 'text-purple-400 bg-purple-400/10';
-    default: return 'text-gray-400 bg-gray-400/10';
+    case 'igl': return { color: '#facc15', background: 'rgba(250,204,21,0.1)' };
+    case 'duelist': return { color: '#f87171', background: 'rgba(248,113,113,0.1)' };
+    case 'controller': return { color: '#60a5fa', background: 'rgba(96,165,250,0.1)' };
+    case 'sentinel': return { color: '#4ade80', background: 'rgba(74,222,128,0.1)' };
+    case 'initiator': return { color: '#c084fc', background: 'rgba(192,132,252,0.1)' };
+    default: return { color: '#9ca3af', background: 'rgba(156,163,175,0.1)' };
   }
+}
+
+// Two uppercase initials of a player name, for the photo fallback.
+function playerInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return name.trim().substring(0, 2).toUpperCase();
 }
 
 // Find the player + their team within a tournament.
@@ -167,29 +176,27 @@ export function PlayerPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0d0f16]">
+      <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
-        <div className="flex items-center justify-center py-32">
-          <div className="w-6 h-6 border-2 border-[#ff4655] border-t-transparent rounded-full animate-spin" />
+        <div className="arena-md-state">
+          <p className="arena-md-state__text animate-pulse">Loading player…</p>
         </div>
+        <Footer />
       </div>
     );
   }
 
   if (!tournament || !found) {
     return (
-      <div className="min-h-screen bg-[#0d0f16]">
+      <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
-        <main className="max-w-5xl mx-auto px-4 py-16 text-center">
-          <User className="w-12 h-12 mx-auto text-gray-600 mb-4" />
-          <p className="text-gray-400 mb-4">Player not found</p>
-          <button
-            onClick={() => navigate('/teams')}
-            className="text-[#ff4655] text-sm hover:underline"
-          >
-            Back to Teams
+        <div className="arena-md-state">
+          <p className="arena-md-state__text">Player not found.</p>
+          <button onClick={() => navigate('/teams')} className="arena-md__back" style={{ margin: '0 auto' }}>
+            <ChevronLeft className="w-4 h-4" /> Back to Teams
           </button>
-        </main>
+        </div>
+        <Footer />
       </div>
     );
   }
@@ -204,75 +211,60 @@ export function PlayerPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0d0f16] pb-16">
+    <div className="min-h-screen bg-[#0e0e0e]">
       <Header />
 
-      <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+      <main className="arena-md">
         {/* Back */}
-        <button
-          onClick={() => navigate('/teams')}
-          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-        >
-          <ChevronLeft className="w-5 h-5" />
-          <span className="text-sm">Back to Teams</span>
+        <button onClick={() => navigate('/teams')} className="arena-md__back">
+          <ChevronLeft className="w-4 h-4" />
+          Back to Teams
         </button>
 
-        {/* Player header */}
-        <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-6">
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-            {/* Photo */}
-            {player.photo ? (
-              <div className="w-32 h-32 rounded-xl overflow-hidden bg-[#0d0f16] flex-shrink-0">
-                <img src={player.photo} alt={player.name} className="w-full h-full object-cover" />
-              </div>
-            ) : (
-              <div className="w-32 h-32 rounded-xl bg-gradient-to-br from-[#ff4655]/20 to-[#ff4655]/5 flex items-center justify-center flex-shrink-0">
-                <User className="w-12 h-12 text-gray-600" />
-              </div>
-            )}
+        {/* Player hero */}
+        <div className="arena-pp-hero">
+          <div className="arena-pp-hero__photo">
+            {player.photo
+              ? <img src={player.photo} alt={player.name} />
+              : <span className="arena-pp-hero__initials">{playerInitials(player.name)}</span>}
+          </div>
 
-            {/* Identity */}
-            <div className="flex-1 text-center sm:text-left">
-              <h1 className="text-white font-bold text-3xl">{player.name}</h1>
-              {player.riotId && (
-                <p className="text-gray-500 text-sm mt-1 font-mono">{player.riotId}</p>
-              )}
-              <div className="flex items-center justify-center sm:justify-start gap-3 mt-3 flex-wrap">
-                <span className="flex items-center gap-1.5 text-gray-300 text-sm">
-                  <Shield className="w-4 h-4 text-[#ff4655]" />
-                  {team.name}
+          <div className="arena-pp-hero__id">
+            <p className="arena-md-section__eyebrow" style={{ margin: '0 0 0.4rem' }}>Player Profile</p>
+            <h1 className="arena-pp-hero__name">{player.name}</h1>
+            {player.riotId && <p className="arena-pp-hero__riot">{player.riotId}</p>}
+
+            <div className="arena-pp-hero__chips">
+              <button type="button" onClick={() => navigate(`/teams/${team.id}`)} className="arena-pp-chip arena-pp-chip--link">
+                <Shield className="w-3.5 h-3.5" />
+                {team.name}
+              </button>
+              <button type="button" onClick={() => navigate(`/tournament/${tournament.id}`)} className="arena-pp-chip arena-pp-chip--link">
+                <Trophy className="w-3.5 h-3.5" />
+                {tournament.name}
+              </button>
+              {player.role && (
+                <span className="arena-pp-chip arena-pp-chip--role" style={getRoleStyle(player.role)}>
+                  {player.role.toUpperCase()}
                 </span>
-                <span className="flex items-center gap-1.5 text-gray-300 text-sm">
-                  <Trophy className="w-4 h-4 text-[#ff4655]" />
-                  {tournament.name}
-                </span>
-                {player.role && (
-                  <span className={`text-xs uppercase tracking-wider font-semibold px-2 py-0.5 rounded ${getRoleColor(player.role)}`}>
-                    {player.role}
-                  </span>
-                )}
-              </div>
-              {agg.agents.length > 0 && (
-                <div className="flex items-center gap-2 mt-3 flex-wrap">
-                  <span className="text-gray-500 text-xs">Agents played:</span>
-                  <span className="text-gray-300 text-xs">
-                    <AgentTag agent={agg.agents.join(', ')} />
-                  </span>
-                </div>
               )}
             </div>
+
+            {agg.agents.length > 0 && (
+              <div className="arena-pp-hero__agents">
+                <span className="arena-pp-hero__agents-label">Agents</span>
+                <AgentTag agent={agg.agents.join(', ')} />
+              </div>
+            )}
           </div>
         </div>
 
         {/* Summary stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="arena-pp-stats">
           {summaryCards.map(card => (
-            <div
-              key={card.label}
-              className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-5 text-center"
-            >
-              <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">{card.label}</p>
-              <p className={`font-bold text-2xl ${card.highlight ? 'text-[#ff4655]' : 'text-white'}`}>
+            <div key={card.label} className="arena-pp-stat">
+              <p className="arena-pp-stat__label">{card.label}</p>
+              <p className={`arena-pp-stat__value${card.highlight ? ' arena-pp-stat__value--accent' : ''}`}>
                 {card.value}
               </p>
             </div>
@@ -280,57 +272,56 @@ export function PlayerPage() {
         </div>
 
         {/* Match / map history */}
-        <div>
-          <h2 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
-            <div className="w-1 h-6 bg-[#ff4655] rounded" />
-            Match History
-          </h2>
+        <section className="arena-md-section">
+          <p className="arena-md-section__eyebrow">Form</p>
+          <h2 className="arena-md-section__title">Match History</h2>
 
           {mapStats.length === 0 ? (
-            <div className="text-center py-12 bg-[#151821] border border-[#2a2d3a] rounded-xl">
-              <p className="text-gray-400 mb-1">No stats recorded yet</p>
-              <p className="text-gray-600 text-sm">
+            <div className="arena-stats-empty">
+              <p className="arena-stats-empty__title">No stats recorded yet</p>
+              <p className="arena-stats-empty__sub">
                 Stats appear here once match scoreboards are applied for this player.
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-[#2a2d3a]">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-[#151821] text-gray-400 text-xs uppercase">
-                    <th className="px-4 py-3 text-left">Stage</th>
-                    <th className="px-4 py-3 text-left">Opponent</th>
-                    <th className="px-4 py-3 text-left">Map</th>
-                    <th className="px-4 py-3 text-left">Agent</th>
-                    <th className="px-4 py-3 text-center w-28">K / D / A</th>
-                    <th className="px-4 py-3 text-center w-20">ACS</th>
-                    <th className="px-4 py-3 text-center w-20">HS%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mapStats.map((s, i) => (
-                    <tr
-                      key={`${s.playerId}-${i}`}
-                      onClick={() => navigate(`/tournament-match/${s.matchId}`)}
-                      className="border-t border-[#2a2d3a] bg-[#0d0f16] hover:bg-[#151821] transition-colors cursor-pointer"
-                    >
-                      <td className="px-4 py-3 text-purple-400">{s.stageLabel}</td>
-                      <td className="px-4 py-3 text-white">{s.opponentName}</td>
-                      <td className="px-4 py-3 text-gray-300">{s.mapName}</td>
-                      <td className="px-4 py-3 text-gray-400"><AgentTag agent={s.agent} /></td>
-                      <td className="px-4 py-3 text-center text-gray-300">
-                        {s.kills} / {s.deaths} / {s.assists}
-                      </td>
-                      <td className="px-4 py-3 text-center text-white font-semibold">{s.acs}</td>
-                      <td className="px-4 py-3 text-center text-gray-300">{s.hsPercent}%</td>
+            <div className="arena-md-table-card">
+              <div className="arena-md-table-wrap">
+                <table className="arena-md-table arena-pp-table">
+                  <thead>
+                    <tr>
+                      <th className="arena-md-table__left">Stage</th>
+                      <th className="arena-md-table__left">Opponent</th>
+                      <th className="arena-md-table__left">Map</th>
+                      <th className="arena-md-table__left">Agent</th>
+                      <th>K / D / A</th>
+                      <th>ACS</th>
+                      <th>HS%</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {mapStats.map((s, i) => (
+                      <tr
+                        key={`${s.playerId}-${i}`}
+                        onClick={() => navigate(`/tournament-match/${s.matchId}`)}
+                        className={`arena-pp-table__row${i % 2 === 0 ? ' arena-md-table__alt' : ''}`}
+                      >
+                        <td className="arena-md-table__left"><span className="arena-pp-table__stage">{s.stageLabel}</span></td>
+                        <td className="arena-md-table__left arena-pp-table__opp">{s.opponentName}</td>
+                        <td className="arena-md-table__left arena-md-table__dim">{s.mapName}</td>
+                        <td className="arena-md-table__left"><AgentTag agent={s.agent} /></td>
+                        <td className="arena-md-table__dim">{s.kills} / {s.deaths} / {s.assists}</td>
+                        <td className="arena-md-table__acs-top">{s.acs}</td>
+                        <td className="arena-md-table__dim">{s.hsPercent}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
-        </div>
+        </section>
       </main>
+      <Footer />
     </div>
   );
 }

@@ -6,13 +6,52 @@ interface UpcomingMatchProps {
   tournament: string;
   date: string;
   time: string;
+  team1Logo?: string;
+  team2Logo?: string;
+  format?: 'bo1' | 'bo3' | 'bo5';
   matchId?: string;
   // Tournament bracket matches open the rich tournament match page; standalone
   // admin matches use the legacy scoreboard page.
   isTournamentMatch?: boolean;
 }
 
-export function UpcomingMatch({ team1, team2, tournament, date, time, matchId, isTournamentMatch }: UpcomingMatchProps) {
+const FORMAT_LABEL: Record<'bo1' | 'bo3' | 'bo5', string> = {
+  bo1: 'Best of 1',
+  bo3: 'Best of 3',
+  bo5: 'Best of 5',
+};
+
+// Two uppercase initials of a team name, for the logo fallback chip.
+function teamInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return name.trim().substring(0, 2).toUpperCase();
+}
+
+// Friendly countdown: "Today", "Tomorrow", "In 3 days", "In 2 hours". Returns
+// null when there's no usable future date (so the row shows "TBD" instead).
+function countdownLabel(date: string, time: string): string | null {
+  if (!date) return null;
+  const target = new Date(`${date}T${time || '00:00'}`).getTime();
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return null;
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `In ${mins} min${mins !== 1 ? 's' : ''}`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `In ${hours} hour${hours !== 1 ? 's' : ''}`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return 'Tomorrow';
+  if (days < 7) return `In ${days} days`;
+  const weeks = Math.round(days / 7);
+  if (weeks < 5) return `In ${weeks} week${weeks !== 1 ? 's' : ''}`;
+  const months = Math.round(days / 30);
+  return `In ${months} month${months !== 1 ? 's' : ''}`;
+}
+
+export function UpcomingMatch({
+  team1, team2, tournament, date, time, team1Logo, team2Logo, format, matchId, isTournamentMatch,
+}: UpcomingMatchProps) {
   const navigate = useNavigate();
 
   const handleClick = () => {
@@ -21,29 +60,42 @@ export function UpcomingMatch({ team1, team2, tournament, date, time, matchId, i
     }
   };
 
-  const meta = [tournament, 'Best of 3'].filter(Boolean).join(' • ');
-  const when = [date, time].filter(Boolean).join(' ');
+  const formatLabel = format ? FORMAT_LABEL[format] : 'Best of 3';
+  const countdown = countdownLabel(date, time);
+  // Exact schedule (e.g. "May 17 · 14:00") shown as the secondary line.
+  const exact = date
+    ? `${new Date(`${date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${time ? ` · ${time}` : ''}`
+    : '';
 
-  const TeamBadge = ({ name }: { name: string }) => (
-    <div className="arena-match-team">
-      <div className="arena-match-logo">{name.substring(0, 1)}</div>
-      <span className="arena-match-name">{name}</span>
+  const TeamSide = ({ name, logo, align }: { name: string; logo?: string; align: 'left' | 'right' }) => (
+    <div className={`arena-upcoming__team arena-upcoming__team--${align}`}>
+      <span className="arena-upcoming__logo">
+        {logo
+          ? <img src={logo} alt="" />
+          : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
+      </span>
+      <span className="arena-upcoming__name">{name}</span>
     </div>
   );
 
   return (
-    <div onClick={handleClick} className="arena-match-row">
-      <div className="flex-1 flex items-center gap-10 min-w-0">
-        <div className="flex items-center gap-6">
-          <TeamBadge name={team1} />
-          <span className="arena-match-vs">VS</span>
-          <TeamBadge name={team2} />
-        </div>
-        {meta && (
-          <span className="arena-match-meta truncate hidden sm:block">{meta}</span>
-        )}
+    <button type="button" onClick={handleClick} className="arena-upcoming">
+      <div className="arena-upcoming__matchup">
+        <TeamSide name={team1} logo={team1Logo} align="right" />
+        <span className="arena-upcoming__vs">VS</span>
+        <TeamSide name={team2} logo={team2Logo} align="left" />
       </div>
-      <span className="arena-match-time">{when || 'TBD'}</span>
-    </div>
+
+      <div className="arena-upcoming__meta">
+        <span className="arena-upcoming__tournament">{tournament}</span>
+        <span className="arena-upcoming__dot" />
+        <span className="arena-upcoming__format">{formatLabel}</span>
+      </div>
+
+      <div className="arena-upcoming__when">
+        <span className="arena-upcoming__countdown">{countdown ?? 'TBD'}</span>
+        {exact && <span className="arena-upcoming__exact">{exact}</span>}
+      </div>
+    </button>
   );
 }

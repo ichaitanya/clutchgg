@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ImageWithFallback } from './figma/ImageWithFallback';
+import type { Tournament } from './TournamentCreation';
 
 interface HeroSectionProps {
   heroLink?: string;
   heroVideo?: string;
   standingsTournamentId?: string;
+  spotlightTournament?: Tournament | null;
 }
 
 // Extract YouTube video ID from any youtube.com / youtu.be URL.
@@ -123,7 +125,7 @@ function YouTubeBackground({ videoId }: { videoId: string }) {
   );
 }
 
-export function HeroSection({ heroLink, heroVideo, standingsTournamentId }: HeroSectionProps) {
+export function HeroSection({ heroLink, heroVideo, standingsTournamentId, spotlightTournament }: HeroSectionProps) {
   const navigate = useNavigate();
 
   const ytId = heroVideo ? getYouTubeId(heroVideo) : null;
@@ -136,6 +138,11 @@ export function HeroSection({ heroLink, heroVideo, standingsTournamentId }: Hero
     : isGDrive && heroVideo
       ? toGDriveDirectUrl(heroVideo)
       : heroVideo || null;
+
+  // Use tournament's cover image if available, otherwise fallback to default
+  const heroImageSrc = spotlightTournament?.coverImage
+    ? spotlightTournament.coverImage
+    : 'https://t4.ftcdn.net/jpg/04/21/83/03/360_F_421830310_DsAMQEpOnIpPS5OXnx5HtYymT4kJpzjt.jpg';
 
   return (
     <section className={`arena-hero${isYouTube || videoSrc ? ' arena-hero--video' : ''}`}>
@@ -155,8 +162,8 @@ export function HeroSection({ heroLink, heroVideo, standingsTournamentId }: Hero
         </video>
       ) : (
         <ImageWithFallback
-          src="https://t4.ftcdn.net/jpg/04/21/83/03/360_F_421830310_DsAMQEpOnIpPS5OXnx5HtYymT4kJpzjt.jpg"
-          alt="Clutch.gg Invitational 2025"
+          src={heroImageSrc}
+          alt={spotlightTournament ? spotlightTournament.name : 'Clutch.gg Invitational 2025'}
           className="absolute inset-0 w-full h-full object-cover"
           style={{ filter: 'grayscale(100%) brightness(0.55)' }}
         />

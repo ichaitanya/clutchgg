@@ -20,6 +20,7 @@ import { TournamentPage } from './components/TournamentPage';
 import { Footer } from './components/Footer';
 import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
+import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
 import { loadAdminData } from './services/db';
 
 
@@ -44,6 +45,47 @@ function getMatchStatus(date?: string, time?: string) {
   }
 }
 
+// A series is decided once a team reaches ceil(maxMaps/2) map wins (e.g. 2 in a
+// BO3), or all maps are played and someone is ahead.
+function isMatchDecidedByMaps(match: BracketMatch): boolean {
+  const maps = match.maps ?? [];
+  if (maps.length === 0) return false;
+  const maxMaps = match.format === 'bo1' ? 1 : match.format === 'bo5' ? 5 : 3;
+  let w1 = 0, w2 = 0;
+  for (const m of maps) {
+    if (m.team1Score > m.team2Score) w1++;
+    else if (m.team2Score > m.team1Score) w2++;
+  }
+  const needed = Math.ceil(maxMaps / 2);
+  if (w1 >= needed || w2 >= needed) return true;
+  if (maps.length >= maxMaps && w1 !== w2) return true;
+  return false;
+}
+
+// Winner-aware status: a recorded winner or a map-decided result is completed
+// regardless of the scheduled date; otherwise fall back to the date.
+function getEffectiveStatus(match: BracketMatch): 'upcoming' | 'live' | 'completed' {
+  if (match.winner || isMatchDecidedByMaps(match)) return 'completed';
+  return getMatchStatus(match.date, match.time);
+}
+
+// Names standing in for an undecided bracket slot (winner-of, TBD, empty seats).
+function isPlaceholderSlot(name: string): boolean {
+  if (!name) return true;
+  const n = name.trim();
+  return (
+    n === '' ||
+    n === 'Select Team' ||
+    n === 'TBD' ||
+    n === 'LB TBD' ||
+    n === 'WB Champion' ||
+    n === 'LB Champion' ||
+    n.startsWith('Team Slot') ||
+    n.startsWith('Winner') ||
+    n.startsWith('Loser')
+  );
+}
+
 function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
@@ -53,24 +95,42 @@ function Home() {
 
   const handleDataChange = (data: AdminData) => setAdminData(data);
 
-  // Extract matches from tournament brackets
+  // Extract matches from every tournament bracket (single-stage + both stages),
+  // attaching the tournament name and each team's logo (resolved from the roster
+  // by id, then by name). Placeholder slots are filtered out by the consumer.
   const tournamentBracketMatches = adminData
     ? adminData.tournaments
-      .flatMap(tournament =>
-        tournament.generatedBracket
-          ? tournament.generatedBracket.rounds.flat().map(match => ({
-              ...match,
-              status: getMatchStatus(match.date, match.time),
-              tournamentName: tournament.name,
-            }))
-          : []
-      )
+      .flatMap(tournament => {
+        const brackets = [
+          tournament.generatedBracket,
+          tournament.stage1Bracket,
+          tournament.stage2Bracket,
+        ].filter(Boolean) as BracketGenerated[];
+        const logoFor = (teamId: string, teamName: string) => {
+          const byId = tournament.teams.find(tm => tm.id === teamId);
+          if (byId?.logo) return byId.logo;
+          const norm = teamName.trim().toLowerCase();
+          return tournament.teams.find(tm => tm.name.trim().toLowerCase() === norm)?.logo;
+        };
+        return brackets.flatMap(b =>
+          b.rounds.flat().map(match => ({
+            ...match,
+            status: getEffectiveStatus(match),
+            tournamentName: tournament.name,
+            team1Logo: logoFor(match.team1Id, match.team1Name),
+            team2Logo: logoFor(match.team2Id, match.team2Name),
+          }))
+        );
+      })
     : [];
 
   // Derive display data: first try tournament brackets, then fall back to admin matches
   const upcomingMatches = (() => {
     const all = tournamentBracketMatches.length > 0
-      ? tournamentBracketMatches.filter(m => m.status === 'upcoming')
+      ? tournamentBracketMatches.filter(m =>
+          m.status === 'upcoming' &&
+          !isPlaceholderSlot(m.team1Name) &&
+          !isPlaceholderSlot(m.team2Name))
       : adminData
       ? adminData.matches.filter(m => m.status === 'upcoming' && m.visible)
       : null;
@@ -83,11 +143,11 @@ function Home() {
   // Auto-standings: if a tournament is round-robin or group-based, compute its
   // standings tables directly for the homepage (instead of manual standings).
   type StandRow = { id: string; rank: number; name: string; wins: number; losses: number };
-  const autoStandings: { tournamentId: string; tournamentName: string; groups: { title: string; rows: StandRow[] }[] } | null = (() => {
+  const autoStandings: { tournament: any; tournamentId: string; tournamentName: string; groups: { title: string; rows: StandRow[] }[] } | null = (() => {
     if (!adminData) return null;
-    // If the admin picked a tournament for homepage standings, consider only it;
+    // If the admin picked a spotlight tournament, consider only it;
     // otherwise fall back to the first round-robin / group-stage tournament.
-    const selectedId = adminData.standingsTournamentId;
+    const selectedId = adminData.spotlightTournamentId;
     const candidates = selectedId
       ? adminData.tournaments.filter(t => t.id === selectedId)
       : adminData.tournaments;
@@ -102,7 +162,7 @@ function Home() {
           }));
           return { title: g.name, rows };
         }).filter(g => g.rows.length > 0);
-        if (groups.length > 0) return { tournamentId: t.id, tournamentName: t.name, groups };
+        if (groups.length > 0) return { tournament: t, tournamentId: t.id, tournamentName: t.name, groups };
       }
       // Round robin (single-stage generatedBracket or stage1Bracket).
       const rr = [t.generatedBracket, t.stage1Bracket].find(b => b?.bracketType === 'roundrobin');
@@ -110,15 +170,24 @@ function Home() {
         const rows = computeRRStandings(rr.rounds, rr.rrTeams ?? []).map((r, i) => ({
           id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses,
         }));
-        if (rows.length > 0) return { tournamentId: t.id, tournamentName: t.name, groups: [{ title: 'Standings', rows }] };
+        if (rows.length > 0) return { tournament: t, tournamentId: t.id, tournamentName: t.name, groups: [{ title: 'Standings', rows }] };
       }
     }
     return null;
   })();
 
+  // Spotlight tournament (for hero section + stands). Works for any format, not just RRB/group.
+  const spotlightTournament = adminData && adminData.spotlightTournamentId
+    ? adminData.tournaments.find(t => t.id === adminData.spotlightTournamentId) ?? null
+    : null;
+
   // Top players ranked by average ACS, computed from applied tournament match
-  // stats. Falls back to admin-entered / placeholder players when no stats exist.
-  const topByAcs = adminData ? getTopPlayersByAcs(adminData.tournaments, 5) : [];
+  // stats. Scoped to the spotlight tournament (if one is selected); otherwise
+  // considers all tournaments. Falls back to admin-entered / placeholder players
+  // when no stats exist.
+  const topByAcs = adminData
+    ? getTopPlayersByAcs(spotlightTournament ? [spotlightTournament] : adminData.tournaments, 5)
+    : [];
 
   // First paragraph of an article body, used as the Editorial card excerpt.
   // Strips @[label](ref) mention syntax and other markdown artifacts before display.
@@ -192,7 +261,7 @@ function Home() {
       <Header />
 
       {/* Hero */}
-      <HeroSection heroLink={adminData?.heroLink} heroVideo={adminData?.heroVideo} standingsTournamentId={autoStandings?.tournamentId} />
+      <HeroSection heroLink={adminData?.heroLink} heroVideo={adminData?.heroVideo} standingsTournamentId={spotlightTournament?.id} spotlightTournament={spotlightTournament} />
 
       {/* Upcoming Matches + Standings */}
       <section className="arena-section">
@@ -214,12 +283,18 @@ function Home() {
                   const tournament = 'tournamentName' in m ? m.tournamentName : m.tournament;
                   const date = 'date' in m ? m.date : '';
                   const time = 'time' in m ? m.time : '';
+                  const team1Logo = 'team1Logo' in m ? m.team1Logo : undefined;
+                  const team2Logo = 'team2Logo' in m ? m.team2Logo : undefined;
+                  const format = 'format' in m ? m.format : undefined;
                   return (
                     <UpcomingMatch
                       key={m.id}
                       team1={team1}
                       team2={team2}
+                      team1Logo={team1Logo}
+                      team2Logo={team2Logo}
                       tournament={tournament || ''}
+                      format={format}
                       date={date || ''}
                       time={time || ''}
                       matchId={m.id}

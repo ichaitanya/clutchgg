@@ -1,9 +1,10 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trophy, Users, Shield, Clock, Calendar, Map, Youtube, Play, ExternalLink, X } from 'lucide-react';
+import { ArrowLeft, Trophy, Clock, Calendar, Play, ExternalLink, X, Map as MapIcon } from 'lucide-react';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import type { AdminData } from './AdminPanel';
-import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult } from './TournamentCreation';
+import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult, BracketGenerated } from './TournamentCreation';
 import { getTournaments } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { mapImageUrl, agentIconUrl } from '../utils/valorantAssets';
@@ -48,15 +49,23 @@ function isMatchDecidedByMaps(match: BracketMatch): boolean {
   return false;
 }
 
+// Role badge colors, tuned for the dark editorial surface.
 function getRoleColor(role?: string) {
   switch (role) {
-    case 'igl': return 'text-yellow-400 bg-yellow-400/10';
-    case 'duelist': return 'text-red-400 bg-red-400/10';
-    case 'controller': return 'text-blue-400 bg-blue-400/10';
-    case 'sentinel': return 'text-green-400 bg-green-400/10';
-    case 'initiator': return 'text-purple-400 bg-purple-400/10';
-    default: return 'text-gray-400 bg-gray-400/10';
+    case 'igl': return 'color:#facc15;background:rgba(250,204,21,0.1)';
+    case 'duelist': return 'color:#f87171;background:rgba(248,113,113,0.1)';
+    case 'controller': return 'color:#60a5fa;background:rgba(96,165,250,0.1)';
+    case 'sentinel': return 'color:#4ade80;background:rgba(74,222,128,0.1)';
+    case 'initiator': return 'color:#c084fc;background:rgba(192,132,252,0.1)';
+    default: return 'color:#9ca3af;background:rgba(156,163,175,0.1)';
   }
+}
+
+// Two uppercase initials of a team name for the crest fallback.
+function teamInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return name.trim().substring(0, 2).toUpperCase();
 }
 
 // Extract a YouTube video id from the common URL shapes (watch?v=, youtu.be/,
@@ -154,24 +163,114 @@ function deriveScore(match: BracketMatch): { s1: number; s2: number } {
   return { s1, s2 };
 }
 
+// ── Head-to-head / past matches ──────────────────────────────────────────────
+// A normalized player-name set for a roster, used to decide whether two team
+// entries (possibly under different names or tournaments) are "the same team".
+function rosterKey(players: TournamentPlayer[]): Set<string> {
+  return new Set(players.map(p => p.name.trim().toLowerCase()).filter(Boolean));
+}
+
+// Two rosters are treated as the same team when they share at least 3 players.
+function rostersOverlap(a: Set<string>, b: Set<string>): boolean {
+  if (a.size === 0 || b.size === 0) return false;
+  let shared = 0;
+  for (const name of a) if (b.has(name)) shared++;
+  return shared >= 3;
+}
+
+// One finished match involving a tracked team, flattened for the history lists.
+interface HistoryMatch {
+  id: string;
+  tournamentId: string;
+  tournamentName: string;
+  date?: string;
+  // Oriented around the "subject" team: self = the tracked team's score.
+  selfName: string;
+  selfLogo?: string;
+  oppName: string;
+  oppLogo?: string;
+  selfScore: number;
+  oppScore: number;
+  won: boolean;
+  format: 'bo1' | 'bo3' | 'bo5';
+  // Both rosters, so head-to-head can test the opponent side too.
+  selfRoster: Set<string>;
+  oppRoster: Set<string>;
+  ts: number; // sort key (epoch ms; 0 when undated)
+}
+
+// Walk every bracket of every tournament and collect each *completed* match that
+// involves a team whose roster matches `subjectRoster` (≥3 shared players). The
+// result is oriented so `self*` is always the subject team's side.
+function collectHistory(
+  subjectRoster: Set<string>,
+  tournaments: Tournament[],
+  excludeMatchId: string,
+): HistoryMatch[] {
+  const out: HistoryMatch[] = [];
+  for (const t of tournaments) {
+    const brackets = [t.generatedBracket, t.stage1Bracket, t.stage2Bracket].filter(Boolean) as BracketGenerated[];
+    const teamById = new Map(t.teams.map(tm => [tm.id, tm]));
+    for (const b of brackets) {
+      for (const m of b.rounds.flat()) {
+        if (m.id === excludeMatchId) continue;
+        if (!m.winner && !isMatchDecidedByMaps(m)) continue; // completed only
+        const t1 = teamById.get(m.team1Id);
+        const t2 = teamById.get(m.team2Id);
+        const r1 = rosterKey(t1?.players ?? []);
+        const r2 = rosterKey(t2?.players ?? []);
+        const subjectIs1 = rostersOverlap(subjectRoster, r1);
+        const subjectIs2 = rostersOverlap(subjectRoster, r2);
+        if (!subjectIs1 && !subjectIs2) continue;
+        const { s1, s2 } = deriveScore(m);
+        const ts = m.date ? new Date(`${m.date}T${m.time || '00:00'}`).getTime() : 0;
+        const format = (m.format ?? 'bo3') as 'bo1' | 'bo3' | 'bo5';
+        if (subjectIs1) {
+          out.push({
+            id: m.id, tournamentId: t.id, tournamentName: t.name, date: m.date,
+            selfName: t1?.name ?? m.team1Name, selfLogo: t1?.logo,
+            oppName: t2?.name ?? m.team2Name, oppLogo: t2?.logo,
+            selfScore: s1, oppScore: s2, won: s1 > s2, format,
+            selfRoster: r1, oppRoster: r2, ts: Number.isNaN(ts) ? 0 : ts,
+          });
+        } else {
+          out.push({
+            id: m.id, tournamentId: t.id, tournamentName: t.name, date: m.date,
+            selfName: t2?.name ?? m.team2Name, selfLogo: t2?.logo,
+            oppName: t1?.name ?? m.team1Name, oppLogo: t1?.logo,
+            selfScore: s2, oppScore: s1, won: s2 > s1, format,
+            selfRoster: r2, oppRoster: r1, ts: Number.isNaN(ts) ? 0 : ts,
+          });
+        }
+      }
+    }
+  }
+  // Newest first; undated (ts 0) sort to the end.
+  return out.sort((a, b) => b.ts - a.ts);
+}
+
 // ── Sub-components ──────────────────────────────────────────────────────────
-function TeamLogo({ name, gradient }: { name: string; gradient: string }) {
+// Team crest in the hero: uploaded logo, else a gradient tile with initials.
+function HeroCrest({ name, gradient, logo }: { name: string; gradient: string; logo?: string }) {
+  if (logo) {
+    return (
+      <span className="arena-md-hero__crest">
+        <img src={logo} alt={name} />
+      </span>
+    );
+  }
   return (
-    <div
-      className="w-16 h-16 rounded-xl flex items-center justify-center text-white font-bold text-xl flex-shrink-0"
-      style={{ background: gradient }}
-    >
-      {name.substring(0, 2).toUpperCase()}
-    </div>
+    <span className="arena-md-hero__crest arena-md-hero__crest--gradient" style={{ background: gradient }}>
+      <span className="arena-md-hero__crest-text">{teamInitials(name)}</span>
+    </span>
   );
 }
 
 type SortKey = 'kills' | 'kd' | 'acs' | 'hsPercent';
 
-function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlayers }: {
+function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers }: {
   teamName: string;
   teamStats: MatchPlayerStat[];
-  accentColor: string;
   tournamentId: string;
   rosterPlayers: TournamentPlayer[];
 }) {
@@ -186,9 +285,7 @@ function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlay
 
   const SortHeader = ({ label, sortKey: key }: { label: string; sortKey: SortKey }) => (
     <th
-      className={`px-3 py-2.5 text-center cursor-pointer select-none transition-colors hover:text-white ${
-        sortKey === key ? 'text-[#ff4655]' : ''
-      }`}
+      className={`arena-md-table__sortable${sortKey === key ? ' arena-md-table__sorted' : ''}`}
       onClick={() => setSortKey(key)}
     >
       {label}{sortKey === key ? ' ↓' : ''}
@@ -196,20 +293,20 @@ function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlay
   );
 
   return (
-    <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden">
-      {/* Team header */}
-      <div className="px-5 py-3 border-b border-[#2a2d3a]">
-        <span className="font-bold text-sm" style={{ color: accentColor }}>{teamName}</span>
+    <div className="arena-md-table-card">
+      <div className="arena-md-table-card__head">
+        <span className="arena-md-table-card__bar" />
+        <span className="arena-md-table-card__team">{teamName}</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[600px]">
+      <div className="arena-md-table-wrap">
+        <table className="arena-md-table">
           <thead>
-            <tr className="text-gray-500 text-xs uppercase tracking-wider border-b border-[#2a2d3a]">
-              <th className="px-5 py-2.5 text-left">Player</th>
-              <th className="px-3 py-2.5 text-left">Agent</th>
+            <tr>
+              <th className="arena-md-table__left">Player</th>
+              <th className="arena-md-table__left">Agent</th>
               <SortHeader label="K" sortKey="kills" />
-              <th className="px-3 py-2.5 text-center">D</th>
-              <th className="px-3 py-2.5 text-center">A</th>
+              <th>D</th>
+              <th>A</th>
               <SortHeader label="K/D" sortKey="kd" />
               <SortHeader label="ACS" sortKey="acs" />
               <SortHeader label="HS%" sortKey="hsPercent" />
@@ -221,50 +318,47 @@ function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlay
               // Resolve this stat row to a roster player so the name links to
               // their profile (stats are keyed by Riot ID, not roster slot id).
               const rosterPlayer = rosterPlayers.find(p => statMatchesPlayer(s, p));
+              const kdClass = s.kd >= 1.5 ? 'arena-md-table__kd-good' : s.kd >= 1 ? 'arena-md-table__kd-ok' : 'arena-md-table__kd-low';
               return (
-                <tr key={s.playerId} className={`border-b border-[#2a2d3a] last:border-0 ${i % 2 === 0 ? 'bg-[#0d0f16]/40' : ''}`}>
-                  <td className="px-5 py-3">
+                <tr key={s.playerId} className={i % 2 === 0 ? 'arena-md-table__alt' : ''}>
+                  <td className="arena-md-table__left">
                     {rosterPlayer ? (
                       <button
                         onClick={() => navigate(`/player/${tournamentId}/${rosterPlayer.id}`)}
-                        className="text-white font-semibold text-sm hover:text-[#ff4655] transition-colors"
+                        className="arena-md-table__player"
                       >
                         {s.playerName}
                       </button>
                     ) : (
-                      <span className="text-white font-semibold text-sm">{s.playerName}</span>
+                      <span className="arena-md-table__player arena-md-table__player--static">{s.playerName}</span>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-gray-400 text-sm">
+                  <td className="arena-md-table__left">
                     {s.agent ? (
-                      <span className="flex items-center gap-1.5 flex-wrap">
+                      <span className="arena-md-table__agents">
                         {s.agent.split(',').map(a => a.trim()).filter(Boolean).map((a, idx) => {
                           const url = agentIconUrl(a);
-                          return (
-                            <span key={idx} className="flex items-center gap-1" title={a}>
-                              {url
-                                ? <img src={url} alt={a} className="w-6 h-6 rounded object-cover bg-[#0d0f16] flex-shrink-0" />
-                                : <span className="w-6 h-6 rounded bg-[#0d0f16] border border-[#2a2d3a] flex items-center justify-center text-[9px] text-gray-500 flex-shrink-0">{a.slice(0, 2).toUpperCase()}</span>}
-                            </span>
-                          );
+                          return url
+                            ? <img key={idx} src={url} alt={a} title={a} className="arena-md-table__agent" />
+                            : <span key={idx} title={a} className="arena-md-table__agent-fallback">{a.slice(0, 2).toUpperCase()}</span>;
                         })}
                       </span>
-                    ) : '—'}
+                    ) : <span className="arena-md-table__dim">—</span>}
                   </td>
-                  <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.kills}</td>
-                  <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.deaths}</td>
-                  <td className="px-3 py-3 text-center text-white font-semibold text-sm">{s.assists}</td>
-                  <td className="px-3 py-3 text-center">
-                    <span className={`font-bold text-sm ${s.kd >= 1.5 ? 'text-[#4ade80]' : s.kd >= 1 ? 'text-gray-300' : 'text-gray-500'}`}>
+                  <td>{s.kills}</td>
+                  <td>{s.deaths}</td>
+                  <td>{s.assists}</td>
+                  <td>
+                    <span className={kdClass}>
                       {s.kd > 0 ? s.kd.toFixed(2) : (s.deaths > 0 ? (s.kills / s.deaths).toFixed(2) : '—')}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-center">
-                    <span className={`font-bold text-sm ${isTopAcs ? 'text-[#ff4655]' : 'text-white'}`}>
+                  <td>
+                    <span className={isTopAcs ? 'arena-md-table__acs-top' : ''}>
                       {s.acs > 0 ? s.acs : '—'}
                     </span>
                   </td>
-                  <td className="px-3 py-3 text-center text-gray-300 text-sm">
+                  <td className="arena-md-table__dim">
                     {s.hsPercent > 0 ? `${s.hsPercent}%` : '—'}
                   </td>
                 </tr>
@@ -277,20 +371,43 @@ function StatsTable({ teamName, teamStats, accentColor, tournamentId, rosterPlay
   );
 }
 
+// One row in the head-to-head / past-matches lists. Oriented around the subject
+// team: their score on the left, opponent's logo + name, the date on the right.
+function HistoryRow({ h, onClick }: { h: HistoryMatch; onClick: () => void }) {
+  const dateText = h.date
+    ? new Date(`${h.date}T00:00`).toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    : '';
+  return (
+    <button type="button" onClick={onClick} className="arena-md-hrow">
+      <span className="arena-md-hrow__crest">
+        {h.oppLogo ? <img src={h.oppLogo} alt="" /> : <span className="arena-md-hrow__crest-text">{teamInitials(h.oppName)}</span>}
+      </span>
+      <span className="arena-md-hrow__name">{h.oppName}</span>
+      {dateText && <span className="arena-md-hrow__date">{dateText}</span>}
+      <span className="arena-md-hrow__fmt">{h.format.toUpperCase()}</span>
+      <span className={`arena-md-hrow__score${h.won ? ' arena-md-hrow__score--win' : ' arena-md-hrow__score--loss'}`}>
+        {h.selfScore} <span className="arena-md-hrow__score-dash">-</span> {h.oppScore}
+      </span>
+    </button>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export function TournamentMatchPage() {
   const { matchId } = useParams<{ matchId: string }>();
   const navigate = useNavigate();
   const [ctx, setCtx] = useState<MatchContext | null>(null);
+  const [allTournaments, setAllTournaments] = useState<Tournament[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [selectedMapIndex, setSelectedMapIndex] = useState(0);
-  // When set, a YouTube embed URL to show in the stream popup modal.
+  // When set, a YouTube embed URL to show in the video popup modal (stream/clip).
   const [streamPopup, setStreamPopup] = useState<string | null>(null);
 
   useEffect(() => {
     if (!matchId) { setNotFound(true); return; }
     getTournaments()
       .then(tournaments => {
+        setAllTournaments(tournaments);
         const result = findMatchInTournaments(matchId, tournaments);
         if (result) setCtx(result);
         else setNotFound(true);
@@ -312,25 +429,27 @@ export function TournamentMatchPage() {
 
   if (notFound) {
     return (
-      <div className="min-h-screen bg-[#0d0f16]">
+      <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
-        <div className="max-w-4xl mx-auto px-4 py-16 text-center">
-          <p className="text-gray-400 text-lg mb-4">Match not found.</p>
-          <button onClick={() => navigate('/matches')} className="text-[#ff4655] hover:underline text-sm flex items-center gap-1 mx-auto">
+        <div className="arena-md-state">
+          <p className="arena-md-state__text">Match not found.</p>
+          <button onClick={() => navigate('/matches')} className="arena-md__back" style={{ margin: '0 auto' }}>
             <ArrowLeft className="w-4 h-4" /> Back to Schedule
           </button>
         </div>
+        <Footer />
       </div>
     );
   }
 
   if (!ctx) {
     return (
-      <div className="min-h-screen bg-[#0d0f16]">
+      <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
-        <div className="max-w-4xl mx-auto px-4 py-16 text-center">
-          <div className="animate-pulse text-gray-500">Loading match...</div>
+        <div className="arena-md-state">
+          <p className="arena-md-state__text animate-pulse">Loading match…</p>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -363,8 +482,7 @@ export function TournamentMatchPage() {
   // ACS and HS% are averaged over the maps that player actually played; K/D is
   // recomputed from summed kills/deaths.
   const buildTotalStats = (): MatchPlayerStat[] => {
-    // Plain object keyed by playerId — `Map` here is the lucide-react icon import,
-    // not the global constructor.
+    // Aggregate keyed by playerId via a plain object (kept simple/portable).
     type Agg = { row: MatchPlayerStat; agents: Set<string>; mapsPlayed: number; acsSum: number; hsSum: number };
     const acc: Record<string, Agg> = {};
     const order: string[] = [];
@@ -433,93 +551,77 @@ export function TournamentMatchPage() {
     team2Stats = effectiveStats.filter(s => s.teamId === match.team2Id);
   }
 
-  const statusBadge = {
-    live: { label: 'LIVE', cls: 'bg-red-500/20 text-red-400 border border-red-500/50' },
-    upcoming: { label: 'UPCOMING', cls: 'bg-blue-500/10 text-blue-400 border border-blue-500/30' },
-    completed: { label: 'COMPLETED', cls: 'bg-gray-700/60 text-gray-300 border border-gray-600/40' },
-  }[status];
+  const statusLabel = status === 'live' ? 'Live' : status === 'upcoming' ? 'Upcoming' : 'Completed';
+
+  // Highlight clips: only those that resolve to a YouTube embed open in the
+  // popup; others (rare) fall back to opening in a new tab via an anchor.
+  const clips = (match.clips ?? []).filter(c => c.url);
+  const hasBroadcast = !!match.streamUrl || clips.length > 0;
+
+  // History: each team's completed matches (this one excluded), matched across
+  // all tournaments by roster overlap. Head-to-head = the subset where the
+  // opponent side also matches the *other* team here.
+  const roster1 = rosterKey(team1?.players ?? []);
+  const roster2 = rosterKey(team2?.players ?? []);
+  const history1 = collectHistory(roster1, allTournaments, match.id);
+  const history2 = collectHistory(roster2, allTournaments, match.id);
+  const headToHead = history1.filter(h => rostersOverlap(h.oppRoster, roster2));
+  const past1 = history1.slice(0, 5);
+  const past2 = history2.slice(0, 5);
+  const hasHistory = headToHead.length > 0 || past1.length > 0 || past2.length > 0;
 
   return (
-    <div className="min-h-screen bg-[#0d0f16]">
+    <div className="min-h-screen bg-[#0e0e0e]">
       <Header />
 
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+      <main className="arena-md">
         {/* Back */}
-        <button
-          onClick={() => navigate('/matches')}
-          className="flex items-center gap-2 text-[#ff4655] hover:text-[#ff6670] transition-colors text-sm font-medium"
-        >
+        <button onClick={() => navigate('/matches')} className="arena-md__back">
           <ArrowLeft className="w-4 h-4" />
           Back to Schedule
         </button>
 
-        {/* ── Match Header ───────────────────────────────────────────────── */}
-        <div className="bg-[#151821] border border-[#2a2d3a] rounded-2xl overflow-hidden">
-          {/* Stage label */}
-          <div className="text-center pt-6 pb-2">
-            <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">{stage}</span>
-          </div>
+        {/* ── Match Hero ─────────────────────────────────────────────────── */}
+        <div className={`arena-md-hero${isCompleted && team1Won ? ' arena-md-hero--win-left' : ''}${isCompleted && team2Won ? ' arena-md-hero--win-right' : ''}`}>
+          <div className="arena-md-hero__stage">{stage}</div>
 
-          {/* Teams + Score */}
-          <div className="flex items-center justify-center gap-0 px-8 py-6">
+          <div className="arena-md-hero__body">
             {/* Team 1 */}
-            <div className={`flex flex-col items-center gap-3 flex-1 ${isCompleted && !team1Won ? 'opacity-40' : ''}`}>
-              {team1 ? (
-                <button onClick={() => navigate(`/teams/${team1.id}`)} className="flex flex-col items-center gap-3 group">
-                  <TeamLogo name={team1Name} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
-                  <div className="text-center">
-                    <p className={`font-black text-xl tracking-wide group-hover:text-[#ff4655] transition-colors ${team1Won ? 'text-[#ff4655]' : 'text-white'}`}>
-                      {team1Name.toUpperCase().substring(0, 6)}
-                    </p>
-                    <p className="text-gray-500 text-xs mt-0.5 group-hover:text-gray-300 transition-colors">{team1Name}</p>
-                  </div>
-                </button>
-              ) : (
-                <>
-                  <TeamLogo name={team1Name} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
-                  <div className="text-center">
-                    <p className={`font-black text-xl tracking-wide ${team1Won ? 'text-[#ff4655]' : 'text-white'}`}>
-                      {team1Name.toUpperCase().substring(0, 6)}
-                    </p>
-                    <p className="text-gray-500 text-xs mt-0.5">{team1Name}</p>
-                  </div>
-                </>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => team1 && navigate(`/teams/${team1.id}`)}
+              className={`arena-md-hero__team${isCompleted && team1Won ? ' arena-md-hero__team--winner' : ''}${isCompleted && !team1Won ? ' arena-md-hero__team--loser' : ''}`}
+              disabled={!team1}
+            >
+              <HeroCrest name={team1Name} logo={team1?.logo} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
+              <p className="arena-md-hero__team-name">{team1Name}</p>
+            </button>
 
-            {/* Score */}
-            <div className="flex flex-col items-center gap-3 px-10 flex-shrink-0">
+            {/* Center */}
+            <div className="arena-md-hero__center">
               {isCompleted ? (
-                <div className="flex items-center gap-5">
-                  <span className={`text-6xl font-black ${team1Won ? 'text-white' : 'text-gray-600'}`}>{s1}</span>
-                  <div className="flex flex-col items-center gap-1">
-                    <span className="text-gray-600 text-2xl font-black">:</span>
-                    <span className={`text-xs font-bold uppercase px-3 py-1 rounded-full ${statusBadge.cls}`}>
-                      {statusBadge.label}
-                    </span>
-                  </div>
-                  <span className={`text-6xl font-black ${team2Won ? 'text-white' : 'text-gray-600'}`}>{s2}</span>
-                </div>
+                <span className="arena-md-hero__score">
+                  <span className={team1Won ? 'arena-md-hero__score-win' : ''}>{s1}</span>
+                  <span className="arena-md-hero__score-sep">:</span>
+                  <span className={team2Won ? 'arena-md-hero__score-win' : ''}>{s2}</span>
+                </span>
               ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <span className="text-5xl font-black text-gray-700">VS</span>
-                  <span className={`text-xs font-bold uppercase px-3 py-1 rounded-full ${statusBadge.cls}`}>
-                    {statusBadge.label}
-                  </span>
-                </div>
+                <span className="arena-md-hero__vs">vs</span>
               )}
-
-              {/* Date/Time */}
+              <span className={`arena-md-hero__badge arena-md-hero__badge--${status}`}>
+                {status === 'live' && <span className="arena-md-hero__badge-dot" />}
+                {statusLabel}
+              </span>
               {(match.date || match.time) && (
-                <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
+                <div className="arena-md-hero__datetime">
                   {match.date && (
-                    <span className="flex items-center gap-1">
+                    <span>
                       <Calendar className="w-3 h-3" />
                       {new Date(`${match.date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   )}
                   {match.time && (
-                    <span className="flex items-center gap-1">
+                    <span>
                       <Clock className="w-3 h-3" />
                       {match.time}
                     </span>
@@ -529,205 +631,170 @@ export function TournamentMatchPage() {
             </div>
 
             {/* Team 2 */}
-            <div className={`flex flex-col items-center gap-3 flex-1 ${isCompleted && !team2Won ? 'opacity-40' : ''}`}>
-              {team2 ? (
-                <button onClick={() => navigate(`/teams/${team2.id}`)} className="flex flex-col items-center gap-3 group">
-                  <TeamLogo name={team2Name} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
-                  <div className="text-center">
-                    <p className={`font-black text-xl tracking-wide group-hover:text-[#ff4655] transition-colors ${team2Won ? 'text-[#ff4655]' : 'text-white'}`}>
-                      {team2Name.toUpperCase().substring(0, 6)}
-                    </p>
-                    <p className="text-gray-500 text-xs mt-0.5 group-hover:text-gray-300 transition-colors">{team2Name}</p>
-                  </div>
-                </button>
-              ) : (
-                <>
-                  <TeamLogo name={team2Name} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
-                  <div className="text-center">
-                    <p className={`font-black text-xl tracking-wide ${team2Won ? 'text-[#ff4655]' : 'text-white'}`}>
-                      {team2Name.toUpperCase().substring(0, 6)}
-                    </p>
-                    <p className="text-gray-500 text-xs mt-0.5">{team2Name}</p>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Tournament info strip */}
-          <div className="border-t border-[#2a2d3a] px-6 py-3 flex items-center justify-center gap-2">
-            <Trophy className="w-3.5 h-3.5 text-[#ff4655]" />
             <button
-              onClick={() => navigate(`/tournament/${tournament.id}`)}
-              className="text-[#ff4655] text-xs hover:underline"
+              type="button"
+              onClick={() => team2 && navigate(`/teams/${team2.id}`)}
+              className={`arena-md-hero__team${isCompleted && team2Won ? ' arena-md-hero__team--winner' : ''}${isCompleted && !team2Won ? ' arena-md-hero__team--loser' : ''}`}
+              disabled={!team2}
             >
-              {tournament.name}
+              <HeroCrest name={team2Name} logo={team2?.logo} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
+              <p className="arena-md-hero__team-name">{team2Name}</p>
             </button>
-            <span className="text-gray-600 text-xs">·</span>
-            <span className="text-gray-500 text-xs">Round {match.round + 1}</span>
           </div>
 
+          {/* Tournament strip */}
+          <div className="arena-md-hero__strip">
+            <Link to={`/tournament/${tournament.id}`} className="arena-md-hero__strip-link">
+              <Trophy className="w-4 h-4" />
+              {tournament.name}
+            </Link>
+            <span className="arena-md-hero__strip-sep">·</span>
+            <span>Round {match.round + 1}</span>
+          </div>
         </div>
 
         {/* ── Map Results ────────────────────────────────────────────────── */}
         {hasMaps && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Map className="w-4 h-4 text-gray-400" />
-              <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Map Results</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <section className="arena-md-section">
+            <p className="arena-md-section__eyebrow">Series</p>
+            <h2 className="arena-md-section__title">Map Results</h2>
+            <div className="arena-md-maps">
               {match.maps!.map((m, i) => {
                 if (!isPlayedMap(m)) return null; // hide unplayed placeholder slots
                 const t1wins = m.team1Score > m.team2Score;
                 const t2wins = m.team2Score > m.team1Score;
                 const clickable = mapsWithStats && !!m.playerStats && m.playerStats.length > 0;
                 const isSelected = clickable && i === safeMapIndex;
+                const splash = mapImageUrl(m.mapName);
                 return (
                   <div
                     key={i}
                     onClick={() => clickable && setSelectedMapIndex(i)}
-                    className={`bg-[#151821] border rounded-xl p-4 text-center transition-all ${
-                      isSelected
-                        ? 'border-[#ff4655] ring-1 ring-[#ff4655]/40'
-                        : 'border-[#2a2d3a]'
-                    } ${clickable ? 'cursor-pointer hover:border-[#ff4655]/60' : ''}`}
+                    className={`arena-md-map${clickable ? ' arena-md-map--clickable' : ''}${isSelected ? ' arena-md-map--selected' : ''}`}
                   >
-                    {mapImageUrl(m.mapName) && (
-                      <div className="relative h-24 -mx-4 -mt-4 mb-3 rounded-t-xl overflow-hidden bg-[#0d0f16]">
-                        <img src={mapImageUrl(m.mapName)!} alt={m.mapName} className="absolute inset-0 w-full h-full object-cover object-center" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#151821] via-[#151821]/20 to-transparent" />
-                      </div>
-                    )}
-                    <p className="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-3">
-                      {m.mapName || `Map ${i + 1}`}
-                    </p>
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <span className={`text-3xl font-black ${t1wins ? 'text-white' : 'text-gray-600'}`}>{m.team1Score}</span>
-                      <span className="text-gray-600 text-xl font-bold">:</span>
-                      <span className={`text-3xl font-black ${t2wins ? 'text-white' : 'text-gray-600'}`}>{m.team2Score}</span>
-                    </div>
-                    {(t1wins || t2wins) && (
-                      <p className={`text-xs font-bold ${t1wins ? 'text-[#ff4655]' : 'text-[#a78bfa]'}`}>
-                        {t1wins ? team1Name : team2Name} wins
-                      </p>
-                    )}
-                    {clickable && (
-                      <p className="text-[10px] text-gray-600 mt-2 uppercase tracking-wider">
-                        {isSelected ? 'Viewing scoreboard' : 'Click for scoreboard'}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── Stream ─────────────────────────────────────────────────────── */}
-        {match.streamUrl && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Youtube className="w-4 h-4 text-[#ff4655]" />
-              <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Stream</h2>
-            </div>
-            {youtubeEmbedUrl(match.streamUrl) ? (
-              <button
-                onClick={() => setStreamPopup(youtubeEmbedUrl(match.streamUrl!))}
-                className="group relative w-full rounded-xl overflow-hidden border border-[#2a2d3a] bg-black hover:border-[#ff4655]/50 transition-colors"
-                style={{ aspectRatio: '16 / 9' }}
-              >
-                {youtubeThumb(match.streamUrl) ? (
-                  <img
-                    src={youtubeThumb(match.streamUrl)!}
-                    alt="Match stream"
-                    className="absolute inset-0 w-full h-full object-cover"
-                  />
-                ) : (
-                  <Youtube className="absolute inset-0 m-auto w-12 h-12 text-gray-600" />
-                )}
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/30 transition-colors">
-                  <div className="w-16 h-16 rounded-full bg-[#ff4655] flex items-center justify-center shadow-lg">
-                    <Play className="w-7 h-7 text-white fill-white ml-1" />
-                  </div>
-                </div>
-              </button>
-            ) : (
-              <a
-                href={match.streamUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 bg-[#151821] border border-[#2a2d3a] rounded-xl px-4 py-3 text-[#ff4655] text-sm hover:border-[#ff4655]/50 transition-colors"
-              >
-                <ExternalLink className="w-4 h-4" /> Watch stream
-              </a>
-            )}
-          </div>
-        )}
-
-        {/* ── Clips ──────────────────────────────────────────────────────── */}
-        {(match.clips ?? []).length > 0 && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Play className="w-4 h-4 text-[#ff4655]" />
-              <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Clips</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {(match.clips ?? []).filter(c => c.url).map(clip => {
-                const thumb = youtubeThumb(clip.url);
-                return (
-                  <a
-                    key={clip.id}
-                    href={clip.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden hover:border-[#ff4655]/50 transition-colors"
-                  >
-                    <div className="relative bg-black flex items-center justify-center" style={{ aspectRatio: '16 / 9' }}>
-                      {thumb ? (
-                        <img src={thumb} alt={clip.title || 'Clip'} className="w-full h-full object-cover" />
-                      ) : (
-                        <Youtube className="w-10 h-10 text-gray-600" />
+                    <span className="arena-md-map__thumb">
+                      {splash
+                        ? <img src={splash} alt={m.mapName} />
+                        : <MapIcon className="w-4 h-4" />}
+                    </span>
+                    <span className="arena-md-map__info">
+                      <span className="arena-md-map__name">{m.mapName || `Map ${i + 1}`}</span>
+                      {(t1wins || t2wins) && (
+                        <span className="arena-md-map__winner">{t1wins ? team1Name : team2Name} wins</span>
                       )}
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div className="w-12 h-12 rounded-full bg-[#ff4655] flex items-center justify-center">
-                          <Play className="w-5 h-5 text-white fill-white ml-0.5" />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="px-3 py-2.5">
-                      <p className="text-white text-sm font-semibold truncate">
-                        {clip.title || 'Untitled clip'}
-                      </p>
-                    </div>
-                  </a>
+                      {clickable && (
+                        <span className="arena-md-map__hint">
+                          {isSelected ? 'Viewing scoreboard' : 'Click for scoreboard'}
+                        </span>
+                      )}
+                    </span>
+                    <span className="arena-md-map__score">
+                      <span className={t1wins ? 'arena-md-map__score-win' : ''}>{m.team1Score}</span>
+                      <span className="arena-md-map__score-sep">:</span>
+                      <span className={t2wins ? 'arena-md-map__score-win' : ''}>{m.team2Score}</span>
+                    </span>
+                  </div>
                 );
               })}
             </div>
-          </div>
+          </section>
+        )}
+
+        {/* ── Broadcast & Highlights (compact two-column tiles) ──────────── */}
+        {hasBroadcast && (
+          <section className="arena-md-section">
+            <div className="arena-md-media">
+              {/* Streams */}
+              <div className="arena-md-media__col">
+                <p className="arena-md-media__label">Streams</p>
+                {match.streamUrl ? (
+                  (() => {
+                    const embed = youtubeEmbedUrl(match.streamUrl!);
+                    return embed ? (
+                      <button
+                        type="button"
+                        onClick={() => setStreamPopup(embed)}
+                        className="arena-md-tile arena-md-tile--primary"
+                      >
+                        <Play className="w-4 h-4 arena-md-tile__icon" />
+                        <span className="arena-md-tile__text">Match Stream</span>
+                      </button>
+                    ) : (
+                      <a
+                        href={match.streamUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="arena-md-tile arena-md-tile--primary"
+                      >
+                        <ExternalLink className="w-4 h-4 arena-md-tile__icon" />
+                        <span className="arena-md-tile__text">Match Stream</span>
+                      </a>
+                    );
+                  })()
+                ) : (
+                  <p className="arena-md-media__empty">Not available</p>
+                )}
+              </div>
+
+              {/* Highlights / clips */}
+              <div className="arena-md-media__col">
+                <p className="arena-md-media__label">Highlights</p>
+                {clips.length > 0 ? (
+                  <div className="arena-md-tile-grid">
+                    {clips.map(clip => {
+                      const embed = youtubeEmbedUrl(clip.url);
+                      const label = clip.title || 'Clip';
+                      return embed ? (
+                        <button
+                          key={clip.id}
+                          type="button"
+                          onClick={() => setStreamPopup(embed)}
+                          className="arena-md-tile"
+                        >
+                          <Play className="w-3.5 h-3.5 arena-md-tile__icon" />
+                          <span className="arena-md-tile__text">{label}</span>
+                        </button>
+                      ) : (
+                        <a
+                          key={clip.id}
+                          href={clip.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="arena-md-tile"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5 arena-md-tile__icon" />
+                          <span className="arena-md-tile__text">{label}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="arena-md-media__empty">Not yet available</p>
+                )}
+              </div>
+            </div>
+          </section>
         )}
 
         {/* ── Player Stats ───────────────────────────────────────────────── */}
         {hasAnyTeamPlayers && (
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Users className="w-4 h-4 text-gray-400" />
-              <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Player Stats</h2>
+          <section className="arena-md-section">
+            <p className="arena-md-section__eyebrow">Performance</p>
+            <h2 className="arena-md-section__title">
+              Player Stats
               {mapsWithStats && (match.maps?.length ?? 0) > 1 && (
-                <span className="ml-2 text-[#ff4655] text-xs font-bold uppercase tracking-wider">
-                  · {isTotalView ? 'Total' : (match.maps?.[safeMapIndex]?.mapName || `Map ${safeMapIndex + 1}`)}
+                <span className="arena-md-section__title-sub">
+                  {isTotalView ? 'Total' : (match.maps?.[safeMapIndex]?.mapName || `Map ${safeMapIndex + 1}`)}
                 </span>
               )}
-            </div>
+            </h2>
 
             {/* Map / Total selector — only when multiple maps carry stats */}
             {mapsWithStats && (match.maps?.length ?? 0) > 1 && (
-              <div className="flex flex-wrap gap-2 mb-4">
+              <div className="arena-md-pills">
                 <button
                   onClick={() => setSelectedMapIndex(-1)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    isTotalView ? 'bg-[#ff4655] text-white' : 'bg-[#151821] border border-[#2a2d3a] text-gray-400 hover:text-white hover:border-[#ff4655]/50'
-                  }`}
+                  className={`arena-md-pill${isTotalView ? ' arena-md-pill--active' : ''}`}
                 >
                   Total
                 </button>
@@ -738,9 +805,7 @@ export function TournamentMatchPage() {
                     <button
                       key={i}
                       onClick={() => setSelectedMapIndex(i)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                        !isTotalView && safeMapIndex === i ? 'bg-[#ff4655] text-white' : 'bg-[#151821] border border-[#2a2d3a] text-gray-400 hover:text-white hover:border-[#ff4655]/50'
-                      }`}
+                      className={`arena-md-pill${!isTotalView && safeMapIndex === i ? ' arena-md-pill--active' : ''}`}
                     >
                       {m.mapName || `Map ${i + 1}`}
                     </button>
@@ -755,128 +820,158 @@ export function TournamentMatchPage() {
               const splash = mapImageUrl(selMap?.mapName);
               if (!selMap || !splash) return null;
               return (
-                <div className="relative rounded-xl overflow-hidden border border-[#2a2d3a] mb-4 h-28 sm:h-36">
-                  <img src={splash} alt={selMap.mapName} className="absolute inset-0 w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#0d0f16] via-[#0d0f16]/60 to-[#0d0f16]/30" />
-                  <div className="relative h-full flex items-center justify-between px-5">
+                <div className="arena-md-splash">
+                  <img src={splash} alt={selMap.mapName} />
+                  <div className="arena-md-splash__wash" />
+                  <div className="arena-md-splash__row">
                     <div>
-                      <p className="text-gray-300 text-[11px] uppercase tracking-widest">Map</p>
-                      <p className="text-white font-black text-2xl sm:text-3xl">{selMap.mapName}</p>
+                      <p className="arena-md-splash__label">Map</p>
+                      <p className="arena-md-splash__name">{selMap.mapName}</p>
                     </div>
-                    <div className="flex items-center gap-3 text-white">
-                      <span className={`text-3xl font-black ${selMap.team1Score > selMap.team2Score ? 'text-white' : 'text-gray-400'}`}>{selMap.team1Score}</span>
-                      <span className="text-gray-500 text-xl">:</span>
-                      <span className={`text-3xl font-black ${selMap.team2Score > selMap.team1Score ? 'text-white' : 'text-gray-400'}`}>{selMap.team2Score}</span>
-                    </div>
+                    <span className="arena-md-splash__score">
+                      <span className={selMap.team1Score >= selMap.team2Score ? '' : 'arena-md-splash__score-dim'}>{selMap.team1Score}</span>
+                      <span className="arena-md-splash__score-sep">:</span>
+                      <span className={selMap.team2Score >= selMap.team1Score ? '' : 'arena-md-splash__score-dim'}>{selMap.team2Score}</span>
+                    </span>
                   </div>
                 </div>
               );
             })()}
 
-            <div className="space-y-4">
-              <StatsTable
-                teamName={team1Name}
-                teamStats={team1Stats}
-                accentColor="#ff4655"
-                tournamentId={tournament.id}
-                rosterPlayers={team1?.players ?? []}
-              />
-              <StatsTable
-                teamName={team2Name}
-                teamStats={team2Stats}
-                accentColor="#a78bfa"
-                tournamentId={tournament.id}
-                rosterPlayers={team2?.players ?? []}
-              />
+            <div className="arena-md-stats">
+              <StatsTable teamName={team1Name} teamStats={team1Stats} tournamentId={tournament.id} rosterPlayers={team1?.players ?? []} />
+              <StatsTable teamName={team2Name} teamStats={team2Stats} tournamentId={tournament.id} rosterPlayers={team2?.players ?? []} />
             </div>
-          </div>
+          </section>
         )}
 
-        {/* ── Player Rosters (always shown) ─────────────────────────────── */}
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <Shield className="w-4 h-4 text-gray-400" />
-            <h2 className="text-gray-300 text-sm font-bold uppercase tracking-wider">Player Rosters</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Team 1 */}
-            <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-[#2a2d3a] flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-[#3b82f6]" />
-                <h3 className="text-white font-bold text-sm">{team1Name}</h3>
-                {team1 && <span className="ml-auto text-gray-600 text-xs">{team1.players.length} players</span>}
-              </div>
-              {team1 && team1.players.length > 0 ? (
-                team1.players.map((player, i) => (
-                  <div key={player.id} onClick={() => navigate(`/player/${tournament.id}/${player.id}`)} className="flex items-center gap-3 px-4 py-3 border-b border-[#2a2d3a] last:border-0 hover:bg-[#0d0f16] transition-colors cursor-pointer">
-                    <span className="text-gray-600 text-xs w-4 text-center">{i + 1}</span>
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#ff4655]/30 to-[#ff4655]/10 flex items-center justify-center text-[#ff4655] text-xs font-bold flex-shrink-0">
-                      {player.name.substring(0, 1).toUpperCase()}
-                    </div>
-                    <span className="text-white text-sm font-semibold flex-1 truncate">{player.name}</span>
-                    {player.role && (
-                      <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${getRoleColor(player.role)}`}>
-                        {player.role}
-                      </span>
-                    )}
+        {/* ── Lineups (player face tiles) ────────────────────────────────── */}
+        <section className="arena-md-section">
+          <p className="arena-md-section__eyebrow">Lineups</p>
+          <h2 className="arena-md-section__title">Player Rosters</h2>
+          <div className="arena-md-lineups">
+            {([
+              { team: team1, name: team1Name, logo: team1?.logo, avatar: 'rgba(255,70,85,0.18)', avatarColor: '#ff4655' },
+              { team: team2, name: team2Name, logo: team2?.logo, avatar: 'rgba(139,92,246,0.18)', avatarColor: '#a78bfa' },
+            ] as const).map((side, idx) => (
+              <div key={idx} className="arena-md-lineup">
+                <div className="arena-md-lineup__head">
+                  <span className="arena-md-lineup__crest">
+                    {side.logo
+                      ? <img src={side.logo} alt={side.name} />
+                      : <span className="arena-md-lineup__crest-text">{teamInitials(side.name)}</span>}
+                  </span>
+                  <span className="arena-md-lineup__name">{side.name}</span>
+                </div>
+                {side.team && side.team.players.length > 0 ? (
+                  <div className="arena-md-lineup__grid">
+                    {side.team.players.map(player => (
+                      <button
+                        key={player.id}
+                        type="button"
+                        onClick={() => navigate(`/player/${tournament.id}/${player.id}`)}
+                        className="arena-md-player"
+                        title={player.role ? `${player.name} · ${player.role.toUpperCase()}` : player.name}
+                      >
+                        <span className="arena-md-player__role" style={player.role ? getRoleStyle(player.role) : { color: 'var(--arena-text-dim)' }}>
+                          {player.role ? player.role.toUpperCase() : '—'}
+                        </span>
+                        <span className="arena-md-player__photo">
+                          {player.photo
+                            ? <img src={player.photo} alt={player.name} />
+                            : <span className="arena-md-player__initials" style={{ background: side.avatar, color: side.avatarColor }}>{teamInitials(player.name)}</span>}
+                        </span>
+                        <span className="arena-md-player__name">{player.name}</span>
+                      </button>
+                    ))}
                   </div>
-                ))
-              ) : (
-                <div className="px-4 py-6 text-center text-gray-600 text-sm">No players listed</div>
-              )}
+                ) : (
+                  <div className="arena-md-lineup__empty">No players listed</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Head-to-Head & Past Matches ────────────────────────────────── */}
+        {hasHistory && (
+          <section className="arena-md-section">
+            <p className="arena-md-section__eyebrow">Form</p>
+            <h2 className="arena-md-section__title">Head-to-Head</h2>
+
+            {/* H2H banner */}
+            <div className="arena-md-h2h">
+              <div className="arena-md-h2h__side">
+                <span className="arena-md-lineup__crest arena-md-h2h__crest">
+                  {team1?.logo ? <img src={team1.logo} alt={team1Name} /> : <span className="arena-md-lineup__crest-text">{teamInitials(team1Name)}</span>}
+                </span>
+                <span className="arena-md-h2h__team">{team1Name}</span>
+              </div>
+              <div className="arena-md-h2h__center">
+                {headToHead.length > 0 ? (
+                  <>
+                    <span className="arena-md-h2h__tally">
+                      {headToHead.filter(h => h.won).length}
+                      <span className="arena-md-h2h__tally-sep">–</span>
+                      {headToHead.filter(h => !h.won).length}
+                    </span>
+                    <span className="arena-md-h2h__tally-label">{team1Name} record</span>
+                  </>
+                ) : (
+                  <span className="arena-md-h2h__none">No previous encounters</span>
+                )}
+              </div>
+              <div className="arena-md-h2h__side arena-md-h2h__side--right">
+                <span className="arena-md-h2h__team">{team2Name}</span>
+                <span className="arena-md-lineup__crest arena-md-h2h__crest">
+                  {team2?.logo ? <img src={team2.logo} alt={team2Name} /> : <span className="arena-md-lineup__crest-text">{teamInitials(team2Name)}</span>}
+                </span>
+              </div>
             </div>
 
-            {/* Team 2 */}
-            <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-[#2a2d3a] flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-[#8b5cf6]" />
-                <h3 className="text-white font-bold text-sm">{team2Name}</h3>
-                {team2 && <span className="ml-auto text-gray-600 text-xs">{team2.players.length} players</span>}
+            {/* H2H match list */}
+            {headToHead.length > 0 && (
+              <div className="arena-md-history" style={{ marginBottom: '1.5rem' }}>
+                {headToHead.map(h => <HistoryRow key={h.id} h={h} onClick={() => navigate(`/tournament-match/${h.id}`)} />)}
               </div>
-              {team2 && team2.players.length > 0 ? (
-                team2.players.map((player, i) => (
-                  <div key={player.id} onClick={() => navigate(`/player/${tournament.id}/${player.id}`)} className="flex items-center gap-3 px-4 py-3 border-b border-[#2a2d3a] last:border-0 hover:bg-[#0d0f16] transition-colors cursor-pointer">
-                    <span className="text-gray-600 text-xs w-4 text-center">{i + 1}</span>
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#8b5cf6]/30 to-[#8b5cf6]/10 flex items-center justify-center text-[#8b5cf6] text-xs font-bold flex-shrink-0">
-                      {player.name.substring(0, 1).toUpperCase()}
-                    </div>
-                    <span className="text-white text-sm font-semibold flex-1 truncate">{player.name}</span>
-                    {player.role && (
-                      <span className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${getRoleColor(player.role)}`}>
-                        {player.role}
-                      </span>
-                    )}
+            )}
+
+            {/* Past matches, two columns */}
+            {(past1.length > 0 || past2.length > 0) && (
+              <div className="arena-md-past">
+                <div>
+                  <p className="arena-md-media__label">{team1Name} — Last {past1.length}</p>
+                  <div className="arena-md-history">
+                    {past1.length > 0
+                      ? past1.map(h => <HistoryRow key={h.id} h={h} onClick={() => navigate(`/tournament-match/${h.id}`)} />)
+                      : <p className="arena-md-media__empty">No recent matches</p>}
                   </div>
-                ))
-              ) : (
-                <div className="px-4 py-6 text-center text-gray-600 text-sm">No players listed</div>
-              )}
-            </div>
-          </div>
-        </div>
+                </div>
+                <div>
+                  <p className="arena-md-media__label">{team2Name} — Last {past2.length}</p>
+                  <div className="arena-md-history">
+                    {past2.length > 0
+                      ? past2.map(h => <HistoryRow key={h.id} h={h} onClick={() => navigate(`/tournament-match/${h.id}`)} />)
+                      : <p className="arena-md-media__empty">No recent matches</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </main>
 
       {/* Stream popup modal */}
       {streamPopup && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-          onClick={() => setStreamPopup(null)}
-        >
-          <div className="w-full max-w-4xl" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-end mb-2">
-              <button
-                onClick={() => setStreamPopup(null)}
-                className="text-gray-300 hover:text-white transition-colors p-2"
-                aria-label="Close stream"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="relative w-full rounded-xl overflow-hidden border border-[#2a2d3a] bg-black" style={{ aspectRatio: '16 / 9' }}>
+        <div className="arena-md-modal" onClick={() => setStreamPopup(null)}>
+          <div className="arena-md-modal__inner" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setStreamPopup(null)} className="arena-md-modal__close" aria-label="Close stream">
+              <X className="w-6 h-6" />
+            </button>
+            <div className="arena-md-modal__frame">
               <iframe
                 src={`${streamPopup}?autoplay=1`}
                 title="Match stream"
-                className="absolute inset-0 w-full h-full"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
               />
@@ -884,6 +979,21 @@ export function TournamentMatchPage() {
           </div>
         </div>
       )}
+      <Footer />
     </div>
   );
+}
+
+// Parse the inline role style string into a React style object.
+function getRoleStyle(role?: string): { color?: string; background?: string } {
+  const decl = getRoleColor(role);
+  const style: { color?: string; background?: string } = {};
+  for (const part of decl.split(';')) {
+    const [k, v] = part.split(':');
+    if (k && v) {
+      if (k.trim() === 'color') style.color = v.trim();
+      else style.background = v.trim();
+    }
+  }
+  return style;
 }

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  ChevronLeft, Trophy, Users, Calendar, MapPin, DollarSign, Newspaper, Clock,
+  ChevronLeft, ChevronDown, Trophy, Users, Calendar, MapPin, DollarSign, Newspaper, Clock,
 } from 'lucide-react';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import type { Tournament, BracketGenerated, BracketMatch } from './TournamentCreation';
 import type { NewsItem } from './AdminPanel';
 import { getTournaments, getNews } from '../services/db';
@@ -54,6 +55,24 @@ function effectiveStatus(m: BracketMatch): 'upcoming' | 'live' | 'completed' {
   return getMatchStatus(m.date, m.time);
 }
 
+// Series score (map wins per side). Falls back to a 1-0 from the recorded
+// winner when no maps were entered.
+function deriveScore(m: BracketMatch): { s1: number; s2: number } {
+  const maps = m.maps ?? [];
+  if (maps.length === 0) {
+    return {
+      s1: m.winner === m.team1Id ? 1 : 0,
+      s2: m.winner === m.team2Id ? 1 : 0,
+    };
+  }
+  let s1 = 0, s2 = 0;
+  for (const map of maps) {
+    if (map.team1Score > map.team2Score) s1++;
+    else if (map.team2Score > map.team1Score) s2++;
+  }
+  return { s1, s2 };
+}
+
 // A bracket match isn't a real, listable match until both slots are real teams.
 function isTeamSlotName(name: string) {
   return !name || name === 'Select Team' || name.startsWith('Team Slot') || name === 'TBD' ||
@@ -100,26 +119,27 @@ export function TournamentPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0d0f16]">
+      <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
-        <div className="flex items-center justify-center py-32">
-          <div className="w-6 h-6 border-2 border-[#ff4655] border-t-transparent rounded-full animate-spin" />
+        <div className="arena-md-state">
+          <p className="arena-md-state__text animate-pulse">Loading tournament…</p>
         </div>
+        <Footer />
       </div>
     );
   }
 
   if (!tournament) {
     return (
-      <div className="min-h-screen bg-[#0d0f16]">
+      <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
-        <main className="max-w-5xl mx-auto px-4 py-16 text-center">
-          <Trophy className="w-12 h-12 mx-auto text-gray-600 mb-4" />
-          <p className="text-gray-400 mb-4">Tournament not found</p>
-          <button onClick={() => navigate('/matches')} className="text-[#ff4655] text-sm hover:underline">
-            Back to Matches
+        <div className="arena-md-state">
+          <p className="arena-md-state__text">Tournament not found.</p>
+          <button onClick={() => navigate('/matches')} className="arena-md__back" style={{ margin: '0 auto' }}>
+            <ChevronLeft className="w-4 h-4" /> Back to Matches
           </button>
-        </main>
+        </div>
+        <Footer />
       </div>
     );
   }
@@ -137,78 +157,69 @@ export function TournamentPage() {
     { key: 'news', label: 'News', count: tournamentNews.length },
   ];
 
+  const statusLabel = deriveTournamentStatus(tournament);
+
   return (
-    <div className="min-h-screen bg-[#0d0f16] pb-16">
+    <div className="min-h-screen bg-[#0e0e0e]">
       <Header />
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
+      <main className="arena-md">
         {/* Back */}
-        <button
-          onClick={() => navigate('/matches')}
-          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors mb-5"
-        >
-          <ChevronLeft className="w-5 h-5" />
-          <span className="text-sm">Back to Matches</span>
+        <button onClick={() => navigate('/matches')} className="arena-md__back">
+          <ChevronLeft className="w-4 h-4" />
+          Back to Matches
         </button>
 
-        {/* Event header */}
-        <div className="bg-gradient-to-r from-[#ff4655]/15 to-[#ff4655]/0 border border-[#2a2d3a] rounded-xl p-6">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-xl bg-[#ff4655]/15 flex items-center justify-center flex-shrink-0">
-              <Trophy className="w-7 h-7 text-[#ff4655]" />
+        {/* Event hero */}
+        <div className={`arena-tp-hero${tournament.coverImage ? ' arena-tp-hero--cover' : ''}`}>
+          {tournament.coverImage && (
+            <div className="arena-tp-hero__cover">
+              <img src={tournament.coverImage} alt={tournament.name} />
+              <div className="arena-tp-hero__cover-wash" />
             </div>
-            <div className="min-w-0">
-              <h1 className="text-white font-bold text-2xl sm:text-3xl">{tournament.name}</h1>
-              {tournament.overview && <p className="text-gray-400 text-sm mt-1">{tournament.overview}</p>}
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-3 text-sm">
+          )}
+          <div className="arena-tp-hero__body">
+            <span className="arena-tp-hero__crest">
+              <Trophy className="w-6 h-6" />
+            </span>
+            <div className="arena-tp-hero__id">
+              <p className="arena-md-section__eyebrow" style={{ margin: '0 0 0.4rem' }}>Tournament</p>
+              <h1 className="arena-tp-hero__name">{tournament.name}</h1>
+              {tournament.overview && <p className="arena-tp-hero__overview">{tournament.overview}</p>}
+              <div className="arena-tp-hero__meta">
                 {ev?.startDate && (
-                  <span className="flex items-center gap-1.5 text-gray-300">
-                    <Calendar className="w-4 h-4 text-gray-500" />
-                    {new Date(ev.startDate).toLocaleDateString()}
-                  </span>
+                  <span><Calendar className="w-3.5 h-3.5" />{new Date(ev.startDate).toLocaleDateString()}</span>
                 )}
                 {ev?.location && (
-                  <span className="flex items-center gap-1.5 text-gray-300">
-                    <MapPin className="w-4 h-4 text-gray-500" />
-                    {ev.location}
-                  </span>
+                  <span><MapPin className="w-3.5 h-3.5" />{ev.location}</span>
                 )}
                 {ev?.type && (
-                  <span className="text-gray-300 capitalize flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-[#4ade80]" /> {ev.type}
-                  </span>
+                  <span className="arena-tp-hero__meta-type"><span className="arena-tp-hero__dot" />{ev.type}</span>
                 )}
                 {prizePool?.total && (
-                  <span className="flex items-center gap-1.5 text-[#4ade80] font-semibold">
-                    <DollarSign className="w-4 h-4" />
-                    {prizePool.total}
-                  </span>
+                  <span className="arena-tp-hero__meta-prize"><DollarSign className="w-3.5 h-3.5" />{prizePool.total}</span>
                 )}
-                <span className="text-[#ff4655] capitalize font-semibold">{deriveTournamentStatus(tournament)}</span>
+                <span className="arena-tp-hero__status">{statusLabel}</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex flex-wrap items-center gap-1 mt-5 border-b border-[#2a2d3a]">
+        <div className="arena-tp-tabs">
           {tabs.map(t => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors ${
-                tab === t.key
-                  ? 'border-[#ff4655] text-white'
-                  : 'border-transparent text-gray-400 hover:text-white'
-              }`}
+              className={`arena-tp-tab${tab === t.key ? ' arena-tp-tab--active' : ''}`}
             >
               {t.label}
-              {t.count !== undefined && <span className="ml-1.5 text-xs text-gray-500">{t.count}</span>}
+              {t.count !== undefined && <span className="arena-tp-tab__count">{t.count}</span>}
             </button>
           ))}
         </div>
 
-        <div className="mt-6">
+        <div className="arena-tp-content">
           {tab === 'overview' && (
             <Overview
               tournament={tournament}
@@ -230,78 +241,73 @@ export function TournamentPage() {
           )}
 
           {tab === 'teams' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {tournament.teams.map(team => (
-                <Link
-                  key={team.id}
-                  to={`/teams/${team.id}`}
-                  className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-4 hover:border-[#ff4655]/50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3 mb-3">
-                    {team.logo ? (
-                      <img src={team.logo} alt={team.name} className="w-10 h-10 rounded-lg object-cover" />
-                    ) : (
-                      <div className="w-10 h-10 rounded-lg bg-[#ff4655]/15 flex items-center justify-center text-[#ff4655] font-bold text-sm">
-                        {team.name.substring(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <h3 className="text-white font-semibold text-sm group-hover:text-[#ff4655] transition-colors truncate">{team.name}</h3>
+            tournament.teams.length === 0 ? (
+              <div className="arena-stats-empty">
+                <p className="arena-stats-empty__title">No teams added</p>
+                <p className="arena-stats-empty__sub">Teams will appear here once they're registered.</p>
+              </div>
+            ) : (
+              <div className="arena-tp-teams">
+                {tournament.teams.map(team => (
+                  <div key={team.id} className="arena-tp-team">
+                    <Link to={`/teams/${team.id}`} className="arena-tp-team__head">
+                      <span className="arena-tp-team__crest">
+                        {team.logo
+                          ? <img src={team.logo} alt={team.name} />
+                          : <span className="arena-tp-team__crest-text">{team.name.substring(0, 2).toUpperCase()}</span>}
+                      </span>
+                      <span className="arena-tp-team__name">{team.name}</span>
+                    </Link>
+                    <div className="arena-tp-team__players">
+                      {team.players.slice(0, 5).map(p => (
+                        <Link key={p.id} to={`/player/${tournament.id}/${p.id}`} className="arena-tp-team__player">
+                          {p.name || 'TBD'}
+                        </Link>
+                      ))}
+                      {team.players.length === 0 && <p className="arena-tp-team__empty">No players listed</p>}
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    {team.players.slice(0, 5).map(p => (
-                      <Link
-                        key={p.id}
-                        to={`/player/${tournament.id}/${p.id}`}
-                        onClick={e => e.stopPropagation()}
-                        className="block text-gray-400 text-xs hover:text-[#ff4655] transition-colors truncate"
-                      >
-                        {p.name || 'TBD'}
-                      </Link>
-                    ))}
-                    {team.players.length === 0 && <p className="text-gray-600 text-xs">No players listed</p>}
-                  </div>
-                </Link>
-              ))}
-              {tournament.teams.length === 0 && (
-                <p className="text-gray-500 text-sm col-span-full">No teams added.</p>
-              )}
-            </div>
+                ))}
+              </div>
+            )
           )}
 
           {tab === 'news' && (
-            <div className="space-y-3">
-              {tournamentNews.length === 0 ? (
-                <div className="text-center py-12 bg-[#151821] border border-[#2a2d3a] rounded-xl">
-                  <Newspaper className="w-10 h-10 mx-auto text-gray-600 mb-3" />
-                  <p className="text-gray-400 text-sm">No news linked to this tournament yet</p>
-                </div>
-              ) : (
-                tournamentNews.map(n => (
+            tournamentNews.length === 0 ? (
+              <div className="arena-stats-empty">
+                <Newspaper className="w-10 h-10 arena-stats-empty__icon" />
+                <p className="arena-stats-empty__title">No news yet</p>
+                <p className="arena-stats-empty__sub">No articles are linked to this tournament.</p>
+              </div>
+            ) : (
+              <div className="arena-tp-news">
+                {tournamentNews.map(n => (
                   <Link
                     key={n.id}
                     to={n.link ? n.link : `/news/${n.id}`}
                     target={n.link ? '_blank' : undefined}
-                    className="flex items-center gap-4 bg-[#151821] border border-[#2a2d3a] rounded-xl px-4 py-3 hover:border-[#ff4655]/50 transition-colors group"
+                    className="arena-tp-news__row"
                   >
                     {n.imageUrl ? (
-                      <img src={n.imageUrl} alt={n.title} className="w-20 h-14 object-cover rounded-lg flex-shrink-0 border border-[#2a2d3a]" />
+                      <img src={n.imageUrl} alt={n.title} className="arena-tp-news__thumb" />
                     ) : (
-                      <div className="w-20 h-14 rounded-lg flex-shrink-0 bg-[#0d0f16] flex items-center justify-center">
-                        <Newspaper className="w-5 h-5 text-gray-600" />
-                      </div>
+                      <span className="arena-tp-news__thumb arena-tp-news__thumb--empty">
+                        <Newspaper className="w-5 h-5" />
+                      </span>
                     )}
-                    <div className="min-w-0">
-                      {n.category && <span className="text-[10px] text-[#ff4655] uppercase tracking-wider font-semibold">{n.category}</span>}
-                      <h3 className="text-white font-semibold text-sm group-hover:text-[#ff4655] transition-colors line-clamp-2">{n.title}</h3>
-                      {n.timeAgo && <span className="text-gray-500 text-xs flex items-center gap-1 mt-0.5"><Clock className="w-3 h-3" />{n.timeAgo}</span>}
+                    <div className="arena-tp-news__info">
+                      {n.category && <span className="arena-tp-news__cat">{n.category}</span>}
+                      <h3 className="arena-tp-news__title">{n.title}</h3>
+                      {n.timeAgo && <span className="arena-tp-news__time"><Clock className="w-3 h-3" />{n.timeAgo}</span>}
                     </div>
                   </Link>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )
           )}
         </div>
       </main>
+      <Footer />
     </div>
   );
 }
@@ -318,32 +324,30 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
 }) {
   const ev = tournament.event;
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 space-y-6">
+    <div className="arena-tp-overview">
+      <div className="arena-tp-overview__main">
         {/* Team slots */}
-        <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-            <Users className="w-4 h-4 text-[#ff4655]" /> Team Slots
-          </h3>
-          <div className="grid grid-cols-3 gap-4 text-center">
+        <div className="arena-tp-card">
+          <h3 className="arena-tp-card__title"><Users className="w-4 h-4" /> Team Slots</h3>
+          <div className="arena-tp-slots">
             <div>
-              <p className="text-gray-500 text-xs mb-1">Total</p>
-              <p className="text-white font-bold text-lg">{ev?.maxTeams || tournament.teams.length}</p>
+              <p className="arena-tp-slots__label">Total</p>
+              <p className="arena-tp-slots__value">{ev?.maxTeams || tournament.teams.length}</p>
             </div>
             <div>
-              <p className="text-gray-500 text-xs mb-1">Registered</p>
-              <p className="text-[#ff4655] font-bold text-lg">{tournament.teams.length}</p>
+              <p className="arena-tp-slots__label">Registered</p>
+              <p className="arena-tp-slots__value arena-tp-slots__value--accent">{tournament.teams.length}</p>
             </div>
             <div>
-              <p className="text-gray-500 text-xs mb-1">Available</p>
-              <p className="text-[#60a5fa] font-bold text-lg">{Math.max(0, (ev?.maxTeams || tournament.teams.length) - tournament.teams.length)}</p>
+              <p className="arena-tp-slots__label">Available</p>
+              <p className="arena-tp-slots__value arena-tp-slots__value--blue">{Math.max(0, (ev?.maxTeams || tournament.teams.length) - tournament.teams.length)}</p>
             </div>
           </div>
         </div>
 
         {/* Upcoming + recent */}
         {(upcomingMatches.length > 0 || recentMatches.length > 0) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="arena-tp-overview__minis">
             <MatchMini title="Upcoming" items={upcomingMatches} onMatch={onMatch} />
             <MatchMini title="Recent Results" items={recentMatches} onMatch={onMatch} />
           </div>
@@ -351,27 +355,25 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
       </div>
 
       {/* Prize pool */}
-      <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-5 h-fit">
-        <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-[#ff4655]" /> Prize Pool
-        </h3>
+      <div className="arena-tp-card arena-tp-card--fit">
+        <h3 className="arena-tp-card__title"><DollarSign className="w-4 h-4" /> Prize Pool</h3>
         {hasPrizePool ? (
-          <div className="space-y-2">
+          <div className="arena-tp-prize">
             {prizePool?.total && (
-              <div className="flex items-center justify-between py-2 border-b border-[#2a2d3a]">
-                <span className="text-gray-400 text-sm">Total</span>
-                <span className="text-white font-bold text-lg">{prizePool.total}</span>
+              <div className="arena-tp-prize__row">
+                <span className="arena-tp-prize__label">Total</span>
+                <span className="arena-tp-prize__total">{prizePool.total}</span>
               </div>
             )}
             {prizePlaces.map((p, i) => (
-              <div key={p.position} className={`flex items-center justify-between py-2 ${i < prizePlaces.length - 1 ? 'border-b border-[#2a2d3a]' : ''}`}>
-                <span className="text-gray-400 text-sm">{ordinal(p.position)} Place</span>
-                <span className="font-bold" style={{ color: PLACE_COLORS[i] || '#e5e7eb' }}>{p.prize}</span>
+              <div key={p.position} className="arena-tp-prize__row">
+                <span className="arena-tp-prize__label">{ordinal(p.position)} Place</span>
+                <span className="arena-tp-prize__value" style={{ color: PLACE_COLORS[i] || '#e5e7eb' }}>{p.prize}</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-gray-500 text-sm">No prize pool set.</p>
+          <p className="arena-tp-card__empty">No prize pool set.</p>
         )}
       </div>
     </div>
@@ -384,21 +386,37 @@ function MatchMini({ title, items, onMatch }: {
   onMatch: (id: string) => void;
 }) {
   return (
-    <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-4">
-      <p className="text-gray-300 text-xs font-bold uppercase tracking-wider mb-3">{title}</p>
+    <div className="arena-tp-card">
+      <p className="arena-tp-mini__title">{title}</p>
       {items.length === 0 ? (
-        <p className="text-gray-600 text-xs">Nothing yet.</p>
+        <p className="arena-tp-card__empty">Nothing yet.</p>
       ) : (
-        <div className="space-y-2">
-          {items.map(({ match: m }) => (
-            <button key={m.id} onClick={() => onMatch(m.id)} className="w-full text-left bg-[#0d0f16] rounded-lg px-3 py-2 hover:bg-[#1e2130] transition-colors">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-white text-xs font-medium truncate">{m.team1Name}</span>
-                <span className="text-gray-600 text-[10px]">vs</span>
-                <span className="text-white text-xs font-medium truncate text-right">{m.team2Name}</span>
-              </div>
-            </button>
-          ))}
+        <div className="arena-tp-mini__list">
+          {items.map(({ match: m, status }) => {
+            const done = status === 'completed';
+            const { s1, s2 } = deriveScore(m);
+            const w1 = done && s1 > s2;
+            const w2 = done && s2 > s1;
+            return (
+              <button key={m.id} onClick={() => onMatch(m.id)} className="arena-tp-mini__row">
+                <span className={`arena-tp-mini__team${w1 ? ' arena-tp-mini__team--win' : ''}${done && !w1 ? ' arena-tp-mini__team--loss' : ''}`}>
+                  {m.team1Name}
+                </span>
+                {done ? (
+                  <span className="arena-tp-mini__score">
+                    <span className={w1 ? 'arena-tp-mini__score-win' : ''}>{s1}</span>
+                    <span className="arena-tp-mini__score-sep">:</span>
+                    <span className={w2 ? 'arena-tp-mini__score-win' : ''}>{s2}</span>
+                  </span>
+                ) : (
+                  <span className="arena-tp-mini__vs">vs</span>
+                )}
+                <span className={`arena-tp-mini__team arena-tp-mini__team--right${w2 ? ' arena-tp-mini__team--win' : ''}${done && !w2 ? ' arena-tp-mini__team--loss' : ''}`}>
+                  {m.team2Name}
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -411,48 +429,67 @@ function MatchesList({ matches, onMatch }: {
   onMatch: (id: string) => void;
 }) {
   const groups: { key: string; label: string }[] = [
-    { key: 'live', label: '🔴 Live' },
-    { key: 'upcoming', label: '⏰ Upcoming' },
-    { key: 'completed', label: '✓ Completed' },
+    { key: 'live', label: 'Live' },
+    { key: 'upcoming', label: 'Upcoming' },
+    { key: 'completed', label: 'Completed' },
   ];
-  if (matches.length === 0) return <p className="text-gray-500 text-sm">No matches yet.</p>;
+  if (matches.length === 0) {
+    return (
+      <div className="arena-stats-empty">
+        <p className="arena-stats-empty__title">No matches yet</p>
+        <p className="arena-stats-empty__sub">Matches appear here once the bracket is set.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="arena-tp-matches">
       {groups.map(g => {
         const items = matches.filter(m => m.status === g.key);
         if (items.length === 0) return null;
         return (
-          <div key={g.key} className="space-y-2">
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400">{g.label}</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {items.map(({ match: m, stage }) => (
-                <button
-                  key={m.id}
-                  onClick={() => onMatch(m.id)}
-                  className="bg-[#1e2130] border border-[#2a2d3a] rounded-lg p-4 hover:border-[#ff4655]/30 transition-colors text-left"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded text-xs font-bold bg-[#ff4655]/20 text-[#ff4655] flex items-center justify-center">{m.team1Name.substring(0, 1)}</div>
-                      <span className="text-white text-sm font-semibold flex-1 truncate">{m.team1Name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded text-xs font-bold bg-[#3b82f6]/20 text-[#3b82f6] flex items-center justify-center">{m.team2Name.substring(0, 1)}</div>
-                      <span className="text-white text-sm font-semibold flex-1 truncate">{m.team2Name}</span>
-                    </div>
-                  </div>
-                  <div className="pt-2 mt-2 border-t border-[#2a2d3a] flex items-center justify-between">
-                    <span className="text-xs text-purple-400 font-semibold">{stage}</span>
-                    {(m.date || m.time) && (
-                      <span className="text-gray-400 text-xs">
-                        {m.date && new Date(`${m.date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        {m.date && m.time && ' • '}{m.time}
+          <div key={g.key} className="arena-tp-matchgroup">
+            <div className="arena-match-divider">
+              {g.key === 'live' && <span className="arena-match-card__badge-dot" style={{ color: 'var(--arena-accent)' }} />}
+              <p className={`arena-match-divider__label${g.key === 'live' ? ' arena-match-divider__label--live' : ''}`}>{g.label}</p>
+              <span className="arena-match-divider__rule" />
+              <p className="arena-match-divider__label">{items.length}</p>
+            </div>
+            <div className="arena-tp-matchlist">
+              {items.map(({ match: m, stage, status }) => {
+                const dateText = m.date
+                  ? `${new Date(`${m.date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${m.time ? ` · ${m.time}` : ''}`
+                  : '';
+                const done = status === 'completed';
+                const { s1, s2 } = deriveScore(m);
+                const w1 = done && s1 > s2;
+                const w2 = done && s2 > s1;
+                return (
+                  <button key={m.id} onClick={() => onMatch(m.id)} className="arena-tp-matchrow">
+                    <span className="arena-tp-matchrow__teams">
+                      <span className={`arena-tp-matchrow__team${w1 ? ' arena-tp-matchrow__team--win' : ''}${done && !w1 ? ' arena-tp-matchrow__team--loss' : ''}`}>
+                        {m.team1Name}
                       </span>
-                    )}
-                  </div>
-                </button>
-              ))}
+                      {done ? (
+                        <span className="arena-tp-matchrow__score">
+                          <span className={w1 ? 'arena-tp-matchrow__score-win' : ''}>{s1}</span>
+                          <span className="arena-tp-matchrow__score-sep">:</span>
+                          <span className={w2 ? 'arena-tp-matchrow__score-win' : ''}>{s2}</span>
+                        </span>
+                      ) : (
+                        <span className="arena-tp-matchrow__vs">vs</span>
+                      )}
+                      <span className={`arena-tp-matchrow__team arena-tp-matchrow__team--right${w2 ? ' arena-tp-matchrow__team--win' : ''}${done && !w2 ? ' arena-tp-matchrow__team--loss' : ''}`}>
+                        {m.team2Name}
+                      </span>
+                    </span>
+                    <span className="arena-tp-matchrow__meta">
+                      <span className="arena-tp-matchrow__stage">{stage}</span>
+                      {dateText && <span className="arena-tp-matchrow__date">{dateText}</span>}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         );
@@ -478,41 +515,41 @@ function BracketTab({ tournament, stages }: {
   const [selectedId, setSelectedId] = useState<string>(orderedStages[0]?.id ?? '');
 
   if (bracketStages.length === 0) {
-    return <p className="text-gray-500 text-sm">No bracket has been generated for this tournament.</p>;
+    return (
+      <div className="arena-stats-empty">
+        <p className="arena-stats-empty__title">No bracket yet</p>
+        <p className="arena-stats-empty__sub">No bracket has been generated for this tournament.</p>
+      </div>
+    );
   }
 
   const active = orderedStages.find(s => s.id === selectedId) ?? orderedStages[0];
 
   return (
-    <div className="space-y-4">
-      {/* Stage selector — only when more than one stage has a bracket */}
-      {orderedStages.length > 1 && (
-        <div className="flex items-center gap-3">
-          <label className="text-xs text-gray-400 font-medium">Stage</label>
-          <select
-            className="bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-            value={active.id}
-            onChange={e => setSelectedId(e.target.value)}
-          >
-            {orderedStages.map(s => (
-              <option key={s.id} value={s.id}>{s.label}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div>
-        <h3 className="text-white font-bold text-sm uppercase tracking-wider mb-3">{active.label}</h3>
-        {active.brackets.map((bracket, i) => (
-          <BracketDisplay
-            key={i}
-            bracket={bracket}
-            teams={tournament.teams}
-            editable={false}
-            onBracketChange={() => {}}
-          />
-        ))}
+    <div className="arena-tp-bracket">
+      <div className="arena-tp-bracket__head">
+        <h3 className="arena-tp-bracket__stage">{active.label}</h3>
+        {/* Stage selector — only when more than one stage has a bracket */}
+        {orderedStages.length > 1 && (
+          <div className="arena-stats-select" style={{ minWidth: '12rem' }}>
+            <select value={active.id} onChange={e => setSelectedId(e.target.value)}>
+              {orderedStages.map(s => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 arena-stats-select__chevron" />
+          </div>
+        )}
       </div>
+      {active.brackets.map((bracket, i) => (
+        <BracketDisplay
+          key={i}
+          bracket={bracket}
+          teams={tournament.teams}
+          editable={false}
+          onBracketChange={() => {}}
+        />
+      ))}
     </div>
   );
 }

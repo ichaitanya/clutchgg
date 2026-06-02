@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, BarChart3, Users } from 'lucide-react';
+import { ChevronLeft, ChevronDown, BarChart3, Users } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import type { Tournament, BracketGenerated, MatchPlayerStat, TournamentPlayer } from './TournamentCreation';
 import { getTournaments } from '../services/db';
+import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
 // Does a recorded stat line belong to a given roster player? Stats applied from
 // the Valorant API are keyed by Riot ID (e.g. "TsWaGg#6969"), while manually
@@ -197,6 +199,16 @@ export function StatsPage() {
     getTournaments().then(setTournaments).catch(() => {});
   }, []);
 
+  // Auto-select the first in-progress tournament when tournaments load
+  useEffect(() => {
+    if (tournaments.length > 0 && !tournamentId) {
+      const inProgressTournament = tournaments.find(t => deriveTournamentStatus(t) === 'in-progress');
+      if (inProgressTournament) {
+        setTournamentId(inProgressTournament.id);
+      }
+    }
+  }, [tournaments, tournamentId]);
+
   const tournament = useMemo(
     () => tournaments.find(t => t.id === tournamentId) || null,
     [tournaments, tournamentId],
@@ -262,166 +274,153 @@ export function StatsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0f16] pb-16">
+    <div className="min-h-screen bg-[#0e0e0e]">
       <Header />
 
-      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Page title */}
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate('/')}
-            className="p-2 hover:bg-[#1e2130] rounded-lg transition-colors text-gray-500 hover:text-white"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-[#ff4655]" />
-            <div>
-              <h1 className="text-white font-bold text-2xl">Stats</h1>
-              <p className="text-gray-500 text-sm">Player leaderboards by tournament</p>
-            </div>
-          </div>
+      <main className="arena-md">
+        {/* Back */}
+        <button onClick={() => navigate('/')} className="arena-md__back">
+          <ChevronLeft className="w-4 h-4" />
+          Back to Home
+        </button>
+
+        {/* Editorial heading */}
+        <div style={{ marginBottom: '1.75rem' }}>
+          <p className="arena-md-section__eyebrow">Leaderboards</p>
+          <h1 className="arena-md-section__title" style={{ margin: 0, fontSize: '2rem' }}>Player Stats</h1>
         </div>
 
         {/* Filters */}
-        <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-5">
-          <div className={`grid grid-cols-1 gap-4 ${showStageDropdown ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
-            {/* 1) Tournament */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5 font-medium">Tournament</label>
-              <select
-                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                value={tournamentId}
-                onChange={e => setTournamentId(e.target.value)}
-              >
+        <div className="arena-stats-filters">
+          {/* 1) Tournament */}
+          <div className="arena-stats-field">
+            <label className="arena-stats-field__label">Tournament</label>
+            <div className="arena-stats-select">
+              <select value={tournamentId} onChange={e => setTournamentId(e.target.value)}>
                 <option value="">Select tournament…</option>
                 {tournaments.map(t => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
+              <ChevronDown className="w-4 h-4 arena-stats-select__chevron" />
             </div>
+          </div>
 
-            {/* 2) Stage — only for two-stage tournaments */}
-            {showStageDropdown && (
-              <div>
-                <label className="block text-xs text-gray-400 mb-1.5 font-medium">Stage</label>
-                <select
-                  className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                  value={stageId}
-                  onChange={e => setStageId(e.target.value)}
-                >
+          {/* 2) Stage — only for two-stage tournaments */}
+          {showStageDropdown && (
+            <div className="arena-stats-field">
+              <label className="arena-stats-field__label">Stage</label>
+              <div className="arena-stats-select">
+                <select value={stageId} onChange={e => setStageId(e.target.value)}>
                   {stageOptions.map(s => (
                     <option key={s.id} value={s.id}>{s.label}</option>
                   ))}
                 </select>
+                <ChevronDown className="w-4 h-4 arena-stats-select__chevron" />
               </div>
-            )}
+            </div>
+          )}
 
-            {/* 3) Stat */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5 font-medium">Sort by stat</label>
-              <select
-                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                value={metric}
-                onChange={e => setMetric(e.target.value as MetricKey)}
-              >
-                {METRICS.map(m => (
-                  <option key={m.key} value={m.key}>{m.label}</option>
-                ))}
-              </select>
+          {/* 3) Stat — segmented pills */}
+          <div className="arena-stats-field">
+            <label className="arena-stats-field__label">Sort by</label>
+            <div className="arena-stats-metrics">
+              {METRICS.map(m => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setMetric(m.key)}
+                  className={`arena-md-pill${m.key === metric ? ' arena-md-pill--active' : ''}`}
+                >
+                  {m.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
         {/* Leaderboard */}
         {!tournament ? (
-          <div className="text-center py-16 bg-[#151821] border border-[#2a2d3a] rounded-xl">
-            <BarChart3 className="w-12 h-12 mx-auto text-gray-600 mb-4" />
-            <p className="text-gray-400 mb-1">Select a tournament to view stats</p>
-            <p className="text-gray-600 text-sm">Choose from the dropdown above to get started</p>
+          <div className="arena-stats-empty">
+            <BarChart3 className="w-10 h-10 arena-stats-empty__icon" />
+            <p className="arena-stats-empty__title">Select a tournament to view stats</p>
+            <p className="arena-stats-empty__sub">Choose from the dropdown above to get started</p>
           </div>
         ) : rows.length === 0 ? (
-          <div className="text-center py-16 bg-[#151821] border border-[#2a2d3a] rounded-xl">
-            <Users className="w-12 h-12 mx-auto text-gray-600 mb-4" />
-            <p className="text-gray-400 mb-1">No stats recorded yet</p>
-            <p className="text-gray-600 text-sm">
+          <div className="arena-stats-empty">
+            <Users className="w-10 h-10 arena-stats-empty__icon" />
+            <p className="arena-stats-empty__title">No stats recorded yet</p>
+            <p className="arena-stats-empty__sub">
               Player stats appear here once match scoreboards are applied
               {showStageDropdown && selectedStage ? ` for ${selectedStage.label}` : ''}.
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-[#2a2d3a]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-[#151821] text-gray-400 text-xs uppercase">
-                  <th className="px-4 py-3 text-left w-14">#</th>
-                  <th className="px-4 py-3 text-left">Player</th>
-                  <th className="px-4 py-3 text-left">Team</th>
-                  <th className="px-4 py-3 text-center w-16">Maps</th>
-                  {METRICS.map(m => (
-                    <th
-                      key={m.key}
-                      className={`px-4 py-3 text-center w-24 ${m.key === metric ? 'text-[#ff4655]' : ''}`}
-                    >
-                      {m.label}
-                      {m.key === metric && ' ↓'}
-                    </th>
-                  ))}
-                  <th className="px-4 py-3 text-center w-28">K / D / A</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr
-                    key={row.playerId}
-                    className="border-t border-[#2a2d3a] bg-[#0d0f16] hover:bg-[#151821] transition-colors"
-                  >
-                    <td className="px-4 py-3 text-gray-500 font-semibold">{i + 1}</td>
-                    <td className="px-4 py-3 font-semibold">
-                      {(() => {
-                        const href = resolvePlayerHref(row);
-                        return href ? (
-                          <Link to={href} className="text-white hover:text-[#ff4655] transition-colors">{row.playerName}</Link>
-                        ) : (
-                          <span className="text-white">{row.playerName}</span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-4 py-3">
-                      {(() => {
-                        const href = resolveTeamHref(row.teamName);
-                        return href ? (
-                          <Link to={href} className="text-gray-400 hover:text-[#ff4655] transition-colors">{row.teamName}</Link>
-                        ) : (
-                          <span className="text-gray-400">{row.teamName}</span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-4 py-3 text-center text-gray-400">{row.mapsPlayed}</td>
+          <div className="arena-md-table-card">
+            <div className="arena-md-table-wrap">
+              <table className="arena-md-table arena-stats-table">
+                <thead>
+                  <tr>
+                    <th className="arena-md-table__left arena-stats-table__rank">#</th>
+                    <th className="arena-md-table__left">Player</th>
+                    <th className="arena-md-table__left">Team</th>
+                    <th>Maps</th>
                     {METRICS.map(m => (
-                      <td
-                        key={m.key}
-                        className={`px-4 py-3 text-center ${m.key === metric ? 'text-[#ff4655] font-bold' : 'text-white'}`}
-                      >
-                        {m.format(row[m.key] as number)}
-                      </td>
+                      <th key={m.key} className={m.key === metric ? 'arena-md-table__sorted' : ''}>
+                        {m.label}{m.key === metric && ' ↓'}
+                      </th>
                     ))}
-                    <td className="px-4 py-3 text-center text-gray-300">
-                      {row.kills} / {row.deaths} / {row.assists}
-                    </td>
+                    <th>K / D / A</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => {
+                    const playerHref = resolvePlayerHref(row);
+                    const teamHref = resolveTeamHref(row.teamName);
+                    return (
+                      <tr key={row.playerId} className={i % 2 === 0 ? 'arena-md-table__alt' : ''}>
+                        <td className="arena-md-table__left arena-stats-table__rank">
+                          <span className={i < 3 ? 'arena-stats-table__rank-top' : ''}>{i + 1}</span>
+                        </td>
+                        <td className="arena-md-table__left">
+                          {playerHref ? (
+                            <Link to={playerHref} className="arena-md-table__player">{row.playerName}</Link>
+                          ) : (
+                            <span className="arena-md-table__player arena-md-table__player--static">{row.playerName}</span>
+                          )}
+                        </td>
+                        <td className="arena-md-table__left">
+                          {teamHref ? (
+                            <Link to={teamHref} className="arena-stats-table__team">{row.teamName}</Link>
+                          ) : (
+                            <span className="arena-stats-table__team arena-stats-table__team--static">{row.teamName}</span>
+                          )}
+                        </td>
+                        <td className="arena-md-table__dim">{row.mapsPlayed}</td>
+                        {METRICS.map(m => (
+                          <td key={m.key} className={m.key === metric ? 'arena-md-table__acs-top' : ''}>
+                            {m.format(row[m.key] as number)}
+                          </td>
+                        ))}
+                        <td className="arena-md-table__dim">
+                          {row.kills} / {row.deaths} / {row.assists}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
         {metricDef && rows.length > 0 && (
-          <p className="text-xs text-gray-600">
+          <p className="arena-stats-note">
             Ranked by {metricDef.label}. ACS and HS% are averaged per map; K/D is derived from total kills and deaths.
           </p>
         )}
       </main>
+      <Footer />
     </div>
   );
 }

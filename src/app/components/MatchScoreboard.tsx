@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Trophy } from 'lucide-react';
 import { Header } from './Header';
+import { Footer } from './Footer';
 import type { Match } from './AdminPanel';
 
 export interface PlayerStats {
@@ -271,6 +272,7 @@ export function MatchScoreboard() {
         </div>
       </div>
       </div>
+      <Footer />
     </div>
   );
 }

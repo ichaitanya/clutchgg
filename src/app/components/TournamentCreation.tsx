@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check, Youtube } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check, Youtube, Image as ImageIcon } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
@@ -28,6 +28,7 @@ export interface TournamentPlayer {
 export interface TeamInTournament {
   id: string;
   name: string;
+  description?: string; // optional short bio shown on the team roster page
   logo?: string; // base64 or URL
   players: TournamentPlayer[];
 }
@@ -171,6 +172,7 @@ export interface Tournament {
   groupStage?: GroupStage;
   knockoutBracket?: BracketGenerated;
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
+  coverImage?: string; // base64 or URL for tournament cover image
 }
 
 // Replace a single match (by id) wherever it lives across the tournament's
@@ -657,6 +659,20 @@ function AddTeamScreen({
           {isDuplicate && (
             <p className="text-red-400 text-xs mt-1">A team with this name already exists.</p>
           )}
+        </div>
+
+        {/* Team Description */}
+        <div>
+          <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+            Description <span className="text-gray-600">(Optional)</span>
+          </label>
+          <textarea
+            className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors resize-none"
+            placeholder="A short bio shown on the team roster page..."
+            rows={3}
+            value={form.description ?? ''}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+          />
         </div>
       </div>
 
@@ -2112,8 +2128,8 @@ function CreateTournamentScreen({
   const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
   const [isGeneratingSecondStage, setIsGeneratingSecondStage] = useState(false);
 
-  const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent) => {
-    setTournament(t => ({ ...t, name, overview, tournamentType, event }));
+  const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent, coverImage?: string) => {
+    setTournament(t => ({ ...t, name, overview, tournamentType, event, ...(coverImage && { coverImage }) }));
     setCurrentTeam(null);
     setStep('teamList');
   };
@@ -3096,7 +3112,7 @@ function TournamentForm({
   isEditing = false,
   initialTournament,
 }: {
-  onSave: (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent) => void;
+  onSave: (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent, coverImage?: string) => void;
   isEditing?: boolean;
   initialTournament?: Tournament;
 }) {
@@ -3120,6 +3136,7 @@ function TournamentForm({
       .sort((a, b) => a.position - b.position)
       .map(p => p.prize) || []
   );
+  const [coverImage, setCoverImage] = useState(initialTournament?.coverImage || '');
 
   const handlePrizeCountChange = (count: number) => {
     setPrizePlaces(prev => {
@@ -3180,6 +3197,51 @@ function TournamentForm({
             value={overview}
             onChange={e => setOverview(e.target.value)}
           />
+        </div>
+
+        {/* Cover Image */}
+        <div>
+          <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+            Cover Image
+          </label>
+          <p className="text-xs text-gray-600 mb-3">Display image on hero section and tournament page. Recommended: 1200x600px</p>
+          <div className="flex gap-3">
+            {coverImage && (
+              <div className="w-32 h-20 rounded border border-[#2a2d3a] overflow-hidden flex-shrink-0">
+                <img src={coverImage} alt="Cover" className="w-full h-full object-cover" />
+              </div>
+            )}
+            <label className="flex-1 flex items-center justify-center border-2 border-dashed border-[#2a2d3a] rounded-lg p-4 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      const base64 = event.target?.result as string;
+                      setCoverImage(base64);
+                    };
+                    reader.readAsDataURL(file);
+                  }
+                }}
+              />
+              <div className="text-center">
+                <ImageIcon className="w-5 h-5 text-gray-400 mx-auto mb-2" />
+                <span className="text-xs text-gray-400">Click to upload image</span>
+              </div>
+            </label>
+            {coverImage && (
+              <button
+                onClick={() => setCoverImage('')}
+                className="px-3 py-1 bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] text-xs rounded h-fit transition-colors"
+              >
+                Remove
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Event Details Section */}
@@ -3392,7 +3454,7 @@ function TournamentForm({
               prizePool: hasPrizePool
                 ? { total: prizeTotal.trim() || undefined, places }
                 : undefined,
-            });
+            }, coverImage || undefined);
           }}
           disabled={!isValid}
           className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"

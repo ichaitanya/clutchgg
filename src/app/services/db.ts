@@ -201,16 +201,16 @@ export async function uploadHeroVideo(file: File): Promise<string> {
 // ─── Load all admin data ──────────────────────────────────────────────────────
 
 export async function loadAdminData(): Promise<AdminData> {
-  const [tournaments, news, players, standings, heroLink, standingsTournamentId, heroVideo] = await Promise.all([
+  const [tournaments, news, players, standings, heroLink, spotlightTournamentId, heroVideo] = await Promise.all([
     getTournaments().catch(() => [] as Tournament[]),
     getNews().catch(() => [] as NewsItem[]),
     getTopPlayers().catch(() => [] as TopPlayer[]),
     getStandings().catch(() => [] as StandingTeam[]),
     getSiteConfig('hero_link').catch(() => ''),
-    getSiteConfig('standings_tournament_id').catch(() => ''),
+    getSiteConfig('spotlight_tournament_id').catch(() => ''),
     getSiteConfig('hero_video').catch(() => ''),
   ]);
-  return { matches: [], standings, news, players, tournaments, heroLink, standingsTournamentId, heroVideo };
+  return { matches: [], standings, news, players, tournaments, heroLink, spotlightTournamentId, heroVideo };
 }
 
 // ─── Migrate from localStorage ────────────────────────────────────────────────

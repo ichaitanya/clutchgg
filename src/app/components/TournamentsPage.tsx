@@ -63,8 +63,10 @@ export function TournamentsPage() {
     status: deriveTournamentStatus(t),
   }));
 
-  // Featured = first in-progress, else first overall. Spotlight = next upcoming.
-  const featured = all.find(t => t.status === 'in-progress') || all[0] || null;
+  // Featured = selected spotlight tournament, or first in-progress, else first overall. Spotlight = next upcoming.
+  const featured = (adminData?.spotlightTournamentId 
+    ? all.find(t => t.id === adminData.spotlightTournamentId)
+    : all.find(t => t.status === 'in-progress')) || all[0] || null;
   const spotlight =
     all.find(t => (t.status === 'registration' || t.status === 'planning') && t.id !== featured?.id) || null;
 
@@ -98,7 +100,7 @@ export function TournamentsPage() {
               style={{ cursor: 'pointer' }}
             >
               <ImageWithFallback
-                src={(featured as any).imageUrl || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1200'}
+                src={featured.coverImage || 'https://images.unsplash.com/photo-1542751371-adc38448a05e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1200'}
                 alt={featured.name}
               />
               {featured.status === 'in-progress' && (
