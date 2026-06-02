@@ -65,12 +65,14 @@ function Home() {
     : [];
 
   // Derive display data: first try tournament brackets, then fall back to admin matches
-  const upcomingMatches =
-    tournamentBracketMatches.length > 0
+  const upcomingMatches = (() => {
+    const all = tournamentBracketMatches.length > 0
       ? tournamentBracketMatches.filter(m => m.status === 'upcoming')
       : adminData
       ? adminData.matches.filter(m => m.status === 'upcoming' && m.visible)
       : null;
+    return all ? all.slice(0, 10) : null;
+  })();
 
   const standings = adminData ? adminData.standings : null;
   const news = adminData ? adminData.news.filter(n => n.visible) : null;
