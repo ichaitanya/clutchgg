@@ -8,6 +8,8 @@ import { NewsCard } from './components/NewsCard';
 import { AdminPanel } from './components/AdminPanel';
 import { MatchScoreboard } from './components/MatchScoreboard';
 import { MatchesPage } from './components/MatchesPage';
+import { TournamentsPage } from './components/TournamentsPage';
+import { NewsPage } from './components/NewsPage';
 import { TournamentMatchPage } from './components/TournamentMatchPage';
 import { TeamsPage } from './components/TeamsPage';
 import { StatsPage, getTopPlayersByAcs } from './components/StatsPage';
@@ -15,6 +17,7 @@ import { computeRRStandings } from './components/BracketDisplay';
 import { PlayerPage } from './components/PlayerPage';
 import { ArticlePage } from './components/ArticlePage';
 import { TournamentPage } from './components/TournamentPage';
+import { Footer } from './components/Footer';
 import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import { loadAdminData } from './services/db';
@@ -71,7 +74,7 @@ function Home() {
       : adminData
       ? adminData.matches.filter(m => m.status === 'upcoming' && m.visible)
       : null;
-    return all ? all.slice(0, 10) : null;
+    return all ? all.slice(0, 6) : null;
   })();
 
   const standings = adminData ? adminData.standings : null;
@@ -80,7 +83,7 @@ function Home() {
   // Auto-standings: if a tournament is round-robin or group-based, compute its
   // standings tables directly for the homepage (instead of manual standings).
   type StandRow = { id: string; rank: number; name: string; wins: number; losses: number };
-  const autoStandings: { tournamentName: string; groups: { title: string; rows: StandRow[] }[] } | null = (() => {
+  const autoStandings: { tournamentId: string; tournamentName: string; groups: { title: string; rows: StandRow[] }[] } | null = (() => {
     if (!adminData) return null;
     // If the admin picked a tournament for homepage standings, consider only it;
     // otherwise fall back to the first round-robin / group-stage tournament.
@@ -99,7 +102,7 @@ function Home() {
           }));
           return { title: g.name, rows };
         }).filter(g => g.rows.length > 0);
-        if (groups.length > 0) return { tournamentName: t.name, groups };
+        if (groups.length > 0) return { tournamentId: t.id, tournamentName: t.name, groups };
       }
       // Round robin (single-stage generatedBracket or stage1Bracket).
       const rr = [t.generatedBracket, t.stage1Bracket].find(b => b?.bracketType === 'roundrobin');
@@ -107,7 +110,7 @@ function Home() {
         const rows = computeRRStandings(rr.rounds, rr.rrTeams ?? []).map((r, i) => ({
           id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses,
         }));
-        if (rows.length > 0) return { tournamentName: t.name, groups: [{ title: 'Standings', rows }] };
+        if (rows.length > 0) return { tournamentId: t.id, tournamentName: t.name, groups: [{ title: 'Standings', rows }] };
       }
     }
     return null;
@@ -118,9 +121,15 @@ function Home() {
   const topByAcs = adminData ? getTopPlayersByAcs(adminData.tournaments, 5) : [];
 
   // First paragraph of an article body, used as the Editorial card excerpt.
+  // Strips @[label](ref) mention syntax and other markdown artifacts before display.
   const newsExcerpt = (n: { body?: { type: string; text?: string }[] }) => {
     const para = n.body?.find(b => b.type === 'paragraph' && b.text);
-    return para?.text ?? '';
+    if (!para?.text) return '';
+    return para.text
+      .replace(/@\[([^\]]*)\]\([^)]*\)/g, '$1') // @[label](ref) → label
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')  // [label](url) → label
+      .replace(/[*_`#]/g, '')                    // stray markdown chars
+      .trim();
   };
 
   // Editorial fallback cards when the app data hasn't loaded yet.
@@ -131,33 +140,41 @@ function Home() {
   ];
 
   // Standings table (shared markup for auto-standings groups and manual standings).
+  // highlightTop: how many rows get red shading (6 for RR, 2 for group stage).
   const StandingsTable = ({ rows, highlightTop }: { rows: StandRow[]; highlightTop: number }) => (
-    <table className="w-full">
+    <table className="arena-table">
       <thead>
-        <tr className="border-b border-[#2b2b2b]">
-          <th className="px-2 py-2 text-left text-[#f5f3f3] text-[10px] font-inter font-bold">#</th>
-          <th className="px-2 py-2 text-left text-[#f5f3f3] text-[10px] font-inter font-bold">Team</th>
-          <th className="px-2 py-2 text-right text-[#f5f3f3] text-[10px] font-inter font-bold">W</th>
-          <th className="px-2 py-2 text-right text-[#f5f3f3] text-[10px] font-inter font-bold">L</th>
-          <th className="px-2 py-2 text-right text-[#f5f3f3] text-[10px] font-inter font-bold">Win%</th>
+        <tr>
+          <th>#</th>
+          <th>Team</th>
+          <th>W</th>
+          <th>L</th>
+          <th>Win%</th>
         </tr>
       </thead>
       <tbody>
         {rows.map(team => {
           const total = team.wins + team.losses;
           const wr = total === 0 ? '0%' : `${Math.round((team.wins / total) * 100)}%`;
-          const top = team.rank <= highlightTop;
+          const inTop = team.rank <= highlightTop;
+          // Top rows: fully visible, rank-1 gets left accent bar via --1 modifier.
+          // Rows beyond cutoff: stepped opacity fade.
+          const fadeStep = Math.min(team.rank - highlightTop, 4);
+          const rowClass = inTop
+            ? `arena-rank-row arena-rank-row--${team.rank}`
+            : `arena-rank-row--fade-${fadeStep}`;
+          const isFirst = team.rank === 1;
           return (
-            <tr key={team.id} className="border-b border-[#2b2b2b]/60">
-              <td className={`px-2 py-3 text-sm font-inter font-bold ${top ? 'text-[#ff4655]' : 'text-white'}`}>
+            <tr key={team.id} className={rowClass}>
+              <td className={isFirst ? 'arena-rank--top' : 'arena-rank'}>
                 {String(team.rank).padStart(2, '0')}
               </td>
-              <td className="px-2 py-3 text-sm font-inter font-bold">
-                <Link to={`/teams/${team.id}`} className="text-white hover:text-[#ff4655] transition-colors">{team.name}</Link>
+              <td>
+                <Link to={`/teams/${team.id}`} className="transition-colors">{team.name}</Link>
               </td>
-              <td className="px-2 py-3 text-right text-sm font-inter font-bold text-green-400">{team.wins}</td>
-              <td className="px-2 py-3 text-right text-sm font-inter font-bold text-red-400">{team.losses}</td>
-              <td className="px-2 py-3 text-right text-sm font-inter text-[#e5e2e1]">{wr}</td>
+              <td>{team.wins}</td>
+              <td>{team.losses}</td>
+              <td className={isFirst ? 'arena-winpct--top' : ''}>{wr}</td>
             </tr>
           );
         })}
@@ -175,19 +192,18 @@ function Home() {
       <Header />
 
       {/* Hero */}
-      <HeroSection heroLink={adminData?.heroLink} />
+      <HeroSection heroLink={adminData?.heroLink} heroVideo={adminData?.heroVideo} />
 
       {/* Upcoming Matches + Standings */}
-      <section className="max-w-[1436px] mx-auto px-6 py-16">
+      <section className="arena-section">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Upcoming Matches */}
           <div className="lg:col-span-2 flex flex-col gap-6">
-            <div className="flex items-end justify-between border-b-2 border-[#2b2b2b] pb-4">
-              <h2 className="font-chivo text-2xl">
-                <span className="text-white">Upcoming </span>
-                <span className="text-[#ff4655]">Matches</span>
+            <div className="arena-section-header">
+              <h2 className="arena-heading">
+                Upcoming <span style={{ color: 'var(--arena-accent)' }}>Matches</span>
               </h2>
-              <Link to="/matches" className="text-[#ff4655] text-[11px] font-inter hover:underline">Full Schedule</Link>
+              <Link to="/matches" className="arena-btn--ghost">Full Schedule</Link>
             </div>
             <div className="flex flex-col gap-4">
               {upcomingMatches && upcomingMatches.length > 0 ? (
@@ -221,25 +237,28 @@ function Home() {
 
           {/* Standings */}
           <div className="flex flex-col gap-6">
-            <div className="border-b-2 border-[#2b2b2b] pb-4">
-              <h2 className="font-chivo text-2xl text-white">Standings</h2>
+            <div className="arena-section-header">
+              <h2 className="arena-heading">Standings</h2>
             </div>
             {autoStandings ? (
-              <div className="bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-6">
-                <p className="text-[#ff4655] text-[10px] font-inter">{autoStandings.tournamentName}</p>
+              <div className="arena-standings flex flex-col gap-3">
+                <Link to={`/tournament/${autoStandings.tournamentId}`} className="arena-standings__title">
+                  {autoStandings.tournamentName}
+                </Link>
                 {autoStandings.groups.map(group => (
                   <div key={group.title} className="flex flex-col gap-2">
                     {autoStandings.groups.length > 1 && (
-                      <p className="text-[#ff4655] text-[10px] font-inter font-bold uppercase tracking-wider">{group.title}</p>
+                      <p className="arena-standings__tournament">{group.title}</p>
                     )}
-                    <StandingsTable rows={group.rows} highlightTop={2} />
+                    {/* RR = single group → shade top 6; group stage → shade top 2 per group */}
+                    <StandingsTable rows={group.rows} highlightTop={autoStandings.groups.length === 1 ? 6 : 2} />
                   </div>
                 ))}
               </div>
             ) : manualRows ? (
-              <div className="bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-6">
-                <p className="text-[#ff4655] text-[10px] font-inter">Group Standings</p>
-                <StandingsTable rows={manualRows} highlightTop={3} />
+              <div className="arena-standings flex flex-col gap-3">
+                <p className="arena-standings__tournament">Group Standings</p>
+                <StandingsTable rows={manualRows} highlightTop={6} />
               </div>
             ) : (
               <Standings />
@@ -249,38 +268,37 @@ function Home() {
       </section>
 
       {/* Top Performance — ranked by average ACS from tournament stats */}
-      <section className="bg-[#0e0e0e] border-t border-b border-[#2b2b2b] py-20">
+      <section className="arena-perf-section">
         <div className="max-w-[1436px] mx-auto px-6 flex flex-col gap-12">
           <div className="flex flex-col items-center gap-2 text-center">
-            <p className="text-[#ff4655] text-[11px] font-inter">Season Leaders</p>
-            <h2 className="font-chivo text-3xl text-white">Top Performance</h2>
+            <p className="arena-label">Season Leaders</p>
+            <h2 className="arena-heading arena-heading--lg">Top Performance</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {topByAcs.length > 0 ? (
               topByAcs.slice(0, 4).map(player => {
                 const card = (
                   <>
-                    <p className="text-[#f5f3f3] text-[9px] font-inter uppercase tracking-wide">{player.teamName}</p>
-                    <p className="text-[#e5e2e1] text-xl font-chivo">{player.playerName}</p>
-                    <div className="grid grid-cols-2 gap-4 border-t border-[#2b2b2b] pt-4">
+                    <p className="arena-player-card__team">{player.teamName}</p>
+                    <p className="arena-player-card__name">{player.playerName}</p>
+                    <div className="arena-player-card__stats">
                       <div>
-                        <p className="text-[#f5f3f3] text-[9px] font-inter">ACS</p>
-                        <p className="text-white text-lg font-chivo">{Math.round(player.acs)}</p>
+                        <p className="arena-player-card__stat-label">ACS</p>
+                        <p className="arena-player-card__stat-value">{Math.round(player.acs)}</p>
                       </div>
                       <div>
-                        <p className="text-[#f5f3f3] text-[9px] font-inter">K/D/A</p>
-                        <p className="text-white text-lg font-chivo">{player.kills}/{player.deaths}/{player.assists}</p>
+                        <p className="arena-player-card__stat-label">K/D/A</p>
+                        <p className="arena-player-card__stat-value">{player.kills}/{player.deaths}/{player.assists}</p>
                       </div>
                     </div>
                   </>
                 );
-                const cls = "bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-4 hover:border-[#ff4655]/40 transition-colors";
                 return player.tournamentId && player.rosterPlayerId ? (
-                  <Link key={player.playerId} to={`/player/${player.tournamentId}/${player.rosterPlayerId}`} className={cls}>
+                  <Link key={player.playerId} to={`/player/${player.tournamentId}/${player.rosterPlayerId}`} className="arena-player-card">
                     {card}
                   </Link>
                 ) : (
-                  <div key={player.playerId} className={cls}>{card}</div>
+                  <div key={player.playerId} className="arena-player-card">{card}</div>
                 );
               })
             ) : (
@@ -293,17 +311,17 @@ function Home() {
                     { id: '4', rank: 4, name: 'Demon1', team: 'EG', rating: 1.31, kills: 245, deaths: 192 },
                   ]
               ).slice(0, 4).map(player => (
-                <div key={player.id} className="bg-[#1c1b1b] border border-[#2b2b2b] p-6 flex flex-col gap-4">
-                  <p className="text-[#f5f3f3] text-[9px] font-inter uppercase tracking-wide">{player.team}</p>
-                  <p className="text-[#e5e2e1] text-xl font-chivo">{player.name}</p>
-                  <div className="grid grid-cols-2 gap-4 border-t border-[#2b2b2b] pt-4">
+                <div key={player.id} className="arena-player-card">
+                  <p className="arena-player-card__team">{player.team}</p>
+                  <p className="arena-player-card__name">{player.name}</p>
+                  <div className="arena-player-card__stats">
                     <div>
-                      <p className="text-[#f5f3f3] text-[9px] font-inter">Rating</p>
-                      <p className="text-white text-lg font-chivo">{player.rating.toFixed(2)}</p>
+                      <p className="arena-player-card__stat-label">Rating</p>
+                      <p className="arena-player-card__stat-value">{player.rating.toFixed(2)}</p>
                     </div>
                     <div>
-                      <p className="text-[#f5f3f3] text-[9px] font-inter">K/D</p>
-                      <p className="text-white text-lg font-chivo">{player.kills}/{player.deaths}</p>
+                      <p className="arena-player-card__stat-label">K/D</p>
+                      <p className="arena-player-card__stat-value">{player.kills}/{player.deaths}</p>
                     </div>
                   </div>
                 </div>
@@ -314,14 +332,14 @@ function Home() {
       </section>
 
       {/* Editorial */}
-      <section className="py-20">
-        <div className="max-w-[1436px] mx-auto px-6 flex flex-col gap-10">
-          <div className="flex items-end justify-between border-b-2 border-[#2b2b2b] pb-6">
+      <section className="arena-section" style={{ borderBottom: '1px solid #2b2b2b' }}>
+        <div className="max-w-[1436px] mx-auto flex flex-col gap-10">
+          <div className="arena-section-header">
             <div className="flex flex-col gap-1">
-              <h2 className="font-chivo text-2xl text-white">Editorial</h2>
-              <p className="text-[#efeeed] text-sm font-inter">High-performance analysis and intel.</p>
+              <h2 className="arena-heading">Editorial</h2>
+              <p className="arena-body--sm">High-performance analysis and intel.</p>
             </div>
-            <Link to="/matches" className="flex items-center gap-2 text-[#ff4655] text-[11px] font-inter hover:underline">
+            <Link to="/news" className="arena-btn--ghost flex items-center gap-2">
               Archives <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
@@ -344,20 +362,18 @@ function Home() {
       </section>
 
       {/* Enter the Arena CTA */}
-      <section className="bg-[#111] border-t border-[#2b2b2b] py-24">
-        <div className="max-w-[1436px] mx-auto px-4 flex flex-col items-center gap-10 text-center">
-          <h2 className="font-chivo text-5xl md:text-6xl">
-            <span className="text-white">Enter the </span>
-            <span className="text-[#ff4655]">Arena</span>
+      <section className="arena-cta">
+        <div className="max-w-[1436px] mx-auto flex flex-col items-center gap-10">
+          <h2 className="arena-cta__title">
+            ENTER THE <span className="accent">CLUTCH</span>
           </h2>
-          <Link
-            to="/matches"
-            className="bg-[#ff4655] hover:bg-[#ff3344] text-white text-[13px] font-inter px-14 py-5 transition-colors"
-          >
-            View Tournaments
+          <Link to="/matches" className="arena-btn arena-btn--primary" style={{ letterSpacing: '0.1em', padding: '1.25rem 3.5rem' }}>
+            Register Roster
           </Link>
         </div>
       </section>
+
+      <Footer />
     </div>
   );
 }
@@ -376,6 +392,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/matches" element={<MatchesPage />} />
+        <Route path="/tournaments" element={<TournamentsPage />} />
+        <Route path="/news" element={<NewsPage />} />
         <Route path="/teams" element={<TeamsPage />} />
         <Route path="/teams/:teamId" element={<TeamsPage />} />
         <Route path="/stats" element={<StatsPage />} />

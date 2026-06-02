@@ -1,0 +1,1347 @@
+/* ============================================================
+   Arena Design System — CSS implementation from Figma design
+   Source: Figma file XnipvojbMHxhzPrftsqek0, node 3:247
+   ============================================================ */
+
+/* ── Design tokens ─────────────────────────────────────────── */
+:root {
+  /* Colors */
+  --arena-bg:               #0e0e0e;
+  --arena-surface:          #1c1b1b;
+  --arena-surface-elevated: #111111;
+  --arena-border:           #2b2b2b;
+  --arena-border-subtle:    rgba(43, 43, 43, 0.6);
+  --arena-accent:           #ff4655;
+  --arena-accent-hover:     #ff3344;
+  --arena-accent-dim:       rgba(255, 70, 85, 0.4);
+
+  /* Text */
+  --arena-text-primary:   #ffffff;
+  --arena-text-secondary: #e5e2e1;
+  --arena-text-muted:     #efeeed;
+  --arena-text-faint:     #f5f3f3;
+  --arena-text-dim:       #717182;
+
+  /* Nav */
+  --arena-nav-bg:     #0e0e0e;
+  --arena-nav-border: #2b2b2b;
+  --arena-nav-height: 65px;
+
+  /* Layout */
+  --arena-max-width:    1436px;
+  --arena-gutter:       24px;
+  --arena-section-gap:  5rem;    /* 80px vertical section padding */
+}
+
+/* ── Base resets ────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--arena-bg);
+  color: var(--arena-text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+#root {
+  height: 100%;
+}
+
+/* ── Typography utilities ───────────────────────────────────── */
+
+/* Display / Heading — Chivo Black Italic (matches screenshot) */
+.arena-display {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-weight: 900;
+  font-style: italic;
+  font-size: clamp(2.5rem, 5vw, 4.5rem); /* 72px at 1440px */
+  line-height: 1.05;
+  color: var(--arena-text-primary);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.arena-display .accent { color: var(--arena-accent); }
+
+/* Section heading — Chivo Bold (uppercase, some italic via modifier) */
+.arena-heading {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-weight: 700;
+  font-style: italic;
+  font-size: 1.5rem;          /* 24px */
+  color: var(--arena-text-primary);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.arena-heading--lg {
+  font-size: 1.875rem; /* 30px */
+  font-style: italic;
+  text-transform: uppercase;
+}
+.arena-heading--xl { font-size: 2.25rem; }
+
+/* Section label / eyebrow — Inter uppercase */
+.arena-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;  /* 11px */
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+}
+
+/* Body copy */
+.arena-body {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--arena-text-muted);
+}
+
+.arena-body--sm {
+  font-size: 0.875rem; /* 14px */
+  color: var(--arena-text-secondary);
+}
+
+/* Micro — 9–10px labels */
+.arena-micro {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem; /* 9px */
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-faint);
+}
+
+/* ── Navigation ─────────────────────────────────────────────── */
+.arena-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: var(--arena-nav-height);
+  background-color: var(--arena-nav-bg);
+  border-bottom: 1px solid var(--arena-nav-border);
+  display: flex;
+  align-items: center;
+}
+
+.arena-nav__inner {
+  width: 100%;
+  max-width: var(--arena-max-width);
+  margin: 0 auto;
+  padding: 0 var(--arena-gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+/* Brand wordmark */
+.arena-nav__brand {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-weight: 900;
+  font-size: 1.375rem;
+  color: var(--arena-accent);
+  letter-spacing: 0.05em;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+/* Nav link list */
+.arena-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 2.5rem;       /* ~40px gap between links */
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.arena-nav__link {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem; /* 11px */
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arena-text-muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.arena-nav__link:hover,
+.arena-nav__link--active {
+  color: var(--arena-accent);
+}
+
+/* "Live" nav link — accent color with bottom underline bar */
+.arena-nav__link--live {
+  color: var(--arena-accent) !important;
+  position: relative;
+}
+
+.arena-nav__link--live::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--arena-accent);
+}
+
+/* Sign-in button (outline style) */
+.arena-nav__signin {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--arena-text-primary);
+  background: transparent;
+  border: 1px solid var(--arena-border);
+  padding: 0.4rem 1.125rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+  white-space: nowrap;
+}
+
+.arena-nav__signin:hover {
+  border-color: var(--arena-text-primary);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* ── Hero section ───────────────────────────────────────────── */
+.arena-hero {
+  position: relative;
+  height: 630px;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Grayscale + desaturate background image */
+.arena-hero > img,
+.arena-hero .arena-hero__bg {
+  filter: grayscale(100%) brightness(0.6);
+}
+
+/* Tonal overlay — darkening wash */
+.arena-hero__overlay-wash {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background-color: rgba(14, 14, 14, 0.45);
+  pointer-events: none;
+}
+
+/* Bottom-fade gradient — stronger pull-to-black */
+.arena-hero__overlay-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(
+    to top,
+    var(--arena-bg) 0%,
+    rgba(14, 14, 14, 0.7) 35%,
+    rgba(14, 14, 14, 0.2) 70%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* When a real video is playing — lighter overlays to show original colors */
+.arena-hero--video .arena-hero__overlay-wash {
+  background-color: rgba(14, 14, 14, 0.15);
+}
+
+.arena-hero--video .arena-hero__overlay-fade {
+  background: linear-gradient(
+    to top,
+    var(--arena-bg) 0%,
+    rgba(14, 14, 14, 0.45) 28%,
+    rgba(14, 14, 14, 0.05) 62%,
+    transparent 100%
+  );
+}
+
+/* ── YouTube background player ──────────────────────────────────
+   The API iframe is oversized + centered to fill the frame with no
+   letterboxing; a transparent shield blocks all pointer events so
+   YouTube's hover controls never appear.                         */
+.arena-hero__yt {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.arena-hero__yt-player,
+.arena-hero__yt-player iframe {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  /* 16:9 cover sizing — whichever dimension is larger fills the frame */
+  width: 177.78vh;   /* 100vh * 16/9 */
+  min-width: 100%;
+  height: 56.25vw;   /* 100vw * 9/16 */
+  min-height: 100%;
+  border: none;
+  pointer-events: none;
+}
+
+.arena-hero__yt-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: auto;   /* swallow clicks/hover before YT can react */
+  background: transparent;
+}
+
+/* Right-edge tournament rail — functional switcher, replaces the static accent bar */
+.arena-hero__rail {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  z-index: 10;
+}
+
+.arena-hero__rail-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  width: 4px;
+  height: 72px;
+  transition: width 0.25s ease;
+}
+
+.arena-hero__rail-item:hover,
+.arena-hero__rail-item--active {
+  width: 200px;
+}
+
+/* The red vertical bar on the far right */
+.arena-hero__rail-bar {
+  flex-shrink: 0;
+  width: 4px;
+  height: 100%;
+  background-color: var(--arena-accent);
+  order: 2;
+  transition: background-color 0.2s;
+}
+
+.arena-hero__rail-item:not(.arena-hero__rail-item--active) .arena-hero__rail-bar {
+  background-color: rgba(255, 70, 85, 0.35);
+}
+
+/* Tournament name label that slides in from the right */
+.arena-hero__rail-label {
+  order: 1;
+  flex: 1;
+  background-color: rgba(14, 14, 14, 0.88);
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 0.75rem;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.arena-hero__rail-item:hover .arena-hero__rail-label,
+.arena-hero__rail-item--active .arena-hero__rail-label {
+  opacity: 1;
+}
+
+/* Fallback static accent bar (no tournaments loaded) */
+.arena-hero__accent-bar {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 120px;
+  background-color: var(--arena-accent);
+}
+
+/* Hero content wrapper */
+.arena-hero__content {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+  max-width: var(--arena-max-width);
+  margin: 0 auto;
+  padding: 0 var(--arena-gutter) 4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* "Live Now" badge */
+.arena-badge {
+  display: inline-flex;
+  align-items: center;
+  background-color: var(--arena-accent);
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;  /* 10px */
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.3125rem 0.75rem; /* 5px 12px */
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+.arena-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem; /* 12px */
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1.0625rem 2.5rem; /* 17px 40px — matches Figma 54px button height */
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+/* Primary (red fill) */
+.arena-btn--primary {
+  background-color: var(--arena-accent);
+  color: #fff;
+}
+
+.arena-btn--primary:hover:not(:disabled) {
+  background-color: var(--arena-accent-hover);
+}
+
+.arena-btn--primary:disabled {
+  background-color: #4b4b4b;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+/* Outline (white border, transparent fill) */
+.arena-btn--outline {
+  background-color: transparent;
+  color: #fff;
+  border: 2px solid #fff;
+}
+
+.arena-btn--outline:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Ghost / small text link */
+.arena-btn--ghost {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--arena-accent);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+}
+
+.arena-btn--ghost:hover { text-decoration: underline; }
+
+/* ── Section layout ─────────────────────────────────────────── */
+.arena-section {
+  max-width: var(--arena-max-width);
+  margin: 0 auto;
+  padding: var(--arena-section-gap) var(--arena-gutter);
+}
+
+.arena-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--arena-border);
+  padding-bottom: 1rem;
+  margin-bottom: 0;
+}
+
+/* ── Card (generic dark surface with border) ────────────────── */
+.arena-card {
+  background-color: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  transition: border-color 0.15s;
+}
+
+.arena-card:hover {
+  border-color: var(--arena-accent-dim);
+}
+
+/* ── Match row ──────────────────────────────────────────────── */
+.arena-match-row {
+  background-color: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  padding: 1.5rem;             /* 24px — card inner gutter */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2.5rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.arena-match-row:hover {
+  border-color: var(--arena-accent-dim);
+}
+
+/* Team block inside a match row */
+.arena-match-team {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* 32×32 team logo placeholder */
+.arena-match-logo {
+  width: 32px;
+  height: 32px;
+  background-color: #353534;
+  border: 1px solid var(--arena-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.9375rem;  /* 15px */
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.arena-match-name {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-size: 0.875rem;   /* 14px */
+  font-weight: 700;
+  color: #fff;
+}
+
+.arena-match-vs {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;   /* 10px */
+  font-weight: 700;
+  color: var(--arena-text-faint);
+}
+
+.arena-match-meta {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;   /* 10px */
+  color: var(--arena-text-muted);
+}
+
+.arena-match-time {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;  /* 11px */
+  font-weight: 600;
+  color: var(--arena-accent);
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* ── Standings table ────────────────────────────────────────── */
+.arena-standings {
+  background-color: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  padding: 1.25rem 1.5rem;
+}
+
+/* Clickable tournament title — bigger, bold display style */
+.arena-standings__title {
+  display: block;
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-size: 1.0625rem;  /* 17px */
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--arena-accent);
+  text-decoration: none;
+  transition: color 0.15s, transform 0.15s;
+}
+
+.arena-standings__title:hover {
+  color: var(--arena-accent-hover);
+  transform: translateX(2px);
+}
+
+.arena-standings__tournament {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;  /* 10px */
+  font-weight: 600;
+  color: var(--arena-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 1rem;
+}
+
+.arena-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.arena-table thead tr {
+  border-bottom: 1px solid var(--arena-border);
+}
+
+.arena-table th {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;  /* 10px */
+  font-weight: 700;
+  color: var(--arena-text-faint);
+  padding: 0.5rem 0.5rem 0.75rem;
+  text-align: left;
+}
+
+.arena-table th:last-child { text-align: right; }
+
+.arena-table td {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;  /* 14px */
+  font-weight: 700;
+  color: #fff;
+  padding: 0.5rem 0.5rem;
+  border-bottom: 1px solid var(--arena-border-subtle);
+}
+
+.arena-table td:last-child { text-align: right; }
+
+.arena-table tbody tr:last-child td { border-bottom: none; }
+
+/* Rank badge — red for the first-place team */
+.arena-table td.arena-rank      { color: #fff; }
+.arena-table td.arena-rank--top { color: var(--arena-accent); font-weight: 700; }
+
+/* Win% — red for the first-place team */
+.arena-table td.arena-winpct--top { color: var(--arena-accent); }
+
+/* ── Rank rows ─────────────────────────────────────────────────
+   Top zone (within highlightTop): rank no. + win% in red, names white.
+   Below highlightTop: stepped opacity fade-out.               */
+
+/* All qualifying rows: white name, no background tint */
+.arena-rank-row td a   { color: #fff; }
+.arena-rank-row td a:hover { color: var(--arena-accent); }
+
+/* Fade-out rows beyond highlightTop */
+.arena-rank-row--fade-1 { opacity: 0.50; }
+.arena-rank-row--fade-2 { opacity: 0.35; }
+.arena-rank-row--fade-3 { opacity: 0.22; }
+.arena-rank-row--fade-4 { opacity: 0.12; }
+
+/* ── Top Performance (player cards) ───────────────────────────*/
+.arena-perf-section {
+  background-color: var(--arena-bg);
+  border-top: 1px solid var(--arena-border);
+  border-bottom: 1px solid var(--arena-border);
+  padding: var(--arena-section-gap) 0;
+}
+
+.arena-player-card {
+  background-color: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: border-color 0.15s;
+  text-decoration: none;
+}
+
+.arena-player-card:hover {
+  border-color: var(--arena-accent-dim);
+}
+
+.arena-player-card__team {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;  /* 9px */
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-faint);
+}
+
+.arena-player-card__name {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-size: 1.375rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--arena-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.arena-player-card__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--arena-border);
+}
+
+.arena-player-card__stat-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;  /* 9px */
+  color: var(--arena-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.arena-player-card__stat-value {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-size: 1.125rem;   /* 18px */
+  font-weight: 700;
+  color: #fff;
+}
+
+/* ── Editorial (news cards) ─────────────────────────────────── */
+.arena-news-card {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+/* Image thumbnail — aspect matches Figma 441×248 */
+.arena-news-card__thumbnail {
+  width: 100%;
+  aspect-ratio: 441 / 248;
+  background-color: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.arena-news-card__thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.arena-news-card:hover .arena-news-card__thumbnail img {
+  transform: scale(1.05);
+}
+
+.arena-news-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 1.5rem;
+}
+
+.arena-news-card__meta {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;   /* 10px */
+  color: var(--arena-accent);
+}
+
+.arena-news-card__title {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-size: 1.25rem;    /* 20px */
+  font-weight: 700;
+  font-style: italic;
+  text-transform: uppercase;
+  color: #fff;
+  line-height: 1.25;
+  margin: 0;
+  transition: color 0.15s;
+}
+
+.arena-news-card:hover .arena-news-card__title {
+  color: var(--arena-accent);
+}
+
+.arena-news-card__excerpt {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--arena-text-dim);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* ── CTA (Enter the Arena) ──────────────────────────────────── */
+.arena-cta {
+  background-color: var(--arena-surface-elevated);
+  border-top: 1px solid var(--arena-border);
+  padding: 6rem var(--arena-gutter);
+  text-align: center;
+}
+
+.arena-cta__title {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-weight: 900;
+  font-style: italic;
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  text-transform: uppercase;
+  line-height: 1.05;
+  color: #fff;
+  margin: 0 0 2.5rem;
+}
+
+.arena-cta__title .accent { color: var(--arena-accent); }
+
+/* ── Footer ─────────────────────────────────────────────────── */
+.arena-footer {
+  border-top: 1px solid var(--arena-border);
+  padding: 4rem var(--arena-gutter) 2rem;
+  background-color: var(--arena-bg);
+}
+
+.arena-footer__inner {
+  max-width: var(--arena-max-width);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3rem;
+}
+
+.arena-footer__brand {
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-weight: 900;
+  font-size: 1.375rem;
+  color: var(--arena-accent);
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+
+.arena-footer__tagline {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;  /* 13px */
+  color: var(--arena-text-dim);
+  line-height: 1.6;
+  max-width: 240px;
+}
+
+.arena-footer__cols {
+  display: flex;
+  gap: 4rem;
+}
+
+.arena-footer__col-title {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;  /* 11px */
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.875rem;
+}
+
+.arena-footer__link {
+  display: block;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;  /* 13px */
+  color: var(--arena-text-dim);
+  text-decoration: none;
+  margin-bottom: 0.5rem;
+  transition: color 0.15s;
+}
+
+.arena-footer__link:hover { color: var(--arena-text-primary); }
+
+.arena-footer__bottom {
+  max-width: var(--arena-max-width);
+  margin: 3rem auto 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--arena-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;  /* 12px */
+  color: var(--arena-text-dim);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TOURNAMENT & NEWS LISTING PAGES — serif editorial style
+   (matches the provided screenshot design)
+   ════════════════════════════════════════════════════════════════ */
+
+/* Serif display font for these pages */
+.arena-serif {
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+}
+
+/* Page wrapper */
+.arena-page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 var(--arena-gutter);
+}
+
+/* ── Centered hero ──────────────────────────────────────────── */
+.arena-page-hero {
+  text-align: center;
+  padding: 5.5rem var(--arena-gutter) 4rem;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.arena-page-hero__eyebrow {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  margin: 0 0 1.25rem;
+}
+
+.arena-page-hero__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: clamp(2.25rem, 4.5vw, 3.25rem);
+  line-height: 1.12;
+  color: #fff;
+  margin: 0 0 1.5rem;
+}
+
+.arena-page-hero__subtitle {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--arena-text-dim);
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+/* ── Spotlight card (2-column featured + side panel) ─────────── */
+.arena-spotlight {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  border: 1px solid var(--arena-border);
+  background-color: var(--arena-surface-elevated);
+  margin-bottom: 5rem;
+}
+
+@media (max-width: 860px) {
+  .arena-spotlight { grid-template-columns: 1fr; }
+}
+
+/* Left — featured image with overlaid content */
+.arena-spotlight__feature {
+  position: relative;
+  min-height: 340px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 2rem;
+}
+
+.arena-spotlight__feature img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.arena-spotlight__feature::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(to top, rgba(8,8,8,0.95) 0%, rgba(8,8,8,0.55) 45%, rgba(8,8,8,0.25) 100%);
+}
+
+.arena-spotlight__feature > * { position: relative; z-index: 2; }
+
+.arena-spotlight__live {
+  align-self: flex-start;
+  background-color: var(--arena-accent);
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.625rem;
+  margin-bottom: auto;
+}
+
+.arena-spotlight__feature-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.625rem;
+  color: #fff;
+  margin: 0 0 0.5rem;
+}
+
+.arena-spotlight__feature-desc {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.75);
+  margin: 0 0 1.25rem;
+  max-width: 90%;
+}
+
+.arena-spotlight__stats {
+  display: flex;
+  gap: 2.5rem;
+}
+
+.arena-spotlight__stat-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+  margin: 0 0 0.25rem;
+}
+
+.arena-spotlight__stat-value {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+/* Right — upcoming spotlight side panel */
+.arena-spotlight__side {
+  padding: 2rem;
+  border-left: 1px solid var(--arena-border);
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 860px) {
+  .arena-spotlight__side { border-left: none; border-top: 1px solid var(--arena-border); }
+}
+
+.arena-spotlight__side-eyebrow {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  margin: 0 0 0.75rem;
+}
+
+.arena-spotlight__side-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  color: #fff;
+  margin: 0 0 1rem;
+}
+
+.arena-spotlight__side-desc {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--arena-text-dim);
+  margin: 0 0 1.5rem;
+}
+
+.arena-spotlight__detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--arena-border);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+}
+
+.arena-spotlight__detail-label { color: var(--arena-text-dim); }
+.arena-spotlight__detail-value { color: #fff; font-weight: 600; }
+
+.arena-spotlight__register {
+  margin-top: 1.5rem;
+  width: 100%;
+  padding: 0.875rem;
+  background: transparent;
+  border: 1px solid var(--arena-border);
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.arena-spotlight__register:hover {
+  border-color: var(--arena-accent);
+  background-color: rgba(255,70,85,0.08);
+}
+
+/* ── Event Schedule section ─────────────────────────────────── */
+.arena-schedule__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.arena-schedule__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.75rem;
+  color: #fff;
+  margin: 0 0 0.375rem;
+}
+
+.arena-schedule__subtitle {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--arena-text-dim);
+  margin: 0;
+}
+
+.arena-schedule__tabs {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.arena-schedule__tab {
+  background: none;
+  border: none;
+  padding: 0 0 0.25rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s;
+}
+
+.arena-schedule__tab--active {
+  color: var(--arena-accent);
+  border-bottom-color: var(--arena-accent);
+}
+
+.arena-schedule__tab:hover { color: #fff; }
+
+/* Schedule row */
+.arena-event-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 200px 160px;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.5rem 0.5rem;
+  border-top: 1px solid var(--arena-border);
+  text-decoration: none;
+  transition: background-color 0.15s;
+  cursor: pointer;
+}
+
+.arena-event-row:last-child { border-bottom: 1px solid var(--arena-border); }
+.arena-event-row:hover { background-color: rgba(255,255,255,0.02); }
+
+@media (max-width: 760px) {
+  .arena-event-row {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}
+
+.arena-event-row__date {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+}
+
+.arena-event-row__status {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 0.25rem;
+}
+
+.arena-event-row__status--live { color: var(--arena-accent); }
+
+.arena-event-row__name {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.0625rem;
+  color: #fff;
+  margin: 0 0 0.25rem;
+}
+
+.arena-event-row__meta {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+}
+
+.arena-event-row__prize-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  margin: 0 0 0.25rem;
+}
+
+.arena-event-row__prize-value {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.arena-event-row__action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  transition: color 0.15s;
+}
+
+.arena-event-row:hover .arena-event-row__action { color: var(--arena-accent); }
+
+/* ── Newsletter CTA ─────────────────────────────────────────── */
+.arena-newsletter {
+  text-align: center;
+  padding: 5rem var(--arena-gutter);
+  max-width: 620px;
+  margin: 3rem auto 0;
+  border-top: 1px solid var(--arena-border);
+}
+
+.arena-newsletter__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.75rem;
+  color: #fff;
+  margin: 0 0 1rem;
+}
+
+.arena-newsletter__subtitle {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--arena-text-dim);
+  margin: 0 0 2rem;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.arena-newsletter__form {
+  display: flex;
+  max-width: 440px;
+  margin: 0 auto;
+  border: 1px solid var(--arena-border);
+}
+
+.arena-newsletter__input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 0.875rem 1.25rem;
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.arena-newsletter__input::placeholder { color: var(--arena-text-dim); }
+
+.arena-newsletter__btn {
+  background-color: var(--arena-accent);
+  color: #fff;
+  border: none;
+  padding: 0 1.75rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.arena-newsletter__btn:hover { background-color: var(--arena-accent-hover); }
+
+/* ── News listing grid ──────────────────────────────────────── */
+.arena-news-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2.5rem 2rem;
+}
+
+@media (max-width: 860px) { .arena-news-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .arena-news-grid { grid-template-columns: 1fr; } }
+
+/* Serif variant of the editorial card title for the news page */
+.arena-news-card__title--serif {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 600;
+  font-style: normal;
+  text-transform: none;
+  font-size: 1.25rem;
+  line-height: 1.3;
+}

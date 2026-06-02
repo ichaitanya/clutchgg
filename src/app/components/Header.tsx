@@ -1,39 +1,52 @@
-import { Trophy, Tv, Calendar, Users, BarChart3, Menu } from 'lucide-react';
+import { useState } from 'react';
+import { Menu, X } from 'lucide-react';
 
 export function Header() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
-    <header className="bg-[#1a1d29] border-b border-[#2a2d3a] sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-8">
+    <nav className="arena-nav" style={{ position: 'relative' }}>
+      <div className="arena-nav__inner">
+        {/* Brand wordmark — left */}
+        <a href="/" className="arena-nav__brand">CLUTCH.GG</a>
 
-            <div className="flex items-center gap-2">
-               
-              <Trophy className="w-8 h-8 text-[#ff4655]" />
-              <a href="/" className="text-white text-xl font-bold">Clutch.gg</a>
-            </div>
+        {/* Desktop nav links — right-aligned, original site names */}
+        <ul className="arena-nav__links hidden md:flex">
+          <li><a href="/tournaments" className="arena-nav__link">Tournaments</a></li>
+          <li><a href="/matches" className="arena-nav__link">Matches</a></li>
+          <li><a href="/teams" className="arena-nav__link">Teams</a></li>
+          <li><a href="/stats" className="arena-nav__link">Stats</a></li>
+          <li><a href="/news" className="arena-nav__link">News</a></li>
+        </ul>
 
-            <nav className="hidden md:flex items-center gap-6">
-              <a href="/matches" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
-                <Calendar className="w-4 h-4" />
-                <span className="text-sm">Matches</span>
-              </a>
-              <a href="/teams" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
-                <Users className="w-4 h-4" />
-                <span className="text-sm">Teams</span>
-              </a>
-              <a href="/stats" className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-md hover:bg-white/5 transition-colors">
-                <BarChart3 className="w-4 h-4" />
-                <span className="text-sm">Stats</span>
-              </a>
-            </nav>
-          </div>
-
-          <button className="md:hidden text-gray-400 hover:text-white">
-            <Menu className="w-6 h-6" />
-          </button>
-        </div>
+        {/* Mobile hamburger */}
+        <button
+          className="md:hidden text-[#efeeed] hover:text-white"
+          onClick={() => setMenuOpen(o => !o)}
+          aria-label="Toggle menu"
+        >
+          {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
       </div>
-    </header>
+
+      {/* Mobile dropdown */}
+      {menuOpen && (
+        <div
+          className="md:hidden"
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0,
+            background: '#1a1d29', borderBottom: '1px solid #2a2d3a', zIndex: 50,
+          }}
+        >
+          <ul className="flex flex-col px-6 py-4 gap-4" style={{ listStyle: 'none', margin: 0, padding: '1rem 1.5rem' }}>
+            <li><a href="/tournaments" className="arena-nav__link" onClick={() => setMenuOpen(false)}>Tournaments</a></li>
+            <li><a href="/matches" className="arena-nav__link" onClick={() => setMenuOpen(false)}>Matches</a></li>
+            <li><a href="/teams" className="arena-nav__link" onClick={() => setMenuOpen(false)}>Teams</a></li>
+            <li><a href="/stats" className="arena-nav__link" onClick={() => setMenuOpen(false)}>Stats</a></li>
+            <li><a href="/news" className="arena-nav__link" onClick={() => setMenuOpen(false)}>News</a></li>
+          </ul>
+        </div>
+      )}
+    </nav>
   );
 }

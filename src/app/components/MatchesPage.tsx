@@ -109,54 +109,6 @@ export function MatchesPage() {
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Tournaments Section */}
-        {adminData?.tournaments && adminData.tournaments.length > 0 && (
-          <section className="mb-12">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-white text-2xl font-bold flex items-center gap-2">
-                <div className="w-1 h-8 bg-[#ff4655] rounded" />
-                Active Tournaments
-              </h2>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {adminData.tournaments
-                .filter(t => t.status !== 'completed')
-                .map(tournament => (
-                  <div
-                    key={tournament.id}
-                    onClick={() => navigate(`/tournament/${tournament.id}`)}
-                    className="bg-[#151821] border border-[#2a2d3a] rounded-lg p-4 cursor-pointer hover:border-[#ff4655]/50 transition-all"
-                  >
-                    <h3 className="text-white font-bold text-sm mb-2">{tournament.name}</h3>
-                    <p className="text-gray-500 text-xs mb-4 line-clamp-2">
-                      {tournament.overview}
-                    </p>
-                    
-                    <div className="space-y-2 py-3 border-y border-[#2a2d3a]">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Teams</span>
-                        <span className="text-white font-semibold">{tournament.teams.length}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Format</span>
-                        <span className="text-[#4ade80]">
-                          {tournament.stage1Config ? '2-Stage' : tournament.generatedBracket ? '✓' : '—'}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Status</span>
-                        <span className="text-[#ff4655] capitalize font-semibold">{tournament.status}</span>
-                      </div>
-                    </div>
-
-                    <button className="w-full mt-3 py-2 px-3 bg-[#ff4655]/10 hover:bg-[#ff4655]/20 text-[#ff4655] text-xs font-semibold rounded-lg transition-colors">
-                      View Details
-                    </button>
-                  </div>
-                ))}
-            </div>
-          </section>
-        )}
         {/* Completed Matches */}
         {completedMatches && completedMatches.length > 0 && (
           <section>

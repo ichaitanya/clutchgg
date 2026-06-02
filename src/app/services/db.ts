@@ -181,18 +181,36 @@ export async function setSiteConfig(key: string, value: string): Promise<void> {
   if (error) throw error;
 }
 
+// ─── Hero video upload (Supabase Storage) ──────────────────────────────────────
+
+const HERO_VIDEO_BUCKET = 'hero-videos';
+
+// Upload a video file to the hero-videos bucket and return its public URL.
+// Overwrites any file with the same name (upsert) so re-uploads are clean.
+export async function uploadHeroVideo(file: File): Promise<string> {
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'mp4';
+  const path = `hero-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage
+    .from(HERO_VIDEO_BUCKET)
+    .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
+  if (error) throw error;
+  const { data } = supabase.storage.from(HERO_VIDEO_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
 // ─── Load all admin data ──────────────────────────────────────────────────────
 
 export async function loadAdminData(): Promise<AdminData> {
-  const [tournaments, news, players, standings, heroLink, standingsTournamentId] = await Promise.all([
+  const [tournaments, news, players, standings, heroLink, standingsTournamentId, heroVideo] = await Promise.all([
     getTournaments().catch(() => [] as Tournament[]),
     getNews().catch(() => [] as NewsItem[]),
     getTopPlayers().catch(() => [] as TopPlayer[]),
     getStandings().catch(() => [] as StandingTeam[]),
     getSiteConfig('hero_link').catch(() => ''),
     getSiteConfig('standings_tournament_id').catch(() => ''),
+    getSiteConfig('hero_video').catch(() => ''),
   ]);
-  return { matches: [], standings, news, players, tournaments, heroLink, standingsTournamentId };
+  return { matches: [], standings, news, players, tournaments, heroLink, standingsTournamentId, heroVideo };
 }
 
 // ─── Migrate from localStorage ────────────────────────────────────────────────

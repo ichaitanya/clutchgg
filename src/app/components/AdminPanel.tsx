@@ -10,7 +10,7 @@ import {
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
 import { supabase, signIn, signOut } from '../services/supabase';
-import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings, setSiteConfig, migrateFromLocalStorage } from '../services/db';
+import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings, setSiteConfig, migrateFromLocalStorage, uploadHeroVideo } from '../services/db';
 
 function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('');
@@ -210,6 +210,7 @@ interface AdminData {
   players: TopPlayer[];
   tournaments: Tournament[];
   heroLink: string;
+  heroVideo?: string;
   // Tournament id whose round-robin/group standings show on the homepage.
   standingsTournamentId?: string;
 }
@@ -238,6 +239,7 @@ const defaultData: AdminData = {
   players: [],
   tournaments: [],
   heroLink: '',
+  heroVideo: '',
 };
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -1029,6 +1031,8 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [dbLoading, setDbLoading] = useState(true);
   const [savingNewsId, setSavingNewsId] = useState<string | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const videoFileRef = useRef<HTMLInputElement>(null);
   // IDs of news items currently persisted in the DB. Used on save to delete any
   // items the admin removed from the editor (the upsert pass alone can't remove).
   const persistedNewsIds = useRef<Set<string>>(new Set());
@@ -1215,6 +1219,74 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                     placeholder="https://example.com/watch"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-2 font-medium">Hero Background Video</label>
+                  <p className="text-xs text-gray-600 mb-3">Upload an .mp4 / .webm clip (max 100&nbsp;MB) for a seamless, control-free looping background — or paste a direct video URL below. When set, this replaces the static background image.</p>
+
+                  {/* Upload button */}
+                  <input
+                    ref={videoFileRef}
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime"
+                    className="hidden"
+                    onChange={async e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 100 * 1024 * 1024) {
+                        showToast('Video too large — max 100 MB', 'error');
+                        if (videoFileRef.current) videoFileRef.current.value = '';
+                        return;
+                      }
+                      setUploadingVideo(true);
+                      try {
+                        const url = await uploadHeroVideo(file);
+                        setData(d => ({ ...d, heroVideo: url }));
+                        await setSiteConfig('hero_video', url);
+                        showToast('Video uploaded!', 'success');
+                      } catch (err) {
+                        showToast(err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed', 'error');
+                      } finally {
+                        setUploadingVideo(false);
+                        if (videoFileRef.current) videoFileRef.current.value = '';
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={uploadingVideo}
+                    onClick={() => videoFileRef.current?.click()}
+                    className="flex items-center gap-2 bg-[#0d0f16] border border-[#2a2d3a] hover:border-[#ff4655] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed mb-3"
+                  >
+                    {uploadingVideo
+                      ? <><Loader className="w-4 h-4 animate-spin" /> Uploading…</>
+                      : <><ImageIcon className="w-4 h-4" /> Upload Video File</>}
+                  </button>
+
+                  {/* Or paste URL */}
+                  <input
+                    type="url"
+                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-4 py-3 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors placeholder:text-gray-600"
+                    value={data.heroVideo || ''}
+                    onChange={e => setData(d => ({ ...d, heroVideo: e.target.value }))}
+                    placeholder="…or paste a direct URL / YouTube link"
+                  />
+                  {data.heroVideo && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <p className="text-xs text-green-500 flex-1 truncate">✓ {data.heroVideo}</p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setData(d => ({ ...d, heroVideo: '' }));
+                          try { await setSiteConfig('hero_video', ''); showToast('Video removed', 'success'); }
+                          catch { showToast('Failed to remove video', 'error'); }
+                        }}
+                        className="text-xs text-gray-400 hover:text-[#ff4655] transition-colors whitespace-nowrap"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Homepage standings selector — round-robin / group-stage tournaments */}
@@ -1244,6 +1316,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
                 onClick={async () => {
                   try {
                     await setSiteConfig('hero_link', data.heroLink ?? '');
+                    await setSiteConfig('hero_video', data.heroVideo ?? '');
                     await setSiteConfig('standings_tournament_id', data.standingsTournamentId ?? '');
                     save(data);
                   } catch { showToast('Failed to save settings', 'error'); }
