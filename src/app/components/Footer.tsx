@@ -6,8 +6,7 @@ export function Footer() {
         <div>
           <div className="arena-footer__brand">CLUTCH.GG</div>
           <p className="arena-footer__tagline">
-            Definitive digital environment for<br />
-            high-performance competitive rosters.
+            You can't improve what you don't measure.
           </p>
         </div>
 
@@ -43,7 +42,7 @@ export function Footer() {
       {/* Bottom bar */}
       <div className="arena-footer__bottom">
         <span>© 2026 Clutch.gg</span>
-        <span>High-performance infrastructure.</span>
+        <span>All rights reserved.</span>
       </div>
     </footer>
   );

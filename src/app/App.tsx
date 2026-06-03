@@ -442,11 +442,14 @@ function Home() {
           <h2 className="arena-cta__title">
             ENTER THE <span className="accent">CLUTCH</span>
           </h2>
-          <Link to="/matches" className="arena-btn arena-btn--primary" style={{ letterSpacing: '0.1em', padding: '1.25rem 3.5rem' }}>
-            Register Roster
-          </Link>
-        </div>
-      </section>
+              <a  href="mailto:clutch.gg@gmail.com"
+                className="arena-btn arena-btn--primary"
+                style={{ letterSpacing: '0.1em', padding: '1.25rem 3.5rem' }}
+              >
+                Contact us
+              </a>
+          </div>
+        </section>
 
       <Footer />
     </div>
