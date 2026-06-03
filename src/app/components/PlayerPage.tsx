@@ -162,15 +162,43 @@ export function PlayerPage() {
     [tournaments, tournamentId],
   );
 
-  const found = useMemo(
-    () => (tournament ? findPlayer(tournament, playerId) : null),
-    [tournament, playerId],
-  );
+  // Find the player by id in the URL's tournament first; if not there (e.g. a
+  // substitute who only exists in another tournament's copy of the team), fall
+  // back to searching every tournament. `sourceTournament` is wherever we found
+  // them, so stats are collected from the right place.
+  const resolved = useMemo(() => {
+    const primary = tournament ? findPlayer(tournament, playerId) : null;
+    if (primary && tournament) return { ...primary, sourceTournament: tournament };
+    for (const t of tournaments) {
+      const hit = findPlayer(t, playerId);
+      if (hit) return { ...hit, sourceTournament: t };
+    }
+    return null;
+  }, [tournament, tournaments, playerId]);
+
+  const found = resolved;
+
+  // The player's photo may have been uploaded on a different tournament's copy
+  // of this team (teams recur across tournaments). If this copy has no photo,
+  // backfill it from another copy matched by team name + player name.
+  const photo = useMemo(() => {
+    if (!found) return undefined;
+    if (found.player.photo) return found.player.photo;
+    const norm = (s: string) => s.trim().toLowerCase();
+    for (const t of tournaments) {
+      for (const team of t.teams) {
+        if (norm(team.name) !== norm(found.team.name)) continue;
+        const match = team.players.find(p => norm(p.name) === norm(found.player.name) && p.photo);
+        if (match?.photo) return match.photo;
+      }
+    }
+    return undefined;
+  }, [found, tournaments]);
 
   const mapStats = useMemo(() => {
-    if (!tournament || !found) return [];
-    return collectPlayerMapStats(tournament, found.player, found.team.id);
-  }, [tournament, found]);
+    if (!resolved) return [];
+    return collectPlayerMapStats(resolved.sourceTournament, resolved.player, resolved.team.id);
+  }, [resolved]);
 
   const agg = useMemo(() => aggregate(mapStats), [mapStats]);
 
@@ -186,7 +214,7 @@ export function PlayerPage() {
     );
   }
 
-  if (!tournament || !found) {
+  if (!found) {
     return (
       <div className="min-h-screen bg-[#0e0e0e]">
         <Header />
@@ -202,6 +230,8 @@ export function PlayerPage() {
   }
 
   const { player, team } = found;
+  // The tournament the player actually belongs to (may differ from the URL one).
+  const playerTournament = found.sourceTournament;
 
   const summaryCards: { label: string; value: string; highlight?: boolean }[] = [
     { label: 'ACS', value: Math.round(agg.acs).toString(), highlight: true },
@@ -224,8 +254,8 @@ export function PlayerPage() {
         {/* Player hero */}
         <div className="arena-pp-hero">
           <div className="arena-pp-hero__photo">
-            {player.photo
-              ? <img src={player.photo} alt={player.name} />
+            {photo
+              ? <img src={photo} alt={player.name} />
               : <span className="arena-pp-hero__initials">{playerInitials(player.name)}</span>}
           </div>
 
@@ -239,9 +269,9 @@ export function PlayerPage() {
                 <Shield className="w-3.5 h-3.5" />
                 {team.name}
               </button>
-              <button type="button" onClick={() => navigate(`/tournament/${tournament.id}`)} className="arena-pp-chip arena-pp-chip--link">
+              <button type="button" onClick={() => navigate(`/tournament/${playerTournament.id}`)} className="arena-pp-chip arena-pp-chip--link">
                 <Trophy className="w-3.5 h-3.5" />
-                {tournament.name}
+                {playerTournament.name}
               </button>
               {player.role && (
                 <span className="arena-pp-chip arena-pp-chip--role" style={getRoleStyle(player.role)}>

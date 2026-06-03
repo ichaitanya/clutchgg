@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check, Youtube, Image as ImageIcon } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
@@ -10,19 +10,28 @@ import {
   generateSimplifiedRoundRobinBracket,
 } from '../utils/bracketUtils';
 import * as ValorantAPI from '../services/valorantApi';
-import { upsertTournament, uploadImage } from '../services/db';
+import { upsertTournament, uploadImage, getTournaments } from '../services/db';
+import { normalizePhotoUrl } from '../utils/excelImportUtils';
 import { computeRRStandings } from './BracketDisplay';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export type PlayerRole = 'igl' | 'duelist' | 'controller' | 'sentinel' | 'initiator';
 
+export interface PlayerAlias {
+  name: string;
+  riotId?: string;
+}
+
 export interface TournamentPlayer {
   id: string;
   name: string;
-  riotId?: string; // Riot ID in "name#tag" format — used for API match lookups
+  riotId?: string;  // Riot ID in "name#tag" format — used for API match lookups
   role?: PlayerRole;
-  photo?: string; // base64 or URL
+  photo?: string;   // base64 or URL
+  // Previous names/Riot IDs the player has used. When a player renames, the old
+  // name/riotId are pushed here so historical stat rows still resolve to them.
+  nameHistory?: PlayerAlias[];
 }
 
 export interface TeamInTournament {
@@ -240,6 +249,43 @@ function PlayerDetailsForm({
   );
   const [photoPreview, setPhotoPreview] = useState(player?.photo || '');
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUrlInput, setPhotoUrlInput] = useState('');
+  // Whether the current photo was auto-filled from another tournament (vs. set
+  // explicitly here) — shown as a hint the admin can override.
+  const [photoPrefilled, setPhotoPrefilled] = useState(false);
+  // name (lowercased) → existing photo URL, gathered from every tournament.
+  const [photoIndex, setPhotoIndex] = useState<Map<string, string>>(new Map());
+
+  // Build a lookup of existing player photos across all tournaments so a player
+  // who already has a photo elsewhere shows it automatically when added here.
+  useEffect(() => {
+    getTournaments()
+      .then(ts => {
+        const idx = new Map<string, string>();
+        for (const t of ts) {
+          for (const tm of t.teams) {
+            for (const p of tm.players) {
+              const k = p.name.trim().toLowerCase();
+              if (p.photo && k && !idx.has(k)) idx.set(k, p.photo);
+            }
+          }
+        }
+        setPhotoIndex(idx);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Prefill the photo from the index when this player has none yet and a match
+  // exists for the typed name. Only fills — never overrides an explicit photo.
+  useEffect(() => {
+    if (form.photo) return;
+    const hit = photoIndex.get(form.name.trim().toLowerCase());
+    if (hit) {
+      setForm(f => ({ ...f, photo: hit }));
+      setPhotoPreview(hit);
+      setPhotoPrefilled(true);
+    }
+  }, [form.name, form.photo, photoIndex]);
 
   // Upload the photo to Storage and keep only the public URL in the form (no
   // base64 in the tournament blob). Shows an instant local preview meanwhile.
@@ -252,6 +298,7 @@ function PlayerDetailsForm({
       const url = await uploadImage(file, 'player-photos');
       setPhotoPreview(url);
       setForm(f => ({ ...f, photo: url }));
+      setPhotoPrefilled(false);
     } catch (err) {
       console.error('Photo upload failed', err);
       alert('Photo upload failed. Please try again.');
@@ -259,6 +306,23 @@ function PlayerDetailsForm({
     } finally {
       setPhotoUploading(false);
     }
+  };
+
+  // Set the photo from a pasted URL (direct link or Google Drive share link).
+  const applyPhotoUrl = () => {
+    const url = normalizePhotoUrl(photoUrlInput);
+    if (!url) return;
+    setForm(f => ({ ...f, photo: url }));
+    setPhotoPreview(url);
+    setPhotoPrefilled(false);
+    setPhotoUrlInput('');
+  };
+
+  // Clear the current photo (e.g. to remove a prefilled one).
+  const clearPhoto = () => {
+    setForm(f => ({ ...f, photo: undefined }));
+    setPhotoPreview('');
+    setPhotoPrefilled(false);
   };
 
   const isValid = form.name.trim() !== '';
@@ -286,7 +350,7 @@ function PlayerDetailsForm({
             </label>
             <div className="flex items-center gap-3">
               {photoPreview && (
-                <div className="w-16 h-16 rounded-lg overflow-hidden border border-[#2a2d3a]">
+                <div className="w-16 h-16 rounded-lg overflow-hidden border border-[#2a2d3a] flex-shrink-0">
                   <img
                     src={photoPreview}
                     alt="preview"
@@ -303,7 +367,7 @@ function PlayerDetailsForm({
                 ) : (
                   <>
                     <Upload className="w-4 h-4 text-gray-500" />
-                    <span className="text-xs text-gray-500">Upload photo</span>
+                    <span className="text-xs text-gray-500">{photoPreview ? 'Replace photo' : 'Upload photo'}</span>
                   </>
                 )}
                 <input
@@ -314,6 +378,38 @@ function PlayerDetailsForm({
                   className="hidden"
                 />
               </label>
+            </div>
+
+            {/* Or paste an image URL (direct link or Google Drive share link). */}
+            <div className="flex gap-2 mt-2">
+              <input
+                type="url"
+                className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-xs focus:border-[#ff4655] focus:outline-none transition-colors placeholder:text-gray-600"
+                placeholder="…or paste image URL (https:// or Google Drive link)"
+                value={photoUrlInput}
+                onChange={e => setPhotoUrlInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyPhotoUrl(); } }}
+              />
+              <button
+                type="button"
+                onClick={applyPhotoUrl}
+                disabled={!photoUrlInput.trim()}
+                className="px-3 py-2 bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] text-xs font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Use URL
+              </button>
+            </div>
+
+            {/* Status line: prefilled hint + remove control. */}
+            <div className="flex items-center justify-between mt-1.5 min-h-[1rem]">
+              {photoPrefilled ? (
+                <span className="text-[10px] text-[#4ade80]">✓ Photo filled from another tournament — replace it above if needed.</span>
+              ) : <span />}
+              {photoPreview && (
+                <button type="button" onClick={clearPhoto} className="text-[10px] text-gray-500 hover:text-[#ff4655] transition-colors">
+                  Remove photo
+                </button>
+              )}
             </div>
           </div>
 

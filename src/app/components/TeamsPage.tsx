@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ChevronLeft, Users, User, ChevronRight, Trophy, ArrowRight } from 'lucide-react';
+import { ChevronLeft, Users, User, ChevronRight, ChevronDown, ChevronUp, Trophy, ArrowRight } from 'lucide-react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { Footer } from './Footer';
@@ -115,6 +115,10 @@ export function TeamsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(routeTeamId ? 'players' : 'teams');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(routeTeamId ?? null);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  // Expand toggles (default collapsed): the substitutes roster list and the
+  // Player Performance Index each show the first 5 until expanded, independently.
+  const [showAllRoster, setShowAllRoster] = useState(false);
+  const [showAllAnalytics, setShowAllAnalytics] = useState(false);
 
   useEffect(() => {
     getTournaments().then(setTournaments).catch(() => {});
@@ -127,32 +131,83 @@ export function TeamsPage() {
     }
   }, [routeTeamId]);
 
+  // Collapse both expandable sections when navigating to a different team.
+  useEffect(() => { setShowAllRoster(false); setShowAllAnalytics(false); }, [selectedTeamId]);
+
   const allTeams: (TeamInTournament & { tournamentName: string; tournamentId: string; overview?: string })[] = useMemo(() => {
     const norm = (s: string) => s.trim().toLowerCase();
-    const rosterSignature = (players: TournamentPlayer[]) =>
-      players
-        .map(p => norm(p.name))
-        .filter(Boolean)
-        .sort()
-        .join('|');
 
-    const teams: (TeamInTournament & { tournamentName: string; tournamentId: string; overview?: string })[] = [];
-    const seen = new Set<string>();
+    type TeamRow = TeamInTournament & { tournamentName: string; tournamentId: string; overview?: string };
+
+    // Group same-named teams across tournaments into one roster when they share
+    // at least 2 players (so a recurring squad — even with a changed line-up —
+    // is one team, but a totally different squad sharing a name stays separate).
+    // Each group accumulates the union of its players (deduped by name, photo
+    // preferred) so new faces get added to the roster instead of a new tile.
+    interface Group {
+      row: TeamRow;
+      names: Set<string>;          // normalized player names in this group
+      playerByName: Map<string, TournamentPlayer>;
+      order: string[];             // insertion order of normalized names
+    }
+    const groups: Group[] = [];
+
+    const upsertPlayer = (g: Group, p: TournamentPlayer) => {
+      const k = norm(p.name);
+      if (!k) return;
+      const existing = g.playerByName.get(k);
+      if (!existing) {
+        g.playerByName.set(k, { ...p });
+        g.order.push(k);
+        g.names.add(k);
+      } else {
+        // Fill in any details the canonical entry is missing.
+        if (!existing.photo && p.photo) existing.photo = p.photo;
+        if (!existing.role && p.role) existing.role = p.role;
+        if (!existing.riotId && p.riotId) existing.riotId = p.riotId;
+      }
+    };
 
     tournaments.forEach(tournament => {
       tournament.teams.forEach(team => {
-        const key = `${norm(team.name)}::${rosterSignature(team.players)}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        teams.push({
-          ...team,
-          tournamentName: tournament.name,
-          tournamentId: tournament.id,
-          overview: tournament.overview,
+        const tk = norm(team.name);
+        const teamNames = new Set(team.players.map(p => norm(p.name)).filter(Boolean));
+
+        // Match an existing group: same name AND ≥2 shared players (or, when a
+        // roster has fewer than 2 players, just the same name).
+        const match = groups.find(g => {
+          if (norm(g.row.name) !== tk) return false;
+          let shared = 0;
+          for (const n of teamNames) if (g.names.has(n)) shared++;
+          return shared >= 2 || teamNames.size < 2 || g.names.size < 2;
         });
+
+        if (match) {
+          if (!match.row.logo && team.logo) match.row.logo = team.logo;
+          team.players.forEach(p => upsertPlayer(match, p));
+        } else {
+          const g: Group = {
+            row: {
+              ...team,
+              players: [],
+              tournamentName: tournament.name,
+              tournamentId: tournament.id,
+              overview: tournament.overview,
+            },
+            names: new Set(),
+            playerByName: new Map(),
+            order: [],
+          };
+          team.players.forEach(p => upsertPlayer(g, p));
+          groups.push(g);
+        }
       });
     });
-    return teams;
+
+    return groups.map(g => ({
+      ...g.row,
+      players: g.order.map(k => g.playerByName.get(k)!),
+    }));
   }, [tournaments]);
 
   const selectedTeam = useMemo(() => {
@@ -433,12 +488,43 @@ export function TeamsPage() {
                   </p>
                 </div>
 
-                {/* Any players beyond the first five spill into extra tiles */}
-                {selectedTeam.players.slice(5).map(p => (
-                  <div key={p.id} className="arena-roster-grid__cell">
-                    <PlayerTile player={p} />
-                  </div>
-                ))}
+              </div>
+            )}
+
+            {/* Substitutes / extra roster (players beyond the first 5) — listed,
+                not tiled, and tucked behind a "View more" toggle. */}
+            {selectedTeam.players.length > 5 && (
+              <div className="arena-roster-extra">
+                <button
+                  type="button"
+                  className="arena-roster-extra__toggle"
+                  onClick={() => setShowAllRoster(v => !v)}
+                >
+                  {showAllRoster
+                    ? <>Hide additional players <ChevronUp className="w-4 h-4" /></>
+                    : <>View all {selectedTeam.players.length} players <ChevronDown className="w-4 h-4" /></>}
+                </button>
+                {showAllRoster && (
+                  <ul className="arena-roster-extra__list">
+                    {selectedTeam.players.slice(5).map(p => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => goToPlayer(p.id)}
+                          className="arena-roster-extra__row"
+                        >
+                          <span className="arena-roster-extra__avatar">
+                            {p.photo
+                              ? <img src={p.photo} alt={p.name} />
+                              : <User className="w-4 h-4 text-gray-600" />}
+                          </span>
+                          <span className="arena-roster-extra__name">{p.name}</span>
+                          {p.role && <span className="arena-roster-extra__role">{p.role}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 
@@ -456,7 +542,7 @@ export function TeamsPage() {
                 </div>
 
                 <div className="arena-roster-analytics__list">
-                  {selectedTeam.players.map((player, i) => {
+                  {(showAllAnalytics ? selectedTeam.players : selectedTeam.players.slice(0, 5)).map((player, i) => {
                     const s = statsFor(player);
                     const has = s && s.mapsPlayed > 0;
                     return (
@@ -497,6 +583,18 @@ export function TeamsPage() {
                     );
                   })}
                 </div>
+
+                {selectedTeam.players.length > 5 && (
+                  <button
+                    type="button"
+                    className="arena-roster-extra__toggle arena-roster-extra__toggle--center"
+                    onClick={() => setShowAllAnalytics(v => !v)}
+                  >
+                    {showAllAnalytics
+                      ? <>Show top 5 only <ChevronUp className="w-4 h-4" /></>
+                      : <>View all {selectedTeam.players.length} players <ChevronDown className="w-4 h-4" /></>}
+                  </button>
+                )}
               </section>
             )}
 

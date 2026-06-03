@@ -178,6 +178,42 @@ function rostersOverlap(a: Set<string>, b: Set<string>): boolean {
   return shared >= 3;
 }
 
+// A team can appear in several tournaments, and photos/logo may have been
+// uploaded on a different copy than the one this match belongs to. Backfill any
+// missing logo + player photos from other tournaments' copies of the same team
+// (matched by team name + player name) so faces show in the lineup.
+function enrichTeamMedia(
+  team: TeamInTournament | null,
+  allTournaments: Tournament[],
+): TeamInTournament | null {
+  if (!team) return null;
+  const norm = (s: string) => s.trim().toLowerCase();
+  const needsLogo = !team.logo;
+  const needsAnyPhoto = team.players.some(p => !p.photo);
+  if (!needsLogo && !needsAnyPhoto) return team;
+
+  // Gather photos for this team's players across every tournament copy.
+  const photoByName = new Map<string, string>();
+  let foundLogo: string | undefined;
+  for (const t of allTournaments) {
+    for (const other of t.teams) {
+      if (norm(other.name) !== norm(team.name)) continue;
+      if (!foundLogo && other.logo) foundLogo = other.logo;
+      for (const p of other.players) {
+        if (p.photo && !photoByName.has(norm(p.name))) photoByName.set(norm(p.name), p.photo);
+      }
+    }
+  }
+
+  return {
+    ...team,
+    logo: team.logo || foundLogo,
+    players: team.players.map(p =>
+      p.photo ? p : { ...p, photo: photoByName.get(norm(p.name)) }
+    ),
+  };
+}
+
 // One finished match involving a tracked team, flattened for the history lists.
 interface HistoryMatch {
   id: string;
@@ -454,7 +490,12 @@ export function TournamentMatchPage() {
     );
   }
 
-  const { match, tournament, team1, team2, stage, status } = ctx;
+  const { match, tournament, team1: rawTeam1, team2: rawTeam2, stage, status } = ctx;
+
+  // Backfill missing player photos / logo from other tournaments' copies of the
+  // same team, so faces show even when they were uploaded on a different copy.
+  const team1 = enrichTeamMedia(rawTeam1, allTournaments);
+  const team2 = enrichTeamMedia(rawTeam2, allTournaments);
 
   const team1Name = team1?.name ?? match.team1Name;
   const team2Name = team2?.name ?? match.team2Name;
@@ -865,7 +906,7 @@ export function TournamentMatchPage() {
                 </div>
                 {side.team && side.team.players.length > 0 ? (
                   <div className="arena-md-lineup__grid">
-                    {side.team.players.map(player => (
+                    {side.team.players.slice(0, 5).map(player => (
                       <button
                         key={player.id}
                         type="button"
@@ -873,15 +914,19 @@ export function TournamentMatchPage() {
                         className="arena-md-player"
                         title={player.role ? `${player.name} · ${player.role.toUpperCase()}` : player.name}
                       >
-                        <span className="arena-md-player__role" style={player.role ? getRoleStyle(player.role) : { color: 'var(--arena-text-dim)' }}>
-                          {player.role ? player.role.toUpperCase() : '—'}
-                        </span>
                         <span className="arena-md-player__photo">
                           {player.photo
                             ? <img src={player.photo} alt={player.name} />
                             : <span className="arena-md-player__initials" style={{ background: side.avatar, color: side.avatarColor }}>{teamInitials(player.name)}</span>}
                         </span>
-                        <span className="arena-md-player__name">{player.name}</span>
+                        {player.role && (
+                          <span className="arena-md-player__role" style={getRoleStyle(player.role)}>
+                            {player.role.toUpperCase()}
+                          </span>
+                        )}
+                        <span className="arena-md-player__plate">
+                          <span className="arena-md-player__name">{player.name}</span>
+                        </span>
                       </button>
                     ))}
                   </div>

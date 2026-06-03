@@ -192,19 +192,19 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-[#ff4655] font-bold">•</span>
-                    <span><strong>Player Name 1-5</strong> - Mandatory. At least 1 player required</span>
+                    <span><strong>Player Name 1-7</strong> - Slots 1-5 are the main roster (at least 1 required); slots 6-7 are optional substitutes.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-[#ff4655] font-bold">•</span>
-                    <span><strong>Riot ID 1-5</strong> - Optional. Full Riot ID as name#tag (e.g. jinggg#NA1). Used for API match lookups; not shown publicly.</span>
+                    <span><strong>Riot ID 1-7</strong> - Optional. Full Riot ID as name#tag (e.g. jinggg#NA1). Used for API match lookups; not shown publicly.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-[#ff4655] font-bold">•</span>
-                    <span><strong>Role 1-5</strong> - Optional. Use: igl, duelist, controller, sentinel, initiator</span>
+                    <span><strong>Role 1-7</strong> - Optional. Use: igl, duelist, controller, sentinel, initiator</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-[#ff4655] font-bold">•</span>
-                    <span><strong>Photo</strong> - Optional. Photos cannot be uploaded via Excel. Add manually.</span>
+                    <span><strong>Photos</strong> - Not set here. Add player photos in the tournament edit section (upload or paste a URL). Existing photos from other tournaments are filled in automatically.</span>
                   </li>
                 </ul>
               </div>
@@ -309,15 +309,16 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
                             </div>
                             <div className="mt-2 space-y-1">
                               {team.players.map((player, playerIndex) => (
-                                <div key={playerIndex} className="text-xs text-gray-400 flex items-center justify-between">
-                                  <span>
+                                <div key={playerIndex} className="text-xs text-gray-400 flex items-center justify-between gap-2">
+                                  <span className="truncate">
                                     {playerIndex + 1}. {player.name}
+                                    {playerIndex >= 5 && <span className="text-gray-600 ml-1">(sub)</span>}
                                     {player.riotId && (
                                       <span className="text-gray-600 ml-2">({player.riotId})</span>
                                     )}
                                   </span>
                                   {player.role && (
-                                    <span className="text-[#ff4655] uppercase tracking-wider font-semibold">
+                                    <span className="text-[#ff4655] uppercase tracking-wider font-semibold flex-shrink-0">
                                       {player.role}
                                     </span>
                                   )}
