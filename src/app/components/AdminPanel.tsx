@@ -10,7 +10,7 @@ import {
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
 import { supabase, signIn, signOut } from '../services/supabase';
-import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings, setSiteConfig, migrateFromLocalStorage, uploadHeroVideo } from '../services/db';
+import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings, setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache } from '../services/db';
 
 function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('');
@@ -550,16 +550,6 @@ function StandingsEditor({ teams, onChange }: { teams: StandingTeam[]; onChange:
 
 // ─── News / Article Editor ─────────────────────────────────────────────────────
 
-// Read an uploaded image file as a base64 data URL.
-function readImageAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 // A paragraph textarea with @-mention autocomplete. Typing "@" opens a picker of
 // teams/players from the DB; selecting one inserts a mention token that becomes a
 // link when the article is rendered.
@@ -671,8 +661,15 @@ function ArticleBodyEditor({ blocks, onChange, mentionIndex }: { blocks: NewsBlo
   const addImage = () => onChange([...blocks, { id: uid(), type: 'image', url: '', caption: '' }]);
 
   const handleBlockImage = async (id: string, file: File) => {
-    const url = await readImageAsDataUrl(file);
-    updateBlock(id, { url } as Partial<NewsBlock>);
+    updateBlock(id, { url: URL.createObjectURL(file) } as Partial<NewsBlock>);
+    try {
+      const url = await uploadImage(file, 'news-images');
+      updateBlock(id, { url } as Partial<NewsBlock>);
+    } catch (err) {
+      console.error('Image upload failed', err);
+      alert('Image upload failed. Please try again.');
+      updateBlock(id, { url: '' } as Partial<NewsBlock>);
+    }
   };
 
   return (
@@ -783,8 +780,16 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
   };
 
   const handleCover = async (id: string, file: File) => {
-    const url = await readImageAsDataUrl(file);
-    update(id, { imageUrl: url });
+    // Show an instant local preview, then replace with the uploaded Storage URL.
+    update(id, { imageUrl: URL.createObjectURL(file) });
+    try {
+      const url = await uploadImage(file, 'news-images');
+      update(id, { imageUrl: url });
+    } catch (err) {
+      console.error('Cover upload failed', err);
+      alert('Image upload failed. Please try again.');
+      update(id, { imageUrl: '' });
+    }
   };
 
   return (
@@ -1038,8 +1043,10 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   // items the admin removed from the editor (the upsert pass alone can't remove).
   const persistedNewsIds = useRef<Set<string>>(new Set());
 
-  // Load from Supabase on mount
+  // Load from Supabase on mount. Clear the read cache first so the admin always
+  // edits the freshest data (not a copy cached during an earlier public-page visit).
   useEffect(() => {
+    clearDbCache();
     loadAdminData()
       .then(d => {
         setData(d);

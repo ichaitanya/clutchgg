@@ -1,27 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { UpcomingMatch } from './components/UpcomingMatch';
 import { Standings } from './components/Standings';
 import { NewsCard } from './components/NewsCard';
-import { AdminPanel } from './components/AdminPanel';
-import { MatchScoreboard } from './components/MatchScoreboard';
-import { MatchesPage } from './components/MatchesPage';
-import { TournamentsPage } from './components/TournamentsPage';
-import { NewsPage } from './components/NewsPage';
-import { TournamentMatchPage } from './components/TournamentMatchPage';
-import { TeamsPage } from './components/TeamsPage';
-import { StatsPage, getTopPlayersByAcs } from './components/StatsPage';
-import { computeRRStandings } from './components/BracketDisplay';
-import { PlayerPage } from './components/PlayerPage';
-import { ArticlePage } from './components/ArticlePage';
-import { TournamentPage } from './components/TournamentPage';
 import { Footer } from './components/Footer';
+// Utilities used directly by the home page stay eager (they pull no heavy deps).
+import { getTopPlayersByAcs } from './components/StatsPage';
+import { computeRRStandings } from './components/BracketDisplay';
 import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
 import { loadAdminData } from './services/db';
+
+// Route pages are code-split so a first-time visitor only downloads the home
+// page's JS. The heavy admin editor (TournamentCreation, Excel/Challonge import,
+// brackets) and the per-route pages load on demand when navigated to. This keeps
+// the initial bundle small and first paint fast.
+const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+const MatchScoreboard = lazy(() => import('./components/MatchScoreboard').then(m => ({ default: m.MatchScoreboard })));
+const MatchesPage = lazy(() => import('./components/MatchesPage').then(m => ({ default: m.MatchesPage })));
+const TournamentsPage = lazy(() => import('./components/TournamentsPage').then(m => ({ default: m.TournamentsPage })));
+const NewsPage = lazy(() => import('./components/NewsPage').then(m => ({ default: m.NewsPage })));
+const TournamentMatchPage = lazy(() => import('./components/TournamentMatchPage').then(m => ({ default: m.TournamentMatchPage })));
+const TeamsPage = lazy(() => import('./components/TeamsPage').then(m => ({ default: m.TeamsPage })));
+const StatsPage = lazy(() => import('./components/StatsPage').then(m => ({ default: m.StatsPage })));
+const PlayerPage = lazy(() => import('./components/PlayerPage').then(m => ({ default: m.PlayerPage })));
+const ArticlePage = lazy(() => import('./components/ArticlePage').then(m => ({ default: m.ArticlePage })));
+const TournamentPage = lazy(() => import('./components/TournamentPage').then(m => ({ default: m.TournamentPage })));
 
 
 // Helper function to determine match status
@@ -467,21 +474,23 @@ function AdminPage() {
 export default function App() {
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/matches" element={<MatchesPage />} />
-        <Route path="/tournaments" element={<TournamentsPage />} />
-        <Route path="/news" element={<NewsPage />} />
-        <Route path="/teams" element={<TeamsPage />} />
-        <Route path="/teams/:teamId" element={<TeamsPage />} />
-        <Route path="/stats" element={<StatsPage />} />
-        <Route path="/player/:tournamentId/:playerId" element={<PlayerPage />} />
-        <Route path="/news/:id" element={<ArticlePage />} />
-        <Route path="/tournament/:id" element={<TournamentPage />} />
-        <Route path="/admin" element={<AdminPage />} />
-        <Route path="/match/:matchId" element={<MatchScoreboard />} />
-        <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />
-      </Routes>
+      <Suspense fallback={<div className="min-h-screen bg-[#0e0e0e]" />}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/matches" element={<MatchesPage />} />
+          <Route path="/tournaments" element={<TournamentsPage />} />
+          <Route path="/news" element={<NewsPage />} />
+          <Route path="/teams" element={<TeamsPage />} />
+          <Route path="/teams/:teamId" element={<TeamsPage />} />
+          <Route path="/stats" element={<StatsPage />} />
+          <Route path="/player/:tournamentId/:playerId" element={<PlayerPage />} />
+          <Route path="/news/:id" element={<ArticlePage />} />
+          <Route path="/tournament/:id" element={<TournamentPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/match/:matchId" element={<MatchScoreboard />} />
+          <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />
+        </Routes>
+      </Suspense>
     </Router>
   );
 }

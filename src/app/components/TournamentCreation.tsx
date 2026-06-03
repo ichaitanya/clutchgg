@@ -10,7 +10,7 @@ import {
   generateSimplifiedRoundRobinBracket,
 } from '../utils/bracketUtils';
 import * as ValorantAPI from '../services/valorantApi';
-import { upsertTournament } from '../services/db';
+import { upsertTournament, uploadImage } from '../services/db';
 import { computeRRStandings } from './BracketDisplay';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -239,17 +239,25 @@ function PlayerDetailsForm({
     player || { id: Math.random().toString(36).slice(2, 9), name: '', role: undefined }
   );
   const [photoPreview, setPhotoPreview] = useState(player?.photo || '');
+  const [photoUploading, setPhotoUploading] = useState(false);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload the photo to Storage and keep only the public URL in the form (no
+  // base64 in the tournament blob). Shows an instant local preview meanwhile.
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        setPhotoPreview(base64);
-        setForm(f => ({ ...f, photo: base64 }));
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoUploading(true);
+    try {
+      const url = await uploadImage(file, 'player-photos');
+      setPhotoPreview(url);
+      setForm(f => ({ ...f, photo: url }));
+    } catch (err) {
+      console.error('Photo upload failed', err);
+      alert('Photo upload failed. Please try again.');
+      setPhotoPreview(player?.photo || '');
+    } finally {
+      setPhotoUploading(false);
     }
   };
 
@@ -287,12 +295,22 @@ function PlayerDetailsForm({
                 </div>
               )}
               <label className="flex-1 flex items-center justify-center gap-2 bg-[#0d0f16] border border-dashed border-[#2a2d3a] rounded-lg py-6 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
-                <Upload className="w-4 h-4 text-gray-500" />
-                <span className="text-xs text-gray-500">Upload photo</span>
+                {photoUploading ? (
+                  <>
+                    <Loader className="w-4 h-4 text-[#ff4655] animate-spin" />
+                    <span className="text-xs text-gray-500">Uploading…</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 text-gray-500" />
+                    <span className="text-xs text-gray-500">Upload photo</span>
+                  </>
+                )}
                 <input
                   type="file"
                   accept="image/*"
                   onChange={handlePhotoUpload}
+                  disabled={photoUploading}
                   className="hidden"
                 />
               </label>
@@ -579,17 +597,24 @@ function AddTeamScreen({
     }
   );
   const [logoPreview, setLogoPreview] = useState(team?.logo || '');
+  const [logoUploading, setLogoUploading] = useState(false);
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload the logo to Storage and keep only the public URL in the form.
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        setLogoPreview(base64);
-        setForm(f => ({ ...f, logo: base64 }));
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    setLogoPreview(URL.createObjectURL(file));
+    setLogoUploading(true);
+    try {
+      const url = await uploadImage(file, 'team-logos');
+      setLogoPreview(url);
+      setForm(f => ({ ...f, logo: url }));
+    } catch (err) {
+      console.error('Logo upload failed', err);
+      alert('Logo upload failed. Please try again.');
+      setLogoPreview(team?.logo || '');
+    } finally {
+      setLogoUploading(false);
     }
   };
 
@@ -632,12 +657,22 @@ function AddTeamScreen({
               </div>
             )}
             <label className="flex-1 flex items-center justify-center gap-2 bg-[#0d0f16] border border-dashed border-[#2a2d3a] rounded-lg py-6 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
-              <Upload className="w-4 h-4 text-gray-500" />
-              <span className="text-xs text-gray-500">Upload logo</span>
+              {logoUploading ? (
+                <>
+                  <Loader className="w-4 h-4 text-[#ff4655] animate-spin" />
+                  <span className="text-xs text-gray-500">Uploading…</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 text-gray-500" />
+                  <span className="text-xs text-gray-500">Upload logo</span>
+                </>
+              )}
               <input
                 type="file"
                 accept="image/*"
                 onChange={handleLogoUpload}
+                disabled={logoUploading}
                 className="hidden"
               />
             </label>
@@ -3137,6 +3172,27 @@ function TournamentForm({
       .map(p => p.prize) || []
   );
   const [coverImage, setCoverImage] = useState(initialTournament?.coverImage || '');
+  const [coverUploading, setCoverUploading] = useState(false);
+
+  // Upload the cover to Storage and keep only the public URL (covers were the
+  // biggest source of blob bloat as inline base64).
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const localPreview = URL.createObjectURL(file);
+    setCoverImage(localPreview);
+    setCoverUploading(true);
+    try {
+      const url = await uploadImage(file, 'tournament-covers');
+      setCoverImage(url);
+    } catch (err) {
+      console.error('Cover upload failed', err);
+      alert('Cover image upload failed. Please try again.');
+      setCoverImage(initialTournament?.coverImage || '');
+    } finally {
+      setCoverUploading(false);
+    }
+  };
 
   const handlePrizeCountChange = (count: number) => {
     setPrizePlaces(prev => {
@@ -3216,21 +3272,21 @@ function TournamentForm({
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                      const base64 = event.target?.result as string;
-                      setCoverImage(base64);
-                    };
-                    reader.readAsDataURL(file);
-                  }
-                }}
+                disabled={coverUploading}
+                onChange={handleCoverUpload}
               />
               <div className="text-center">
-                <ImageIcon className="w-5 h-5 text-gray-400 mx-auto mb-2" />
-                <span className="text-xs text-gray-400">Click to upload image</span>
+                {coverUploading ? (
+                  <>
+                    <Loader className="w-5 h-5 text-[#ff4655] mx-auto mb-2 animate-spin" />
+                    <span className="text-xs text-gray-400">Uploading…</span>
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="w-5 h-5 text-gray-400 mx-auto mb-2" />
+                    <span className="text-xs text-gray-400">Click to upload image</span>
+                  </>
+                )}
               </div>
             </label>
             {coverImage && (

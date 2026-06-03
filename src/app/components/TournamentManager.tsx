@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Plus,
   X,
@@ -10,22 +10,14 @@ import {
   MapPin,
   ChevronRight,
   Swords,
-  BarChart2,
 } from 'lucide-react';
 import type { Tournament, TournamentEvent, TeamInTournament, Stage1Config, BracketGenerated } from './TournamentCreation';
 import { CreateTournamentScreen } from './TournamentCreation';
 import { BracketDisplay } from './BracketDisplay';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
-import { getSiteConfig, setSiteConfig } from '../services/db';
 
 // True if a tournament has a round-robin or group-stage standing worth showing
 // on the homepage.
-function hasStandings(t: Tournament): boolean {
-  return t.stage1Config?.format === 'groupstage'
-    || t.generatedBracket?.bracketType === 'roundrobin'
-    || t.stage1Bracket?.bracketType === 'roundrobin';
-}
-
 interface TournamentManagerProps {
   tournaments: Tournament[];
   onTournamentsChange: (tournaments: Tournament[]) => void;
@@ -317,18 +309,6 @@ export function TournamentManager({
   const [editingEventDetails, setEditingEventDetails] = useState<string | null>(null);
   const [showStage2BracketModal, setShowStage2BracketModal] = useState(false);
   const [pendingQualifiedTeams, setPendingQualifiedTeams] = useState<TeamInTournament[]>([]);
-  // Which tournament's standings are shown on the homepage (site config).
-  const [homepageStandingsId, setHomepageStandingsId] = useState<string>('');
-
-  useEffect(() => {
-    getSiteConfig('standings_tournament_id').then(setHomepageStandingsId).catch(() => {});
-  }, []);
-
-  const toggleHomepageStandings = async (tournamentId: string) => {
-    const next = homepageStandingsId === tournamentId ? '' : tournamentId;
-    setHomepageStandingsId(next);
-    try { await setSiteConfig('standings_tournament_id', next); } catch { /* best-effort */ }
-  };
 
   const selectedTournament = tournaments.find((t) => t.id === selectedTournamentId);
   const editingTournament = tournaments.find((t) => t.id === editingTournamentId);
@@ -392,20 +372,6 @@ export function TournamentManager({
             <h2 className="text-white font-bold text-lg">{t.name}</h2>
             <p className="text-gray-500 text-sm">{t.overview}</p>
           </div>
-          {hasStandings(t) && (
-            <button
-              onClick={() => toggleHomepageStandings(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all border ${
-                homepageStandingsId === t.id
-                  ? 'bg-[#ff4655]/15 border-[#ff4655]/40 text-[#ff4655]'
-                  : 'bg-[#1e2130] border-[#2a2d3a] text-gray-400 hover:text-white hover:border-gray-500'
-              }`}
-              title="Show this tournament's standings on the homepage"
-            >
-              <BarChart2 className="w-3.5 h-3.5" />
-              {homepageStandingsId === t.id ? 'On Homepage' : 'Show on Homepage'}
-            </button>
-          )}
           <button
             onClick={() => setEditingTournamentId(t.id)}
             className="p-2 hover:bg-[#1e2130] rounded-lg transition-colors text-gray-500 hover:text-white"

@@ -3313,11 +3313,15 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
 }
+/* Every team card shows the logo (or initials watermark) filling the card, with
+   the details overlaid in a subtle faded band at the bottom. */
 .arena-team-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   text-align: left;
-  background: var(--arena-surface-elevated);
+  min-height: 16rem;
+  background: #0c0c0c;
   border: 1px solid var(--arena-border);
   border-radius: 0.4rem;
   overflow: hidden;
@@ -3326,13 +3330,10 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 }
 .arena-team-card:hover { border-color: var(--arena-accent); transform: translateY(-2px); }
 
-/* Fixed-height crest area so every card is the same height, with or without
-   an uploaded logo. */
+/* Crest fills the whole card as a backdrop. */
 .arena-team-card__crest {
-  position: relative;
-  height: 9rem;
-  background: #0e0e0e;
-  border-bottom: 1px solid var(--arena-border);
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3343,31 +3344,49 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   height: 100%;
   object-fit: cover;
   object-position: center center;
-  transition: transform 0.2s ease;
+  transition: transform 0.25s ease;
 }
-.arena-team-card:hover .arena-team-card__crest img { transform: scale(1.05); }
+.arena-team-card:hover .arena-team-card__crest img { transform: scale(1.04); }
+/* Initials watermark for logo-less teams — sits high so it isn't hidden by the
+   bottom detail band. */
 .arena-team-card__crest-text {
   font-family: 'Chivo', 'Inter', system-ui, sans-serif;
   font-weight: 700;
-  font-size: 2.75rem;
+  font-size: 3.25rem;
   letter-spacing: 0.02em;
-  color: #2f2f2f;
+  color: #242424;
+  margin-bottom: 3.5rem;
+}
+
+/* Subtle bottom fade — only the lower third darkens, just enough for the text
+   (text-shadow handles the rest of the contrast). */
+.arena-team-card__wash {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top,
+    rgba(8,8,8,0.92) 0%,
+    rgba(8,8,8,0.78) 18%,
+    rgba(8,8,8,0.35) 38%,
+    transparent 60%);
 }
 
 .arena-team-card__body {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 1.1rem 1.25rem 1.25rem;
-  flex: 1;
+  gap: 0.25rem;
+  margin-top: auto;
+  padding: 1.1rem 1.25rem 1.2rem;
 }
 .arena-team-card__name {
   font-family: 'Playfair Display', Georgia, serif;
   font-weight: 600;
-  font-size: 1.25rem;
+  font-size: 1.35rem;
   line-height: 1.15;
   color: #fff;
   margin: 0;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.85), 0 2px 14px rgba(0,0,0,0.55);
   transition: color 0.15s ease;
 }
 .arena-team-card:hover .arena-team-card__name { color: var(--arena-accent); }
@@ -3377,69 +3396,35 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--arena-text-dim);
+  color: #b4b2c0;
   margin: 0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
 }
 .arena-team-card__meta {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  margin-top: 0.4rem;
+  margin-top: 0.35rem;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.8125rem;
-  color: var(--arena-text-dim);
+  color: #b4b2c0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
 }
 .arena-team-card__cta {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  margin-top: auto;
-  padding-top: 0.85rem;
+  margin-top: 0.55rem;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--arena-accent);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
 }
 .arena-team-card__cta svg { transition: transform 0.15s ease; }
 .arena-team-card:hover .arena-team-card__cta svg { transform: translateX(3px); }
-
-/* Logo mode: the crest fills the whole card as a backdrop and the details are
-   overlaid on a faded gradient at the bottom (mirrors the tournament hero). */
-.arena-team-card--logo {
-  position: relative;
-  min-height: 17rem;
-  background: #070707;
-}
-.arena-team-card--logo .arena-team-card__crest {
-  position: absolute;
-  inset: 0;
-  height: auto;
-  border-bottom: none;
-}
-.arena-team-card--logo .arena-team-card__wash {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top, #050505 0%, rgba(5,5,5,0.96) 30%, rgba(5,5,5,0.7) 48%, rgba(5,5,5,0.15) 70%, transparent 100%);
-}
-/* Keep the whole detail block grouped at the bottom over the dark part of the
-   gradient (don't let the CTA spread to push the name into the light zone). */
-.arena-team-card--logo .arena-team-card__body {
-  position: relative;
-  z-index: 1;
-  margin-top: auto;
-  gap: 0.3rem;
-}
-.arena-team-card--logo .arena-team-card__cta { margin-top: 0.5rem; padding-top: 0; }
-.arena-team-card--logo .arena-team-card__name {
-  font-size: 1.4rem;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 2px 16px rgba(0,0,0,0.7);
-}
-.arena-team-card--logo .arena-team-card__tag,
-.arena-team-card--logo .arena-team-card__meta {
-  text-shadow: 0 1px 6px rgba(0,0,0,0.8);
-}
 
 /* ════════════════════════════════════════════════════════════════
    PLAYER PROFILE — editorial theme

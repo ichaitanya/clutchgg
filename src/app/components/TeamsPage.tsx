@@ -354,12 +354,13 @@ export function TeamsPage() {
                     setSelectedTeamId(team.id);
                     setViewMode('players');
                   }}
-                  className={`arena-team-card${team.logo ? ' arena-team-card--logo' : ''}`}
+                  className="arena-team-card"
                 >
                   <div className="arena-team-card__crest">
                     {team.logo
-                      ? <><img src={team.logo} alt={team.name} /><span className="arena-team-card__wash" /></>
+                      ? <img src={team.logo} alt={team.name} />
                       : <span className="arena-team-card__crest-text">{teamInitials(team.name)}</span>}
+                    <span className="arena-team-card__wash" />
                   </div>
                   <div className="arena-team-card__body">
                     <h3 className="arena-team-card__name">{team.name}</h3>
