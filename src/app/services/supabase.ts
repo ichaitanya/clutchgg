@@ -95,8 +95,13 @@ export interface Profile {
   display_name: string;
   role: UserRole;
   email?: string | null;
-  // For organizers: the single tournament (tournaments_blob.id) they may edit.
+  // Legacy/primary pointer — the most recently assigned tournament. The full
+  // multi-tournament scope is in `tournamentIds` (sourced from the
+  // organizer_tournaments junction table). Kept for backward compatibility.
   tournament_id?: string | null;
+  // For organizers: every tournament (tournaments_blob.id) they may edit. A
+  // single organizer can be approved for multiple tournaments.
+  tournamentIds?: string[];
   // Forces a password-change screen on next login (default-password path).
   must_change_password?: boolean;
 }
@@ -110,7 +115,21 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     .eq('id', session.user.id)
     .single();
   if (error) return null;
-  return data as Profile;
+  const profile = data as Profile;
+
+  // For organizers, load the full set of tournaments they're scoped to from the
+  // junction table (a single organizer may manage several). Union in the legacy
+  // single column so a not-yet-migrated profile still works.
+  if (profile.role === 'organizer') {
+    const { data: rows } = await supabase
+      .from('organizer_tournaments')
+      .select('tournament_id')
+      .eq('user_id', session.user.id);
+    const ids = new Set<string>((rows ?? []).map((r: any) => r.tournament_id));
+    if (profile.tournament_id) ids.add(profile.tournament_id);
+    profile.tournamentIds = [...ids];
+  }
+  return profile;
 }
 
 export async function isAdmin(): Promise<boolean> {

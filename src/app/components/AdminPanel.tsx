@@ -774,7 +774,7 @@ function ArticleBodyEditor({ blocks, onChange, mentionIndex }: { blocks: NewsBlo
   );
 }
 
-function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteArticle, savingId, tournaments, lockedTournamentId }: {
+function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteArticle, savingId, tournaments, lockedTournamentId, defaultTournamentId }: {
   items: NewsItem[];
   onChange: (n: NewsItem[]) => void;
   onSaveArticle: (item: NewsItem) => void;
@@ -782,9 +782,12 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
   onDeleteArticle: (id: string) => void;
   savingId: string | null;
   tournaments: Tournament[];
-  // When set (organizer mode), every new article is tagged to this tournament and
-  // the per-article tournament dropdown is locked to it.
+  // When set (single-tournament organizer), every new article is tagged to this
+  // tournament and the per-article tournament dropdown is locked to it.
   lockedTournamentId?: string;
+  // When set (multi-tournament organizer), new articles default to this
+  // tournament but the dropdown stays editable so they can pick among theirs.
+  defaultTournamentId?: string;
 }) {
   const mentionIndex = useMemo(() => buildMentionIndex(tournaments), [tournaments]);
   // Which article is currently expanded for editing (only one at a time).
@@ -797,7 +800,7 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
   const toggleVisible = (item: NewsItem) => onToggleVisible({ ...item, visible: !item.visible });
   const addItem = () => {
     const id = uid();
-    onChange([...items, { id, title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true, author: '', body: [], tournamentId: lockedTournamentId }]);
+    onChange([...items, { id, title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true, author: '', body: [], tournamentId: lockedTournamentId ?? defaultTournamentId }]);
     setExpandedId(id); // open the new article for editing
   };
 
@@ -1431,12 +1434,43 @@ export function AdminPanel({ onClose, onDataChange }: {
     );
   }
 
-  return <AdminPanelInner profile={profile} onClose={onClose} onDataChange={onDataChange} onLogout={async () => {
+  const logout = async () => {
     await signOut();
     setAuthed(false);
     setProfile(null);
     navigate('/');
-  }} />;
+  };
+
+  // Authenticated but no profile row → NO access. Never fall through to a
+  // default role: a missing profile must mean "no permissions", not admin.
+  // (A user can exist in auth.users without a profile if account setup half-
+  // completed; granting them admin would be a privilege-escalation hole.)
+  if (!profile) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#0d0f16] flex items-center justify-center px-4">
+        <div className="w-full max-w-sm bg-[#151821] border border-[#2a2d3a] rounded-2xl overflow-hidden shadow-2xl">
+          <div className="h-1 bg-gradient-to-r from-[#ff4655] via-[#ff6670] to-[#ff4655]" />
+          <div className="p-8 text-center">
+            <div className="w-14 h-14 bg-[#ff4655]/10 border border-[#ff4655]/20 rounded-2xl flex items-center justify-center mb-4 mx-auto">
+              <Lock className="w-7 h-7 text-[#ff4655]" />
+            </div>
+            <h1 className="text-white font-bold text-xl tracking-tight mb-2">No Access</h1>
+            <p className="text-gray-500 text-sm mb-6">
+              This account isn't set up with a role yet. Please contact a site administrator.
+            </p>
+            <button
+              onClick={logout}
+              className="w-full bg-[#1e2130] border border-[#2a2d3a] hover:border-gray-500 text-gray-300 hover:text-white font-medium py-3 rounded-xl transition-all text-sm flex items-center justify-center gap-2"
+            >
+              <LogOut className="w-4 h-4" /> Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <AdminPanelInner profile={profile} onClose={onClose} onDataChange={onDataChange} onLogout={logout} />;
 }
 
 function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
@@ -1446,11 +1480,22 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
-  const role: UserRole = profile?.role ?? 'admin';
+  // Default to the LEAST-privileged role if somehow absent (the parent already
+  // blocks a null profile, so this is pure defense-in-depth — never grant admin
+  // by default).
+  const role: UserRole = profile?.role ?? 'organizer';
   const isOrganizer = role === 'organizer';
   const isSuperadmin = role === 'superadmin';
-  // Organizers are scoped to exactly one tournament.
-  const scopedTournamentId = isOrganizer ? (profile?.tournament_id ?? null) : null;
+  // Organizers are scoped to a SET of tournaments (one organizer can be approved
+  // for several). Falls back to the legacy single tournament_id if the
+  // junction-backed list is absent.
+  const scopedTournamentIds = useMemo(() => {
+    if (!isOrganizer) return [] as string[];
+    const ids = new Set<string>(profile?.tournamentIds ?? []);
+    if (profile?.tournament_id) ids.add(profile.tournament_id);
+    return [...ids];
+  }, [isOrganizer, profile?.tournamentIds, profile?.tournament_id]);
+  const scopedIdSet = useMemo(() => new Set(scopedTournamentIds), [scopedTournamentIds]);
   const [tab, setTab] = useState<Tab>('tournaments');
   const [data, setData] = useState<AdminData>(defaultData);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -1486,21 +1531,20 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
     showToast('Changes saved!', 'success');
   };
 
-  // Organizers only ever see/edit their one assigned tournament. Staff see all.
+  // Organizers only ever see/edit their assigned tournament(s). Staff see all.
   const visibleTournaments = useMemo(
     () => isOrganizer
-      ? data.tournaments.filter(t => t.id === scopedTournamentId)
+      ? data.tournaments.filter(t => scopedIdSet.has(t.id))
       : data.tournaments,
-    [data.tournaments, isOrganizer, scopedTournamentId],
+    [data.tournaments, isOrganizer, scopedIdSet],
   );
 
-  // Organizers only see/manage news scoped to their tournament; the article
-  // editor's tournament dropdown is locked to that single tournament.
+  // Organizers only see/manage news scoped to their tournament(s).
   const visibleNews = useMemo(
     () => isOrganizer
-      ? data.news.filter(n => n.tournamentId === scopedTournamentId)
+      ? data.news.filter(n => !!n.tournamentId && scopedIdSet.has(n.tournamentId))
       : data.news,
-    [data.news, isOrganizer, scopedTournamentId],
+    [data.news, isOrganizer, scopedIdSet],
   );
 
   // Keep organizers off tabs they can't access (e.g. if default 'tournaments'
@@ -1554,7 +1598,7 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
         {/* Sidebar */}
         <aside className="w-56 bg-[#0d0f16] border-r border-[#1e2130] flex flex-col p-4 gap-1 flex-shrink-0">
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Content</p>
-          <SideTab icon={Trophy} label={isOrganizer ? 'My Tournament' : 'Tournaments'} active={tab === 'tournaments'} count={visibleTournaments.length} onClick={() => setTab('tournaments')} />
+          <SideTab icon={Trophy} label={isOrganizer ? (visibleTournaments.length === 1 ? 'My Tournament' : 'My Tournaments') : 'Tournaments'} active={tab === 'tournaments'} count={visibleTournaments.length} onClick={() => setTab('tournaments')} />
           <SideTab icon={Trophy} label="News" active={tab === 'news'} count={visibleNews.length} onClick={() => setTab('news')} />
 
           {/* Superadmin-only: review tournament registration requests */}
@@ -1593,11 +1637,11 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
                     : tournaments;
 
                   // Upsert new/changed tournaments to Supabase. Organizers cannot
-                  // create or delete tournaments — only edit their assigned one.
+                  // create or delete tournaments — only edit their assigned ones.
                   const curr = new Set(merged.map(t => t.id));
                   const deleted = isOrganizer ? [] : data.tournaments.filter(t => !curr.has(t.id));
                   const upserted = isOrganizer
-                    ? merged.filter(t => t.id === scopedTournamentId)
+                    ? merged.filter(t => scopedIdSet.has(t.id))
                     : merged;
                   try {
                     await Promise.all([
@@ -1635,20 +1679,29 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
                 <h2 className="text-white font-bold text-lg">Latest News</h2>
                 <p className="text-gray-500 text-sm">
                   {isOrganizer
-                    ? 'Manage news articles for your tournament. New articles are automatically tagged to your tournament.'
+                    ? (scopedTournamentIds.length > 1
+                        ? 'Manage news articles for your tournaments. Pick which tournament each article belongs to.'
+                        : 'Manage news articles for your tournament. New articles are automatically tagged to your tournament.')
                     : 'Manage news articles shown on the homepage. Each article saves on its own.'}
                 </p>
               </div>
               <NewsEditor
                 items={visibleNews}
                 tournaments={visibleTournaments}
-                lockedTournamentId={isOrganizer ? (scopedTournamentId ?? undefined) : undefined}
+                // Lock the dropdown only when an organizer has a single tournament.
+                // With multiple, leave it editable but default new articles to the first.
+                lockedTournamentId={isOrganizer && scopedTournamentIds.length === 1 ? scopedTournamentIds[0] : undefined}
+                defaultTournamentId={isOrganizer ? scopedTournamentIds[0] : undefined}
                 onChange={news => setData(d => {
                   // For organizers, `news` is only their scoped subset — merge it
                   // back into the full list so other tournaments' news is untouched.
                   if (!isOrganizer) return { ...d, news };
-                  const scopedIds = new Set(news.map(n => n.id));
-                  const others = d.news.filter(n => n.tournamentId !== scopedTournamentId && !scopedIds.has(n.id));
+                  const editedIds = new Set(news.map(n => n.id));
+                  // Keep every article that is NOT in the organizer's scope and was
+                  // not part of this edited subset.
+                  const others = d.news.filter(n =>
+                    (!n.tournamentId || !scopedIdSet.has(n.tournamentId)) && !editedIds.has(n.id),
+                  );
                   return { ...d, news: [...others, ...news] };
                 })}
                 savingId={savingNewsId}
