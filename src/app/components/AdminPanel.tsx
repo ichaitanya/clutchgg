@@ -1002,21 +1002,34 @@ function RequestsPanel({ onApproved, showToast }: {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('timeout')), 8000)
-      );
-      setRequests(await Promise.race([getTournamentRequests(), timeout]));
-    } catch (e) {
-      const msg = e instanceof Error && e.message === 'timeout'
-        ? 'Request timed out — check your connection'
-        : 'Failed to load requests';
-      showToast(msg, 'error');
-      setRequests([]);
-    } finally {
+  // Keep a ref to the current mounted state so async callbacks from a
+  // previous mount don't update state after unmount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 10000)
+        );
+        const data = await Promise.race([getTournamentRequests(), timeout]);
+        if (mountedRef.current) { setRequests(data); setLoading(false); }
+        return;
+      } catch {
+        attempts++;
+        if (attempts < 3) await new Promise(r => setTimeout(r, 1500 * attempts));
+      }
+    }
+    // All attempts failed — keep existing data, just show toast
+    if (mountedRef.current) {
       setLoading(false);
+      showToast('Connection issue — showing last known data', 'error');
     }
   };
 
@@ -1048,18 +1061,21 @@ function RequestsPanel({ onApproved, showToast }: {
     setBusyId(req.id);
     try {
       const result = await approveTournamentRequest(req.id);
-      await sendApprovalEmail({
+      // Fire email in background — don't block the UI on it
+      sendApprovalEmail({
         email: result.email,
         organizerName: result.organizerName,
         tournamentName: result.tournamentName,
       });
+      if (!mountedRef.current) return;
       showToast(`Approved — "${result.tournamentName}" created`, 'success');
       onApproved();
-      await load();
+      await load(true); // silent=true: don't flash the spinner on a post-approve reload
     } catch (e) {
+      if (!mountedRef.current) return;
       showToast(e instanceof Error ? e.message : 'Approval failed', 'error');
     } finally {
-      setBusyId(null);
+      if (mountedRef.current) setBusyId(null);
     }
   };
 
@@ -1067,12 +1083,13 @@ function RequestsPanel({ onApproved, showToast }: {
     setBusyId(req.id);
     try {
       await denyTournamentRequest(req.id);
+      if (!mountedRef.current) return;
       showToast('Request denied', 'success');
-      await load();
+      await load(true);
     } catch {
-      showToast('Failed to deny request', 'error');
+      if (mountedRef.current) showToast('Failed to deny request', 'error');
     } finally {
-      setBusyId(null);
+      if (mountedRef.current) setBusyId(null);
     }
   };
 
