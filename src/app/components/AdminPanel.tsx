@@ -13,7 +13,7 @@ import { supabase, signIn, signOut, getCurrentProfile, changePassword, type Prof
 import {
   loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
-  getTournamentRequests, approveTournamentRequest, denyTournamentRequest, type TournamentRequest,
+  getTournamentRequests, approveTournamentRequest, denyTournamentRequest, resendInvite, type TournamentRequest,
 } from '../services/db';
 
 // EmailJS config for the "your tournament is ready" email sent to organizers on
@@ -1068,6 +1068,23 @@ function RequestsPanel({ onApproved, showToast }: {
     }
   };
 
+  const resend = async (req: TournamentRequest) => {
+    setBusyId(req.id);
+    try {
+      const { mode } = await resendInvite(req.email);
+      showToast(
+        mode === 'recovery'
+          ? `Password-reset link sent to ${req.email}`
+          : `Invite re-sent to ${req.email}`,
+        'success',
+      );
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to resend invite', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const pending = requests.filter(r => r.status === 'pending');
   const handled = requests.filter(r => r.status !== 'pending');
 
@@ -1140,11 +1157,24 @@ function RequestsPanel({ onApproved, showToast }: {
                     <p className="text-gray-300 text-sm font-medium truncate">{req.tournamentName}</p>
                     <p className="text-gray-600 text-xs">{req.organizerName} · {req.email}</p>
                   </div>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                    req.status === 'approved' ? 'bg-[#0d1f16] text-[#4ade80] border border-[#1a4a2e]' : 'bg-[#1f0d0d] text-[#f87171] border border-[#4a1a1a]'
-                  }`}>
-                    {req.status.toUpperCase()}
-                  </span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {req.status === 'approved' && (
+                      <button
+                        onClick={() => resend(req)}
+                        disabled={busyId === req.id}
+                        title="Resend the invite / password link to this organizer"
+                        className="flex items-center gap-1.5 text-gray-400 hover:text-[#ff4655] disabled:opacity-50 bg-[#1e2130] border border-[#2a2d3a] text-xs font-medium px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        {busyId === req.id ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                        Resend
+                      </button>
+                    )}
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                      req.status === 'approved' ? 'bg-[#0d1f16] text-[#4ade80] border border-[#1a4a2e]' : 'bg-[#1f0d0d] text-[#f87171] border border-[#4a1a1a]'
+                    }`}>
+                      {req.status.toUpperCase()}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1159,7 +1189,7 @@ function RequestsPanel({ onApproved, showToast }: {
 // Shown after login when profile.must_change_password is set (default-password
 // path). Organizers must set a personal password before reaching the panel.
 
-function ChangePasswordScreen({ onDone }: { onDone: () => void }) {
+function ChangePasswordScreen({ onDone, firstTime = false }: { onDone: () => void; firstTime?: boolean }) {
   const [pw, setPw] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
@@ -1189,8 +1219,14 @@ function ChangePasswordScreen({ onDone }: { onDone: () => void }) {
             <div className="w-14 h-14 bg-[#ff4655]/10 border border-[#ff4655]/20 rounded-2xl flex items-center justify-center mb-4">
               <KeyRound className="w-7 h-7 text-[#ff4655]" />
             </div>
-            <h1 className="text-white font-bold text-xl tracking-tight">Set a New Password</h1>
-            <p className="text-gray-500 text-sm mt-1 text-center">For your security, choose a personal password before continuing.</p>
+            <h1 className="text-white font-bold text-xl tracking-tight">
+              {firstTime ? 'Welcome — Set Your Password' : 'Set a New Password'}
+            </h1>
+            <p className="text-gray-500 text-sm mt-1 text-center">
+              {firstTime
+                ? 'Your tournament account is ready. Create a password to access your admin panel.'
+                : 'For your security, choose a personal password before continuing.'}
+            </p>
           </div>
           <div className="space-y-4">
             <input
@@ -1269,13 +1305,28 @@ export function AdminPanel({ onClose, onDataChange }: {
     setNeedsPasswordChange(!!p?.must_change_password);
   };
 
+  // True when the user arrived via a Supabase invite or password-recovery link.
+  // In that flow they have a valid session but have NOT set a password yet, so
+  // we must force the set-password screen instead of dropping them into the panel.
+  const [mustSetPassword, setMustSetPassword] = useState(false);
+
   useEffect(() => {
+    // The invite/recovery link lands here with a token in the URL hash, e.g.
+    // #access_token=…&type=invite (or type=recovery). The Supabase client parses
+    // it and emits SIGNED_IN; we read the hash to know it's a first-time setup.
+    const hash = window.location.hash || '';
+    const isInviteFlow = hash.includes('type=invite') || hash.includes('type=recovery');
+    if (isInviteFlow) setMustSetPassword(true);
+
     supabase.auth.getSession().then(async ({ data }) => {
       setAuthed(!!data.session);
       await refreshProfile(!!data.session);
       setChecking(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // PASSWORD_RECOVERY fires for recovery links; invite links arrive as
+      // SIGNED_IN but with the type=invite hash captured above.
+      if (event === 'PASSWORD_RECOVERY') setMustSetPassword(true);
       setAuthed(!!session);
       await refreshProfile(!!session);
     });
@@ -1294,8 +1345,20 @@ export function AdminPanel({ onClose, onDataChange }: {
     return <AdminLogin onSuccess={async () => { setAuthed(true); await refreshProfile(true); }} />;
   }
 
-  if (needsPasswordChange) {
-    return <ChangePasswordScreen onDone={() => setNeedsPasswordChange(false)} />;
+  if (needsPasswordChange || mustSetPassword) {
+    return (
+      <ChangePasswordScreen
+        firstTime={mustSetPassword}
+        onDone={() => {
+          setNeedsPasswordChange(false);
+          setMustSetPassword(false);
+          // Strip the invite token from the URL so a refresh doesn't re-trigger.
+          if (window.location.hash) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }}
+      />
+    );
   }
 
   return <AdminPanelInner profile={profile} onClose={onClose} onDataChange={onDataChange} onLogout={async () => {

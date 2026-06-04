@@ -183,6 +183,18 @@ export async function getTournamentRequests(): Promise<TournamentRequest[]> {
   return (data ?? []).map(mapRequestRow);
 }
 
+// Superadmin: resend the invite (or a recovery link if they already confirmed)
+// to an organizer who never finished setting their password. Returns the mode
+// used so the UI can phrase the confirmation correctly.
+export async function resendInvite(email: string): Promise<{ mode: 'invite' | 'recovery' }> {
+  const { data, error } = await supabase.functions.invoke('resend-invite', {
+    body: { email },
+  });
+  if (error) throw error;
+  if (!data || data.error) throw new Error(data?.error || 'Resend failed');
+  return data;
+}
+
 // Superadmin: mark a request denied (no account/tournament created).
 export async function denyTournamentRequest(id: string): Promise<void> {
   const { error } = await supabase
