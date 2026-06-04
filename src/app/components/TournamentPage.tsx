@@ -80,19 +80,33 @@ function isTeamSlotName(name: string) {
     name === 'LB TBD' || name === 'WB Champion' || name === 'LB Champion';
 }
 
+
 export function TournamentPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<TabKey>('bracket');
+  // Initial tab can be deep-linked via the URL hash (e.g. /tournament/x#bracket).
+  // Falls back to Overview for any missing/unknown hash.
+  const [tab, setTab] = useState<TabKey>(() => {
+    const hash = window.location.hash.replace('#', '') as TabKey;
+    return (['overview', 'matches', 'bracket', 'teams', 'news'] as TabKey[]).includes(hash) ? hash : 'overview';
+  });
 
   useEffect(() => {
-    Promise.all([getTournaments(), getNews()])
-      .then(([ts, ns]) => { setTournaments(ts); setNews(ns); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    function load(attempt: number) {
+      Promise.all([getTournaments(), getNews()])
+        .then(([ts, ns]) => { if (!cancelled) { setTournaments(ts); setNews(ns); setLoading(false); } })
+        .catch(() => {
+          if (cancelled) return;
+          const delay = Math.min(500 * 2 ** (attempt - 1), 8000);
+          setTimeout(() => load(attempt + 1), delay);
+        });
+    }
+    load(1);
+    return () => { cancelled = true; };
   }, []);
 
   const tournament = useMemo(() => tournaments.find(t => t.id === id) || null, [tournaments, id]);

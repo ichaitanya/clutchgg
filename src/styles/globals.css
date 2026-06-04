@@ -2456,6 +2456,255 @@ body {
   cursor: not-allowed;
 }
 
+/* ── Matches page layout ─────────────────────────────────────── */
+.matches-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.matches-sidebar-wrap { position: sticky; top: 80px; }
+
+.matches-main { min-width: 0; }
+
+/* Mobile filter button — hidden on desktop */
+.matches-mobile-filter-btn {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  background: #151821;
+  border: 1px solid #2a2d3a;
+  color: #ccc;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.matches-mobile-filter-btn:hover { color: #fff; border-color: rgba(255,70,85,0.4); }
+.matches-mobile-filter-btn__count {
+  background: var(--arena-accent);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  border-radius: 99px;
+  padding: 1px 6px;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+.matches-sidebar {
+  background: #0f1118;
+  border: 1px solid #1e2130;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.matches-sidebar__section {
+  padding: 1rem;
+  border-bottom: 1px solid #1e2130;
+}
+.matches-sidebar__section:last-child { border-bottom: none; }
+
+.matches-sidebar__heading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #555;
+  margin: 0 0 0.75rem 0;
+}
+
+.matches-sidebar__group { margin-bottom: 0.875rem; }
+.matches-sidebar__group:last-child { margin-bottom: 0; }
+
+.matches-sidebar__label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #444;
+  margin: 0 0 0.4rem 0;
+}
+
+/* ── Filter chips ────────────────────────────────────────────── */
+.matches-filter-chip {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  margin-bottom: 0.25rem;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #888;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.matches-filter-chip:hover { color: #fff; background: rgba(255,255,255,0.05); }
+.matches-filter-chip--active {
+  color: #fff;
+  background: rgba(255, 70, 85, 0.12);
+  border-color: rgba(255, 70, 85, 0.35);
+}
+
+/* ── Active filter tags ──────────────────────────────────────── */
+.matches-active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.matches-active-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(255,70,85,0.1);
+  border: 1px solid rgba(255,70,85,0.3);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.6rem;
+  border-radius: 99px;
+}
+.matches-active-tag button {
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.875rem;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.15s;
+}
+.matches-active-tag button:hover { color: #fff; }
+.matches-active-filters__clear {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  transition: color 0.15s;
+}
+.matches-active-filters__clear:hover { color: #aaa; }
+
+/* ── Mini Calendar ───────────────────────────────────────────── */
+.matches-calendar__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.matches-calendar__nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: #1a1d27;
+  border: 1px solid #2a2d3a;
+  border-radius: 6px;
+  color: #888;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.matches-calendar__nav-btn:hover { color: #fff; border-color: rgba(255,70,85,0.4); }
+.matches-calendar__month {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ccc;
+}
+.matches-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.matches-calendar__day-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #444;
+  text-align: center;
+  padding-bottom: 0.35rem;
+}
+.matches-calendar__day {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #666;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.matches-calendar__day:hover { color: #fff; background: rgba(255,255,255,0.06); }
+.matches-calendar__day--today { color: #ccc; font-weight: 700; }
+.matches-calendar__day--has-match { color: #fff; }
+.matches-calendar__day--selected {
+  background: var(--arena-accent) !important;
+  border-color: var(--arena-accent) !important;
+  color: #fff !important;
+}
+.matches-calendar__dot {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--arena-accent);
+}
+.matches-calendar__clear {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 0.7rem;
+  text-align: center;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.15s;
+}
+.matches-calendar__clear:hover { color: #aaa; }
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .matches-layout { grid-template-columns: 1fr; }
+  .matches-mobile-filter-btn { display: inline-flex; }
+  .matches-sidebar-wrap {
+    display: none;
+    position: static;
+  }
+  .matches-sidebar-wrap--open { display: block; margin-bottom: 1rem; }
+}
+
 /* ════════════════════════════════════════════════════════════════
    MATCH DETAIL PAGE — editorial theme
    ════════════════════════════════════════════════════════════════ */

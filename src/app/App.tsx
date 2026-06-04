@@ -99,11 +99,16 @@ function Home() {
 
   useEffect(() => {
     let cancelled = false;
+    // Retry indefinitely with capped exponential backoff. A transient stall or
+    // timeout should never leave the page permanently blank — we keep trying
+    // (500ms, 1s, 2s, 4s, then 8s forever) until data arrives or we unmount.
     function load(attempt: number) {
       loadAdminData()
         .then(d => { if (!cancelled) setAdminData(d); })
         .catch(() => {
-          if (!cancelled && attempt < 3) setTimeout(() => load(attempt + 1), 2000 * attempt);
+          if (cancelled) return;
+          const delay = Math.min(500 * 2 ** (attempt - 1), 8000);
+          setTimeout(() => load(attempt + 1), delay);
         });
     }
     load(1);

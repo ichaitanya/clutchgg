@@ -15,9 +15,25 @@ type CacheEntry<T> = { value: T; at: number };
 const cacheStore = new Map<string, CacheEntry<unknown>>();
 const inflight = new Map<string, Promise<unknown>>();
 
+// Hard ceiling on a single fetch. Supabase's underlying fetch has no default
+// timeout, so an occasional stalled connection would otherwise leave the promise
+// pending forever — the page shows nothing and no retry ever fires. We race the
+// fetch against this timeout so a stall rejects fast and the caller can retry.
+const FETCH_TIMEOUT_MS = 8_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Request timed out')), ms);
+    promise.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
 // Run `fetcher` through the cache under `key`. Concurrent callers share one
-// in-flight promise; fresh values are reused until the TTL expires. A failed
-// fetch is never cached.
+// in-flight promise; fresh values are reused until the TTL expires. A failed or
+// timed-out fetch is never cached, so the next call re-fetches cleanly.
 function cached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const hit = cacheStore.get(key) as CacheEntry<T> | undefined;
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return Promise.resolve(hit.value);
@@ -25,7 +41,7 @@ function cached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const existing = inflight.get(key) as Promise<T> | undefined;
   if (existing) return existing;
 
-  const p = fetcher()
+  const p = withTimeout(fetcher(), FETCH_TIMEOUT_MS)
     .then(value => {
       cacheStore.set(key, { value, at: Date.now() });
       inflight.delete(key);
@@ -48,6 +64,28 @@ function invalidate(...keys: string[]) {
 export function clearDbCache() {
   cacheStore.clear();
   inflight.clear();
+}
+
+// Retry a read with capped exponential backoff (500ms → 1s → 2s → 4s → 8s, then
+// 8s forever) until it succeeds or `shouldStop()` returns true. Pages call this
+// so a transient stall/timeout never leaves them permanently blank — they keep
+// retrying quietly in the background until the data arrives. The `shouldStop`
+// hook lets a component bail out cleanly on unmount.
+export function loadWithRetry<T>(
+  fetcher: () => Promise<T>,
+  onSuccess: (value: T) => void,
+  shouldStop: () => boolean = () => false,
+): void {
+  const attempt = (n: number) => {
+    fetcher()
+      .then(value => { if (!shouldStop()) onSuccess(value); })
+      .catch(() => {
+        if (shouldStop()) return;
+        const delay = Math.min(500 * 2 ** (n - 1), 8000);
+        setTimeout(() => attempt(n + 1), delay);
+      });
+  };
+  attempt(1);
 }
 
 const KEY = {

@@ -181,7 +181,7 @@ export interface Tournament {
   groupStage?: GroupStage;
   knockoutBracket?: BracketGenerated;
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
-  coverImage?: string; // base64 or URL for tournament cover image
+  coverImage?: string;
 }
 
 // True once any map of a match has had Valorant stats pulled (player stats or a
