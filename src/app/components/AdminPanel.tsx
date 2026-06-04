@@ -1384,9 +1384,14 @@ export function AdminPanel({ onClose, onDataChange }: {
       setChecking(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // PASSWORD_RECOVERY fires for recovery links; invite links arrive as
-      // SIGNED_IN but with the type=invite hash captured above.
-      if (event === 'PASSWORD_RECOVERY') setMustSetPassword(true);
+      // PASSWORD_RECOVERY fires for recovery links — but only treat it as a
+      // "must set password" flow if this tab actually has the recovery hash in
+      // the URL. Without this guard, opening a recovery link in ANY tab causes
+      // the event to fire in all open admin tabs (via localStorage), which would
+      // hijack a logged-in superadmin's session and show them the password screen.
+      if (event === 'PASSWORD_RECOVERY' && window.location.hash.includes('type=recovery')) {
+        setMustSetPassword(true);
+      }
       setAuthed(!!session);
       await refreshProfile(!!session);
     });
