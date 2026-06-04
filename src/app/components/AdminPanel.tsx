@@ -1264,8 +1264,13 @@ function ChangePasswordScreen({ onDone, firstTime = false }: { onDone: () => voi
         ),
       ]);
       onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update password');
+    } catch (e: any) {
+      // 422 = token already used or expired. The invite/recovery link is
+      // one-time-use; if they're seeing this, they need a fresh link.
+      const is422 = e?.status === 422 || /422|unprocessable|otp expired|token.*expired/i.test(e?.message ?? '');
+      setError(is422
+        ? 'This link has expired or already been used. Please ask your admin to resend the invite.'
+        : (e instanceof Error ? e.message : 'Failed to update password'));
       setSaving(false);
     }
   };

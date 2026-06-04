@@ -122,8 +122,13 @@ export async function isAdmin(): Promise<boolean> {
 export async function changePassword(newPassword: string): Promise<void> {
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw error;
-  const session = await getSession();
-  if (session) {
-    await supabase.from('profiles').update({ must_change_password: false }).eq('id', session.user.id);
-  }
+  // Clear the flag best-effort — don't await it. If the profile update stalls
+  // (e.g. RLS blocks self-update for an organizer session) we must not let it
+  // hang the caller's 15s race and show a false "timed out" error when the
+  // password itself was set successfully.
+  getSession().then(session => {
+    if (session) {
+      supabase.from('profiles').update({ must_change_password: false }).eq('id', session.user.id).then(() => {});
+    }
+  });
 }
