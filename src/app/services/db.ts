@@ -28,9 +28,13 @@ function cached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const p = fetcher()
     .then(value => {
       cacheStore.set(key, { value, at: Date.now() });
+      inflight.delete(key);
       return value;
     })
-    .finally(() => { inflight.delete(key); });
+    .catch(err => {
+      inflight.delete(key);
+      throw err;
+    });
   inflight.set(key, p);
   return p;
 }
@@ -79,6 +83,95 @@ export async function deleteTournament(id: string): Promise<void> {
   const { error } = await supabase.from('tournaments_blob').delete().eq('id', id);
   if (error) throw error;
   invalidate(KEY.tournaments);
+}
+
+// ─── Tournament Registration Requests ──────────────────────────────────────────
+// Submitted from the public contact form; reviewed by superadmins in the admin
+// panel. Approval is handled by the `approve-organizer` Edge Function (which needs
+// the service_role key to create the auth user), so the client only reads/denies here.
+
+export interface TournamentRequest {
+  id: string;
+  organizerName: string;
+  email: string;
+  phone: string;
+  tournamentName: string;
+  tournamentDetails: string;
+  status: 'pending' | 'approved' | 'denied';
+  createdTournamentId?: string;
+  createdAt: string;
+}
+
+function mapRequestRow(row: any): TournamentRequest {
+  return {
+    id: row.id,
+    organizerName: row.organizer_name ?? '',
+    email: row.email ?? '',
+    phone: row.phone ?? '',
+    tournamentName: row.tournament_name ?? '',
+    tournamentDetails: row.tournament_details ?? '',
+    status: row.status ?? 'pending',
+    createdTournamentId: row.created_tournament_id ?? undefined,
+    createdAt: row.created_at ?? '',
+  };
+}
+
+// Public contact form submission. Uses the anon key — allowed by the
+// "Anyone can submit a tournament request" RLS policy.
+export async function createTournamentRequest(input: {
+  organizerName: string;
+  email: string;
+  phone?: string;
+  tournamentName: string;
+  tournamentDetails?: string;
+}): Promise<void> {
+  const { error } = await supabase.from('tournament_requests').insert({
+    organizer_name: input.organizerName,
+    email: input.email,
+    phone: input.phone ?? null,
+    tournament_name: input.tournamentName,
+    tournament_details: input.tournamentDetails ?? null,
+  });
+  if (error) throw error;
+}
+
+// Superadmin: list all requests (newest first).
+export async function getTournamentRequests(): Promise<TournamentRequest[]> {
+  const { data, error } = await supabase
+    .from('tournament_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapRequestRow);
+}
+
+// Superadmin: mark a request denied (no account/tournament created).
+export async function denyTournamentRequest(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('tournament_requests')
+    .update({ status: 'denied', reviewed_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// Superadmin: approve a request. Delegates to the `approve-organizer` Edge
+// Function which (server-side, with the service_role key) invites the organizer,
+// creates the empty tournament, and assigns role + scope. Returns the new
+// tournament id. The caller (admin UI) is responsible for sending the EmailJS
+// "your tournament is ready" email after this resolves.
+export async function approveTournamentRequest(requestId: string): Promise<{
+  tournamentId: string;
+  email: string;
+  organizerName: string;
+  tournamentName: string;
+}> {
+  const { data, error } = await supabase.functions.invoke('approve-organizer', {
+    body: { requestId },
+  });
+  if (error) throw error;
+  if (!data || data.error) throw new Error(data?.error || 'Approval failed');
+  invalidate(KEY.tournaments);
+  return data;
 }
 
 // ─── News ─────────────────────────────────────────────────────────────────────
@@ -292,8 +385,8 @@ export async function uploadImage(file: File, bucket: ImageBucket): Promise<stri
 
 export async function loadAdminData(): Promise<AdminData> {
   const [tournaments, news, players, standings, heroLink, spotlightTournamentId, heroVideo] = await Promise.all([
-    getTournaments().catch(() => [] as Tournament[]),
-    getNews().catch(() => [] as NewsItem[]),
+    getTournaments(),
+    getNews(),
     getTopPlayers().catch(() => [] as TopPlayer[]),
     getStandings().catch(() => [] as StandingTeam[]),
     getSiteConfig('hero_link').catch(() => ''),

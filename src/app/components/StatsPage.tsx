@@ -7,16 +7,29 @@ import type { Tournament, BracketGenerated, MatchPlayerStat, TournamentPlayer } 
 import { getTournaments } from '../services/db';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
-// Does a recorded stat line belong to a given roster player? Stats applied from
-// the Valorant API are keyed by Riot ID (e.g. "TsWaGg#6969"), while manually
-// entered stats are keyed by the roster slot id. So we match on any of: slot id,
-// Riot ID (case-insensitive), or display name (case-insensitive).
+// Does a recorded stat line belong to a given roster player?
+//
+// Stats from the Valorant API are keyed by Riot ID (e.g. "TsWaGg#6969");
+// manually entered stats are keyed by the roster slot id. We match on:
+//   • roster slot id (exact)
+//   • current Riot ID (case-insensitive)
+//   • current display name (case-insensitive)
+//   • any historical alias in player.nameHistory
+//
+// This means a rename never orphans old stat rows — they keep resolving to the
+// same player regardless of how many times the player has changed their name.
 export function statMatchesPlayer(stat: MatchPlayerStat, player: TournamentPlayer): boolean {
-  const pid = (stat.playerId ?? '').toLowerCase();
+  const pid   = (stat.playerId   ?? '').toLowerCase();
   const pname = (stat.playerName ?? '').toLowerCase();
+
   if (stat.playerId === player.id) return true;
   if (player.riotId && pid === player.riotId.toLowerCase()) return true;
-  if (player.name && (pid === player.name.toLowerCase() || pname === player.name.toLowerCase())) return true;
+  if (player.name   && (pid === player.name.toLowerCase() || pname === player.name.toLowerCase())) return true;
+
+  for (const alias of player.nameHistory ?? []) {
+    if (alias.riotId && pid === alias.riotId.toLowerCase()) return true;
+    if (alias.name   && (pid === alias.name.toLowerCase() || pname === alias.name.toLowerCase())) return true;
+  }
   return false;
 }
 

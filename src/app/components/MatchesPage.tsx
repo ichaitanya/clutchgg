@@ -320,7 +320,7 @@ export function MatchesPage() {
                           month: 'short',
                           day: 'numeric',
                         })}${match.time ? ` · ${match.time}` : ''}`
-                      : 'Schedule TBD';
+                      : null;
                     const countdown = match.status === 'upcoming' ? countdownLabel(match.date, match.time) : null;
 
                     return (
@@ -338,7 +338,7 @@ export function MatchesPage() {
                       >
                         <div className="arena-match-card__main">
                           <p className="arena-match-card__eyebrow">
-                            {match.stage} · {scheduleText}
+                            {match.stage}{scheduleText ? ` · ${scheduleText}` : ''}
                           </p>
 
                           <div className="arena-match-card__teams">

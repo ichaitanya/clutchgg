@@ -92,10 +92,12 @@ export function UpcomingMatch({
         <span className="arena-upcoming__format">{formatLabel}</span>
       </div>
 
-      <div className="arena-upcoming__when">
-        <span className="arena-upcoming__countdown">{countdown ?? 'TBD'}</span>
-        {exact && <span className="arena-upcoming__exact">{exact}</span>}
-      </div>
+      {(countdown || exact) && (
+        <div className="arena-upcoming__when">
+          {countdown && <span className="arena-upcoming__countdown">{countdown}</span>}
+          {exact && <span className="arena-upcoming__exact">{exact}</span>}
+        </div>
+      )}
     </button>
   );
 }

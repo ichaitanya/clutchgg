@@ -24,7 +24,20 @@ export async function getSession() {
   return session;
 }
 
-export async function getCurrentProfile() {
+export type UserRole = 'admin' | 'superadmin' | 'organizer';
+
+export interface Profile {
+  id: string;
+  display_name: string;
+  role: UserRole;
+  email?: string | null;
+  // For organizers: the single tournament (tournaments_blob.id) they may edit.
+  tournament_id?: string | null;
+  // Forces a password-change screen on next login (default-password path).
+  must_change_password?: boolean;
+}
+
+export async function getCurrentProfile(): Promise<Profile | null> {
   const session = await getSession();
   if (!session) return null;
   const { data, error } = await supabase
@@ -33,10 +46,20 @@ export async function getCurrentProfile() {
     .eq('id', session.user.id)
     .single();
   if (error) return null;
-  return data as { id: string; display_name: string; role: 'admin' | 'superadmin' };
+  return data as Profile;
 }
 
 export async function isAdmin(): Promise<boolean> {
   const profile = await getCurrentProfile();
   return profile?.role === 'admin' || profile?.role === 'superadmin';
+}
+
+// Change the signed-in user's password and clear the must_change_password flag.
+export async function changePassword(newPassword: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+  const session = await getSession();
+  if (session) {
+    await supabase.from('profiles').update({ must_change_password: false }).eq('id', session.user.id);
+  }
 }

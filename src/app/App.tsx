@@ -29,6 +29,7 @@ const StatsPage = lazy(() => import('./components/StatsPage').then(m => ({ defau
 const PlayerPage = lazy(() => import('./components/PlayerPage').then(m => ({ default: m.PlayerPage })));
 const ArticlePage = lazy(() => import('./components/ArticlePage').then(m => ({ default: m.ArticlePage })));
 const TournamentPage = lazy(() => import('./components/TournamentPage').then(m => ({ default: m.TournamentPage })));
+const ContactPage = lazy(() => import('./components/ContactPage').then(m => ({ default: m.ContactPage })));
 
 
 // Helper function to determine match status
@@ -97,7 +98,16 @@ function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
   useEffect(() => {
-    loadAdminData().then(setAdminData).catch(() => {});
+    let cancelled = false;
+    function load(attempt: number) {
+      loadAdminData()
+        .then(d => { if (!cancelled) setAdminData(d); })
+        .catch(() => {
+          if (!cancelled && attempt < 3) setTimeout(() => load(attempt + 1), 2000 * attempt);
+        });
+    }
+    load(1);
+    return () => { cancelled = true; };
   }, []);
 
   const handleDataChange = (data: AdminData) => setAdminData(data);
@@ -449,12 +459,13 @@ function Home() {
           <h2 className="arena-cta__title">
             ENTER THE <span className="accent">CLUTCH</span>
           </h2>
-              <a  href="mailto:clutch.gg@gmail.com"
+              <Link
+                to="/contact"
                 className="arena-btn arena-btn--primary"
                 style={{ letterSpacing: '0.1em', padding: '1.25rem 3.5rem' }}
               >
-                Contact us
-              </a>
+                Register Your Tournament
+              </Link>
           </div>
         </section>
 
@@ -489,6 +500,7 @@ export default function App() {
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/match/:matchId" element={<MatchScoreboard />} />
           <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />
+          <Route path="/contact" element={<ContactPage />} />
         </Routes>
       </Suspense>
     </Router>

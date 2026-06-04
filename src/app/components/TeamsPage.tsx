@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ChevronLeft, Users, User, ChevronRight, ChevronDown, ChevronUp, Trophy, ArrowRight } from 'lucide-react';
+import { ChevronLeft, Users, User, ChevronRight, ChevronDown, ChevronUp, Trophy, ArrowRight, Search } from 'lucide-react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { Footer } from './Footer';
@@ -115,6 +115,7 @@ export function TeamsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(routeTeamId ? 'players' : 'teams');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(routeTeamId ?? null);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   // Expand toggles (default collapsed): the substitutes roster list and the
   // Player Performance Index each show the first 5 until expanded, independently.
   const [showAllRoster, setShowAllRoster] = useState(false);
@@ -209,6 +210,12 @@ export function TeamsPage() {
       players: g.order.map(k => g.playerByName.get(k)!),
     }));
   }, [tournaments]);
+
+  const filteredTeams = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return allTeams;
+    return allTeams.filter(t => t.name.toLowerCase().includes(q));
+  }, [allTeams, searchQuery]);
 
   const selectedTeam = useMemo(() => {
     const fromList = allTeams.find(t => t.id === selectedTeamId);
@@ -396,12 +403,27 @@ export function TeamsPage() {
           </div>
         ) : viewMode === 'teams' ? (
           <div>
-            <div style={{ marginBottom: '1.5rem' }}>
-              <p className="arena-md-section__eyebrow">Rosters</p>
-              <h2 className="arena-md-section__title" style={{ margin: 0, fontSize: '2rem' }}>All Teams</h2>
+            <div className="arena-teams-header">
+              <div>
+                <p className="arena-md-section__eyebrow">Rosters</p>
+                <h2 className="arena-md-section__title" style={{ margin: 0, fontSize: '2rem' }}>All Teams</h2>
+              </div>
+              <div className="arena-teams-search">
+                <Search className="arena-teams-search__icon" />
+                <input
+                  type="text"
+                  className="arena-teams-search__input"
+                  placeholder="Search teams…"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
+            {filteredTeams.length === 0 && searchQuery && (
+              <p className="arena-teams-search__empty">No teams match "{searchQuery}"</p>
+            )}
             <div className="arena-team-grid">
-              {allTeams.map(team => (
+              {filteredTeams.map(team => (
                 <button
                   key={team.id}
                   type="button"

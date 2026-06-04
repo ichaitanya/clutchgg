@@ -12,7 +12,7 @@ import {
   Swords,
 } from 'lucide-react';
 import type { Tournament, TournamentEvent, TeamInTournament, Stage1Config, BracketGenerated } from './TournamentCreation';
-import { CreateTournamentScreen } from './TournamentCreation';
+import { CreateTournamentScreen, tournamentHasBegun } from './TournamentCreation';
 import { BracketDisplay } from './BracketDisplay';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 
@@ -21,6 +21,10 @@ import { BracketConfigurationModal } from './BracketConfigurationModal';
 interface TournamentManagerProps {
   tournaments: Tournament[];
   onTournamentsChange: (tournaments: Tournament[]) => void;
+  // Organizer mode: a scoped tournament admin. They can edit their tournament's
+  // teams, players and match results, but cannot create or delete tournaments,
+  // and cannot change the bracket type once the tournament has begun.
+  organizerMode?: boolean;
 }
 
 function EventDetailsForm({
@@ -302,6 +306,7 @@ function deriveGroupStageQualifiers(config: Stage1Config, bracket?: BracketGener
 export function TournamentManager({
   tournaments,
   onTournamentsChange,
+  organizerMode = false,
 }: TournamentManagerProps) {
   const [showCreateTournament, setShowCreateTournament] = useState(false);
   const [editingTournamentId, setEditingTournamentId] = useState<string | null>(null);
@@ -348,6 +353,8 @@ export function TournamentManager({
       <CreateTournamentScreen
         initialTournament={editingTournament}
         isEditing={!!editingTournamentId}
+        organizerMode={organizerMode}
+        bracketLocked={organizerMode && !!editingTournament && tournamentHasBegun(editingTournament)}
         onComplete={(tournament) => handleSaveTournament(tournament)}
       />
     );
@@ -379,6 +386,16 @@ export function TournamentManager({
             <Edit3 className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Bracket-lock notice for organizers once the tournament has begun */}
+        {organizerMode && tournamentHasBegun(t) && (
+          <div className="bg-yellow-900/20 border border-yellow-700/40 rounded-xl px-4 py-3">
+            <p className="text-yellow-300 text-sm font-medium">
+              This tournament has begun — the bracket type is now locked. You can still edit teams, players,
+              and the results of matches that don't yet have stats pulled.
+            </p>
+          </div>
+        )}
 
         {/* Event Details */}
         {t.event ? (
@@ -632,24 +649,30 @@ export function TournamentManager({
           </h2>
           <p className="text-gray-500 text-sm">Manage tournaments and brackets</p>
         </div>
-        <button
-          onClick={() => setShowCreateTournament(true)}
-          className="py-2.5 px-4 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> New Tournament
-        </button>
+        {!organizerMode && (
+          <button
+            onClick={() => setShowCreateTournament(true)}
+            className="py-2.5 px-4 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> New Tournament
+          </button>
+        )}
       </div>
 
       {tournaments.length === 0 ? (
         <div className="bg-[#151821] border border-dashed border-[#2a2d3a] rounded-xl p-12 text-center">
           <Trophy className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-          <p className="text-gray-500 text-sm mb-4">No tournaments created yet</p>
-          <button
-            onClick={() => setShowCreateTournament(true)}
-            className="inline-flex py-2.5 px-4 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all gap-2"
-          >
-            <Plus className="w-4 h-4" /> Create First Tournament
-          </button>
+          <p className="text-gray-500 text-sm mb-4">
+            {organizerMode ? 'Your tournament is being set up. Check back shortly.' : 'No tournaments created yet'}
+          </p>
+          {!organizerMode && (
+            <button
+              onClick={() => setShowCreateTournament(true)}
+              className="inline-flex py-2.5 px-4 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all gap-2"
+            >
+              <Plus className="w-4 h-4" /> Create First Tournament
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -697,12 +720,14 @@ export function TournamentManager({
                 >
                   <Edit3 className="w-3 h-3" />
                 </button>
-                <button
-                  onClick={() => handleDeleteTournament(tournament.id)}
-                  className="px-3 py-2 rounded-lg bg-[#0d0f16] border border-[#2a2d3a] text-gray-500 hover:text-red-500 transition-all"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
+                {!organizerMode && (
+                  <button
+                    onClick={() => handleDeleteTournament(tournament.id)}
+                    className="px-3 py-2 rounded-lg bg-[#0d0f16] border border-[#2a2d3a] text-gray-500 hover:text-red-500 transition-all"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
               </div>
             </div>
           ))}

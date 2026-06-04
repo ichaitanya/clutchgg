@@ -180,9 +180,24 @@ body {
   transition: color 0.15s;
 }
 
-.arena-nav__link:hover,
+.arena-nav__link:hover {
+  color: var(--arena-accent);
+}
+
 .arena-nav__link--active {
   color: var(--arena-accent);
+  position: relative;
+}
+
+.arena-nav__link--active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--arena-accent);
+  border-radius: 1px;
 }
 
 /* "Live" nav link — accent color with bottom underline bar */
@@ -918,7 +933,13 @@ body {
   margin: 0 0 2.5rem;
 }
 
-.arena-cta__title .accent { color: var(--arena-accent); }
+.arena-cta__title .accent {
+  color: var(--arena-accent);
+  text-shadow:
+    0 0 6px rgba(255, 70, 85, 0.5),
+    0 0 18px rgba(255, 70, 85, 0.25),
+    0 0 40px rgba(255, 70, 85, 0.1);
+}
 
 /* ── Footer ─────────────────────────────────────────────────── */
 .arena-footer {
@@ -1077,6 +1098,13 @@ body {
   height: 100%;
   object-fit: cover;
   z-index: 0;
+  transition: transform 0.45s ease, filter 0.45s ease;
+  filter: brightness(0.85);
+}
+
+.arena-spotlight__feature:hover img {
+  transform: scale(1.04);
+  filter: brightness(1.05);
 }
 
 .arena-spotlight__feature::after {
@@ -3410,6 +3438,59 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 /* ════════════════════════════════════════════════════════════════
    ALL TEAMS — browse cards
    ════════════════════════════════════════════════════════════════ */
+/* ── Teams page header + search ─────────────────────────────────────────── */
+.arena-teams-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.arena-teams-search {
+  position: relative;
+  flex: 1;
+  max-width: 420px;
+  min-width: 200px;
+}
+
+.arena-teams-search__icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.875rem;
+  height: 0.875rem;
+  color: var(--arena-text-muted);
+  pointer-events: none;
+}
+
+.arena-teams-search__input {
+  width: 100%;
+  background: #111318;
+  border: 1px solid #2a2d3a;
+  border-radius: 0;
+  padding: 0.65rem 1rem 0.65rem 2.5rem;
+  color: #efeeed;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+  outline: none;
+  transition: border-color 0.15s;
+  /* Accent underline bar — editorial style */
+  border-bottom: 2px solid #2a2d3a;
+}
+
+.arena-teams-search__input::placeholder { color: var(--arena-text-muted); }
+.arena-teams-search__input:focus { border-color: var(--arena-accent); border-bottom-color: var(--arena-accent); }
+
+.arena-teams-search__empty {
+  color: var(--arena-text-muted);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
 .arena-team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -3692,10 +3773,89 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 }
 .arena-pp-table__opp { color: #fff; }
 
+/* ── Name-history indicator ─────────────────────────────────── */
+/* Wraps the player name + the alias caret so they sit on the same baseline. */
+.arena-pp-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  position: relative;
+}
+.arena-pp-alias { position: relative; }
+.arena-pp-alias__trigger {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0.2rem;
+  cursor: pointer;
+  color: var(--arena-text-dim);
+  transition: color 0.15s ease;
+}
+.arena-pp-alias__trigger:hover { color: #fff; }
+.arena-pp-alias__chevron {
+  width: 1.1rem; height: 1.1rem;
+  transition: transform 0.2s ease;
+}
+.arena-pp-alias__chevron--open { transform: rotate(180deg); }
+.arena-pp-alias__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+}
+.arena-pp-alias__dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 20;
+  min-width: 13rem;
+  background: #1a1a1a;
+  border: 1px solid var(--arena-border);
+  border-radius: 0.4rem;
+  padding: 0.7rem 0.85rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.arena-pp-alias__label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  margin: 0 0 0.55rem;
+}
+.arena-pp-alias__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.arena-pp-alias__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.arena-pp-alias__name {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+}
+.arena-pp-alias__riot {
+  font-family: 'Chivo', 'Courier New', monospace;
+  font-size: 0.6875rem;
+  color: var(--arena-text-dim);
+  flex-shrink: 0;
+}
+
 @media (max-width: 640px) {
   .arena-pp-hero { flex-direction: column; text-align: center; gap: 1.1rem; }
   .arena-pp-hero__chips, .arena-pp-hero__agents { justify-content: center; }
   .arena-pp-hero__name { font-size: 2rem; }
+  .arena-pp-name-row { justify-content: center; }
   .arena-pp-stats { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -4193,3 +4353,147 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   .arena-tp-matchrow__team { font-size: 0.95rem; }
   .arena-tp-matchrow__meta { justify-content: space-between; }
 }
+
+/* ── Contact / Register Tournament Page ─────────────────────── */
+.arena-contact__card {
+  width: 100%;
+  max-width: 680px;
+  background: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  padding: 2.5rem 2.5rem 2.75rem;
+}
+
+.arena-contact__header {
+  margin-bottom: 2rem;
+}
+
+.arena-contact__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 0.5rem;
+  letter-spacing: 0.01em;
+}
+
+.arena-contact__sub {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  color: var(--arena-text-dim);
+  margin: 0;
+}
+
+.arena-contact__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.arena-contact__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.arena-contact__field {
+  display: flex;
+  flex-direction: column;
+}
+
+.arena-contact__input {
+  width: 100%;
+  background: #111;
+  border: 1px solid var(--arena-border);
+  border-radius: 0;
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  padding: 0.8rem 1rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.arena-contact__input::placeholder {
+  color: var(--arena-text-dim);
+}
+
+.arena-contact__input:focus {
+  border-color: var(--arena-accent);
+}
+
+.arena-contact__textarea {
+  resize: vertical;
+  min-height: 130px;
+}
+
+.arena-contact__error {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--arena-accent);
+  margin: 0;
+}
+
+.arena-contact__submit {
+  width: 100%;
+  margin-top: 0.5rem;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  padding: 1rem;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.arena-contact__submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Toast */
+.arena-toast {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  background: #1a1a1a;
+  border: 1px solid var(--arena-accent);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 340px;
+  z-index: 9999;
+  animation: arena-toast-in 0.3s ease;
+}
+
+@keyframes arena-toast-in {
+  from { opacity: 0; transform: translateY(1rem); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.arena-toast__icon {
+  font-size: 1.4rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.arena-toast__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 0.2rem;
+}
+
+.arena-toast__body {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--arena-text-dim);
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .arena-contact__card { padding: 1.5rem 1.25rem; }
+  .arena-contact__row { grid-template-columns: 1fr; }
+  .arena-toast { right: 1rem; left: 1rem; max-width: unset; }
+}
+

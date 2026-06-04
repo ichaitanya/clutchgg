@@ -135,8 +135,8 @@ export function TournamentPage() {
         <Header />
         <div className="arena-md-state">
           <p className="arena-md-state__text">Tournament not found.</p>
-          <button onClick={() => navigate('/matches')} className="arena-md__back" style={{ margin: '0 auto' }}>
-            <ChevronLeft className="w-4 h-4" /> Back to Matches
+          <button onClick={() => navigate('/tournaments')} className="arena-md__back" style={{ margin: '0 auto' }}>
+            <ChevronLeft className="w-4 h-4" /> Back to Tournaments
           </button>
         </div>
         <Footer />
@@ -165,9 +165,9 @@ export function TournamentPage() {
 
       <main className="arena-md">
         {/* Back */}
-        <button onClick={() => navigate('/matches')} className="arena-md__back">
+        <button onClick={() => navigate('/tournaments')} className="arena-md__back">
           <ChevronLeft className="w-4 h-4" />
-          Back to Matches
+          Back to Tournaments
         </button>
 
         {/* Event hero */}
