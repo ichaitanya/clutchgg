@@ -75,8 +75,17 @@ export async function signOut() {
 }
 
 export async function getSession() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session;
+  // getSession can hang indefinitely when the stored token is expired and the
+  // auto-refresh stalls (cold start / flaky connection). Race against a hard
+  // timeout so callers never block forever — a null session is safe: it just
+  // means the user needs to log in again.
+  const result = await Promise.race([
+    supabase.auth.getSession(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('session timeout')), 8_000)
+    ),
+  ]).catch(() => ({ data: { session: null } }));
+  return result.data.session;
 }
 
 export type UserRole = 'admin' | 'superadmin' | 'organizer';
