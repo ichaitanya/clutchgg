@@ -99,9 +99,6 @@ function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    // Retry indefinitely with capped exponential backoff. A transient stall or
-    // timeout should never leave the page permanently blank — we keep trying
-    // (500ms, 1s, 2s, 4s, then 8s forever) until data arrives or we unmount.
     function load(attempt: number) {
       loadAdminData()
         .then(d => { if (!cancelled) setAdminData(d); })
@@ -112,7 +109,20 @@ function Home() {
         });
     }
     load(1);
-    return () => { cancelled = true; };
+
+    // If the tab was hidden while a fetch was in-flight (browser may have
+    // throttled/killed it), re-trigger a fresh load when the user comes back
+    // so the page never stays blank after switching tabs.
+    function onVisible() {
+      if (document.visibilityState === 'visible' && !cancelled) {
+        load(1);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const handleDataChange = (data: AdminData) => setAdminData(data);

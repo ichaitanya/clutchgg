@@ -9,17 +9,14 @@ import type { AdminData, NewsItem, TopPlayer, StandingTeam } from '../components
 // requests and serves repeat reads for a short TTL, so moving between pages is
 // instant. Any write invalidates the affected key so the next read is fresh.
 
-const CACHE_TTL_MS = 60_000; // serve cached reads for up to 1 minute
+const CACHE_TTL_MS = 5 * 60_000;   // serve fresh cache for up to 5 minutes
+const CACHE_STALE_MS = 10 * 60_000; // serve stale cache for up to 10 minutes while revalidating
 
 type CacheEntry<T> = { value: T; at: number };
 const cacheStore = new Map<string, CacheEntry<unknown>>();
 const inflight = new Map<string, Promise<unknown>>();
 
-// Hard ceiling on a single fetch. Supabase's underlying fetch has no default
-// timeout, so an occasional stalled connection would otherwise leave the promise
-// pending forever — the page shows nothing and no retry ever fires. We race the
-// fetch against this timeout so a stall rejects fast and the caller can retry.
-const FETCH_TIMEOUT_MS = 8_000;
+const FETCH_TIMEOUT_MS = 9_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -31,28 +28,38 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-// Run `fetcher` through the cache under `key`. Concurrent callers share one
-// in-flight promise; fresh values are reused until the TTL expires. A failed or
-// timed-out fetch is never cached, so the next call re-fetches cleanly.
+// Stale-while-revalidate cache:
+// - Fresh (< 5 min): return immediately, no fetch.
+// - Stale (5–10 min): return the old value immediately so the page never goes
+//   blank, AND kick off a background revalidation to update the cache quietly.
+// - Expired (> 10 min) or missing: fetch and wait (with backoff from caller).
 function cached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const hit = cacheStore.get(key) as CacheEntry<T> | undefined;
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return Promise.resolve(hit.value);
+  const age = hit ? Date.now() - hit.at : Infinity;
 
-  const existing = inflight.get(key) as Promise<T> | undefined;
-  if (existing) return existing;
+  // Fresh — serve immediately.
+  if (age < CACHE_TTL_MS) return Promise.resolve(hit!.value);
 
-  const p = withTimeout(fetcher(), FETCH_TIMEOUT_MS)
-    .then(value => {
-      cacheStore.set(key, { value, at: Date.now() });
-      inflight.delete(key);
-      return value;
-    })
-    .catch(err => {
-      inflight.delete(key);
-      throw err;
-    });
-  inflight.set(key, p);
-  return p;
+  // Start a background revalidation if one isn't already running.
+  if (!inflight.has(key)) {
+    const p = withTimeout(fetcher(), FETCH_TIMEOUT_MS)
+      .then(value => {
+        cacheStore.set(key, { value, at: Date.now() });
+        inflight.delete(key);
+        return value;
+      })
+      .catch(err => {
+        inflight.delete(key);
+        throw err;
+      });
+    inflight.set(key, p);
+  }
+
+  // Stale — return old value now; background fetch will update cache.
+  if (age < CACHE_STALE_MS && hit) return Promise.resolve(hit.value);
+
+  // Expired or no cache — must wait for the fetch.
+  return inflight.get(key) as Promise<T>;
 }
 
 // Drop one or more cache keys so the next read re-fetches. Called after writes.
@@ -64,6 +71,19 @@ function invalidate(...keys: string[]) {
 export function clearDbCache() {
   cacheStore.clear();
   inflight.clear();
+}
+
+// When the tab becomes visible again after being hidden (user switches back),
+// blow away any stale inflight entries. A hidden tab's fetch may have been
+// throttled or silently killed by the browser, leaving the inflight map with
+// a promise that will never resolve — blocking all subsequent fetches for that
+// key until the TTL expires (which never happens since it never wrote to cache).
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      inflight.clear();
+    }
+  });
 }
 
 // Retry a read with capped exponential backoff (500ms → 1s → 2s → 4s → 8s, then

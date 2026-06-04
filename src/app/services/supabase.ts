@@ -4,7 +4,19 @@ const SUPABASE_URL = 'https://atjongzdifyjnzkbqyoc.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0am9uZ3pkaWZ5am56a2JxeW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzMTYzNzUsImV4cCI6MjA5NTg5MjM3NX0.wfoor7uOkbooSt01NJGrqTxWRjPSgPzN8K5tgFG5nzY';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Wrap the native fetch with an AbortSignal timeout so every Supabase request
+// (data, auth, storage) fails fast instead of hanging indefinitely when the
+// project cold-starts or the connection stalls. The db.ts retry layer then
+// re-attempts with backoff until data arrives.
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: fetchWithTimeout },
+});
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
