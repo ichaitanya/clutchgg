@@ -284,10 +284,12 @@ export async function getTournamentRequests(): Promise<TournamentRequest[]> {
 // Superadmin: resend the invite (or a recovery link if they already confirmed)
 // to an organizer who never finished setting their password. Returns the mode
 // used so the UI can phrase the confirmation correctly.
-export async function resendInvite(email: string): Promise<{ mode: 'invite' | 'recovery' }> {
-  const { data, error } = await supabase.functions.invoke('resend-invite', {
-    body: { email },
-  });
+export async function resendInvite(email: string): Promise<{ mode: 'invite' | 'recovery'; link: string }> {
+  const invoke = supabase.functions.invoke('resend-invite', { body: { email } });
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Resend timed out — please try again')), 20_000)
+  );
+  const { data, error } = await Promise.race([invoke, timeout]);
   if (error) throw error;
   if (!data || data.error) throw new Error(data?.error || 'Resend failed');
   return data;

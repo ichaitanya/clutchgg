@@ -1001,6 +1001,7 @@ function RequestsPanel({ onApproved, showToast }: {
   const [requests, setRequests] = useState<TournamentRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<{ email: string; mode: string; link: string } | null>(null);
 
   // Keep a ref to the current mounted state so async callbacks from a
   // previous mount don't update state after unmount.
@@ -1096,17 +1097,13 @@ function RequestsPanel({ onApproved, showToast }: {
   const resend = async (req: TournamentRequest) => {
     setBusyId(req.id);
     try {
-      const { mode } = await resendInvite(req.email);
-      showToast(
-        mode === 'recovery'
-          ? `Password-reset link sent to ${req.email}`
-          : `Invite re-sent to ${req.email}`,
-        'success',
-      );
+      const { mode, link } = await resendInvite(req.email);
+      if (!mountedRef.current) return;
+      setInviteLink({ email: req.email, mode, link });
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Failed to resend invite', 'error');
+      if (mountedRef.current) showToast(e instanceof Error ? e.message : 'Failed to generate link', 'error');
     } finally {
-      setBusyId(null);
+      if (mountedRef.current) setBusyId(null);
     }
   };
 
@@ -1124,6 +1121,36 @@ function RequestsPanel({ onApproved, showToast }: {
           Refresh
         </button>
       </div>
+
+      {inviteLink && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setInviteLink(null)}>
+          <div className="bg-[#151821] border border-[#2a2d3a] rounded-2xl p-6 max-w-lg w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-white font-bold text-base mb-1">
+              {inviteLink.mode === 'recovery' ? 'Password Reset Link' : 'Invite Link'}
+            </h3>
+            <p className="text-gray-400 text-sm mb-4">
+              Copy this link and send it to <span className="text-white">{inviteLink.email}</span>.
+              It expires in 24 hours. No email was sent — paste it directly into a message.
+            </p>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={inviteLink.link}
+                className="flex-1 bg-[#0e0e0e] border border-[#2a2d3a] rounded-lg px-3 py-2 text-xs text-gray-300 font-mono truncate"
+              />
+              <button
+                onClick={() => { navigator.clipboard.writeText(inviteLink.link); showToast('Link copied!', 'success'); }}
+                className="bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all flex-shrink-0"
+              >
+                Copy
+              </button>
+            </div>
+            <button onClick={() => setInviteLink(null)} className="mt-4 text-xs text-gray-600 hover:text-gray-400 w-full text-center">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader className="w-4 h-4 animate-spin" /> Loading…</div>
@@ -1567,15 +1594,20 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
           )}
 
           {/* ── REQUESTS TAB (superadmin) ── */}
-          {tab === 'requests' && isSuperadmin && (
-            <RequestsPanel
-              showToast={showToast}
-              onApproved={() => {
-                // A new tournament was created server-side — reload admin data.
-                clearDbCache();
-                loadAdminDataAuthed().then(d => setData(d)).catch(() => {});
-              }}
-            />
+          {/* Keep RequestsPanel mounted while the user is in the admin panel
+              so navigating to another tab and back doesn't unmount+remount it
+              (which would reset its state and re-fire the fetch). Hidden via
+              CSS when not on the requests tab. */}
+          {isSuperadmin && (
+            <div style={{ display: tab === 'requests' ? undefined : 'none' }}>
+              <RequestsPanel
+                showToast={showToast}
+                onApproved={() => {
+                  clearDbCache();
+                  loadAdminDataAuthed().then(d => setData(d)).catch(() => {});
+                }}
+              />
+            </div>
           )}
 
           {/* ── NEWS TAB ── */}
