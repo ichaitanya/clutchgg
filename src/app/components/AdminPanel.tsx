@@ -1253,11 +1253,19 @@ function ChangePasswordScreen({ onDone, firstTime = false }: { onDone: () => voi
     if (pw !== confirm) { setError('Passwords do not match'); return; }
     setSaving(true);
     try {
-      await changePassword(pw);
+      // supabase.auth.updateUser can hang indefinitely when the underlying
+      // fetch aborts (AbortError is swallowed inside supabase-js and the
+      // promise never settles). Race against a hard timeout so the spinner
+      // always clears and the user gets actionable feedback.
+      await Promise.race([
+        changePassword(pw),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timed out — please check your connection and try again')), 15_000)
+        ),
+      ]);
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to update password');
-    } finally {
       setSaving(false);
     }
   };

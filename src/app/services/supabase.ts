@@ -59,8 +59,19 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signOut() {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  // Always clear local session state regardless of whether the server call
+  // succeeds — a network error on signout must never leave the user stuck on
+  // the admin panel. supabase.auth.signOut() with 'local' scope clears the
+  // stored session without making a network request.
+  try {
+    await Promise.race([
+      supabase.auth.signOut(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5_000)),
+    ]);
+  } catch {
+    // Server-side revocation failed or timed out — force local signout anyway.
+    await supabase.auth.signOut({ scope: 'local' });
+  }
 }
 
 export async function getSession() {
