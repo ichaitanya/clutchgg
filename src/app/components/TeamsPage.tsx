@@ -4,7 +4,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import type { Tournament, TeamInTournament, TournamentPlayer, BracketGenerated } from './TournamentCreation';
-import { getTournaments } from '../services/db';
+import { getTournaments, loadWithRetry } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { computeRRStandings } from './BracketDisplay';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
@@ -121,9 +121,7 @@ export function TeamsPage() {
   const [showAllRoster, setShowAllRoster] = useState(false);
   const [showAllAnalytics, setShowAllAnalytics] = useState(false);
 
-  useEffect(() => {
-    getTournaments().then(setTournaments).catch(() => {});
-  }, []);
+  useEffect(() => loadWithRetry(getTournaments, setTournaments), []);
 
   useEffect(() => {
     if (routeTeamId) {

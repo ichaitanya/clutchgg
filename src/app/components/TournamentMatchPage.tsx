@@ -5,7 +5,7 @@ import { Header } from './Header';
 import { Footer } from './Footer';
 import type { AdminData } from './AdminPanel';
 import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult, BracketGenerated } from './TournamentCreation';
-import { getTournaments } from '../services/db';
+import { getTournaments, loadWithRetryPolled } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { mapImageUrl, agentIconUrl } from '../utils/valorantAssets';
 
@@ -441,14 +441,22 @@ export function TournamentMatchPage() {
 
   useEffect(() => {
     if (!matchId) { setNotFound(true); return; }
-    getTournaments()
-      .then(tournaments => {
-        setAllTournaments(tournaments);
-        const result = findMatchInTournaments(matchId, tournaments);
-        if (result) setCtx(result);
-        else setNotFound(true);
-      })
-      .catch(() => setNotFound(true));
+    // Reset view state so navigating between match pages (head-to-head/past
+    // match links below all point at /tournament-match/:id and reuse this
+    // component) shows the loader during the switch instead of flashing the
+    // previous match's scoreboard until the new data arrives.
+    setCtx(null);
+    setNotFound(false);
+    // Poll + retry: this is a live-scores view, so refresh on an interval to
+    // pick up map results as they're entered. A fetch failure retries (a
+    // transient stall must not show a false "match not found"); only a
+    // SUCCESSFUL fetch where the match genuinely isn't in the data sets notFound.
+    return loadWithRetryPolled(getTournaments, tournaments => {
+      setAllTournaments(tournaments);
+      const result = findMatchInTournaments(matchId, tournaments);
+      if (result) setCtx(result);
+      else setNotFound(true);
+    });
   }, [matchId]);
 
   // Default to the aggregated "Total" view when the match has multiple maps

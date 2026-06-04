@@ -5,7 +5,7 @@ import { Header } from './Header';
 import { Footer } from './Footer';
 import type { NewsItem } from './AdminPanel';
 import type { Tournament } from './TournamentCreation';
-import { getNews, getTournaments } from '../services/db';
+import { getNews, getTournaments, loadWithRetry } from '../services/db';
 import { buildMentionIndex, parseMentions } from '../utils/mentions';
 
 // X (Twitter) glyph — lucide has no dedicated X icon.
@@ -45,15 +45,10 @@ export function ArticlePage() {
   const [shareOpen, setShareOpen] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    Promise.all([getNews(), getTournaments()])
-      .then(([items, ts]) => {
-        setNews(items);
-        setTournaments(ts);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [id]);
+  useEffect(() => loadWithRetry(
+    () => Promise.all([getNews(), getTournaments()]),
+    ([items, ts]) => { setNews(items); setTournaments(ts); setLoading(false); },
+  ), [id]);
 
   // Reset transient state when navigating between articles.
   useEffect(() => { setCopied(false); setShareOpen(false); }, [id]);

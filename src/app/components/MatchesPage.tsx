@@ -5,7 +5,7 @@ import { Footer } from './Footer';
 import { useNavigate } from 'react-router-dom';
 import type { AdminData } from './AdminPanel';
 import type { Tournament, BracketMatch, MatchMapResult } from './TournamentCreation';
-import { loadAdminData } from '../services/db';
+import { loadAdminData, loadWithRetryPolled } from '../services/db';
 
 type MatchStatus = 'live' | 'upcoming' | 'completed';
 
@@ -292,20 +292,9 @@ export function MatchesPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    function load(attempt: number) {
-      loadAdminData()
-        .then(d => { if (!cancelled) setAdminData(d); })
-        .catch(() => {
-          if (cancelled) return;
-          const delay = Math.min(500 * 2 ** (attempt - 1), 8000);
-          setTimeout(() => load(attempt + 1), delay);
-        });
-    }
-    load(1);
-    return () => { cancelled = true; };
-  }, []);
+  // Initial retrying load + background polling so live/upcoming match states
+  // refresh on an open tab without a manual reload.
+  useEffect(() => loadWithRetryPolled(loadAdminData, setAdminData), []);
 
   const allMatches = useMemo<ScheduleMatch[]>(() => {
     if (!adminData) return [];
@@ -360,6 +349,16 @@ export function MatchesPage() {
   const pickTab = (tab: MatchStatus) => { setUserPickedTab(true); setActiveTab(tab); };
 
   useEffect(() => { setPage(1); }, [activeTab, filterType, filterTournament, selectedDate]);
+
+  // The `live` tab is only rendered while live matches exist. If the active tab
+  // is no longer in the visible tab list (e.g. the last live match just ended,
+  // or a filter removed every live match), fall back to a tab that actually
+  // exists so the user isn't stranded on a hidden tab showing an empty list.
+  useEffect(() => {
+    if (!tabs.includes(activeTab)) {
+      setActiveTab(byStatus.upcoming.length > 0 ? 'upcoming' : 'completed');
+    }
+  }, [tabs, activeTab, byStatus]);
 
   const activeList = byStatus[activeTab];
   const totalPages = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));

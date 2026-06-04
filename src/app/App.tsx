@@ -12,7 +12,7 @@ import { computeRRStandings } from './components/BracketDisplay';
 import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
-import { loadAdminData } from './services/db';
+import { loadAdminData, loadWithRetryPolled } from './services/db';
 
 // Route pages are code-split so a first-time visitor only downloads the home
 // page's JS. The heavy admin editor (TournamentCreation, Excel/Challonge import,
@@ -97,33 +97,9 @@ function isPlaceholderSlot(name: string): boolean {
 function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    function load(attempt: number) {
-      loadAdminData()
-        .then(d => { if (!cancelled) setAdminData(d); })
-        .catch(() => {
-          if (cancelled) return;
-          const delay = Math.min(500 * 2 ** (attempt - 1), 8000);
-          setTimeout(() => load(attempt + 1), delay);
-        });
-    }
-    load(1);
-
-    // If the tab was hidden while a fetch was in-flight (browser may have
-    // throttled/killed it), re-trigger a fresh load when the user comes back
-    // so the page never stays blank after switching tabs.
-    function onVisible() {
-      if (document.visibilityState === 'visible' && !cancelled) {
-        load(1);
-      }
-    }
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      cancelled = true;
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, []);
+  // Initial retrying load + background polling so the home spotlight/standings
+  // stay current on an open tab, and an immediate refresh on tab refocus.
+  useEffect(() => loadWithRetryPolled(loadAdminData, setAdminData), []);
 
   const handleDataChange = (data: AdminData) => setAdminData(data);
 

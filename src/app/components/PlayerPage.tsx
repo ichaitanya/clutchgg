@@ -11,7 +11,7 @@ import type {
   PlayerAlias,
 } from './TournamentCreation';
 import { getStageOptions, statMatchesPlayer } from './StatsPage';
-import { getTournaments } from '../services/db';
+import { getTournaments, loadWithRetry } from '../services/db';
 import { agentIconUrl } from '../utils/valorantAssets';
 
 // Render an agent name with its official icon (falls back to a 2-letter chip).
@@ -160,12 +160,7 @@ export function PlayerPage() {
   const [loading, setLoading] = useState(true);
   const [showAliases, setShowAliases] = useState(false);
 
-  useEffect(() => {
-    getTournaments()
-      .then(setTournaments)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  useEffect(() => loadWithRetry(getTournaments, ts => { setTournaments(ts); setLoading(false); }), []);
 
   const tournament = useMemo(
     () => tournaments.find(t => t.id === tournamentId) || null,

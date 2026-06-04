@@ -11,7 +11,7 @@ import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
 import { supabase, signIn, signOut, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
 import {
-  loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
+  loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
   getTournamentRequests, approveTournamentRequest, denyTournamentRequest, resendInvite, type TournamentRequest,
 } from '../services/db';
@@ -38,8 +38,16 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     try {
       await signIn(email, password);
       onSuccess();
-    } catch {
-      setError('Invalid email or password');
+    } catch (e: any) {
+      // Distinguish a genuine credential rejection (Supabase AuthApiError,
+      // HTTP 400) from a network/timeout/cold-start failure. Reporting a
+      // stalled connection as "wrong password" sends the user down the wrong
+      // path (resetting a password that was actually correct).
+      const status = e?.status ?? e?.statusCode;
+      const isCredentialError = status === 400 || /invalid login|invalid credentials/i.test(e?.message ?? '');
+      setError(isCredentialError
+        ? 'Invalid email or password'
+        : 'Connection problem — please check your network and try again.');
       setShake(true);
       setTimeout(() => setShake(false), 500);
       setPassword('');
@@ -1396,7 +1404,7 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
   // edits the freshest data (not a copy cached during an earlier public-page visit).
   useEffect(() => {
     clearDbCache();
-    loadAdminData()
+    loadAdminDataAuthed()
       .then(d => {
         setData(d);
         persistedNewsIds.current = new Set(d.news.map(n => n.id));
@@ -1548,7 +1556,7 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
               onApproved={() => {
                 // A new tournament was created server-side — reload admin data.
                 clearDbCache();
-                loadAdminData().then(d => setData(d)).catch(() => {});
+                loadAdminDataAuthed().then(d => setData(d)).catch(() => {});
               }}
             />
           )}

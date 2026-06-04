@@ -4,7 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import type { Tournament, BracketGenerated, MatchPlayerStat, TournamentPlayer } from './TournamentCreation';
-import { getTournaments } from '../services/db';
+import { getTournaments, loadWithRetry } from '../services/db';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
 // Does a recorded stat line belong to a given roster player?
@@ -208,9 +208,7 @@ export function StatsPage() {
   const [stageId, setStageId] = useState('');
   const [metric, setMetric] = useState<MetricKey>('acs');
 
-  useEffect(() => {
-    getTournaments().then(setTournaments).catch(() => {});
-  }, []);
+  useEffect(() => loadWithRetry(getTournaments, setTournaments), []);
 
   // Auto-select the first in-progress tournament when tournaments load
   useEffect(() => {

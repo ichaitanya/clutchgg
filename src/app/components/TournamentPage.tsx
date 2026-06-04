@@ -7,7 +7,7 @@ import { Header } from './Header';
 import { Footer } from './Footer';
 import type { Tournament, BracketGenerated, BracketMatch } from './TournamentCreation';
 import type { NewsItem } from './AdminPanel';
-import { getTournaments, getNews } from '../services/db';
+import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
 import { getStageOptions } from './StatsPage';
 import { BracketDisplay } from './BracketDisplay';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
@@ -94,20 +94,13 @@ export function TournamentPage() {
     return (['overview', 'matches', 'bracket', 'teams', 'news'] as TabKey[]).includes(hash) ? hash : 'overview';
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    function load(attempt: number) {
-      Promise.all([getTournaments(), getNews()])
-        .then(([ts, ns]) => { if (!cancelled) { setTournaments(ts); setNews(ns); setLoading(false); } })
-        .catch(() => {
-          if (cancelled) return;
-          const delay = Math.min(500 * 2 ** (attempt - 1), 8000);
-          setTimeout(() => load(attempt + 1), delay);
-        });
-    }
-    load(1);
-    return () => { cancelled = true; };
-  }, []);
+  // Initial retrying load + background polling so bracket/match updates appear
+  // on an open tournament page. setLoading(false) only on the first success;
+  // subsequent polls swap data in silently without flashing the loader.
+  useEffect(() => loadWithRetryPolled(
+    () => Promise.all([getTournaments(), getNews()]),
+    ([ts, ns]) => { setTournaments(ts); setNews(ns); setLoading(false); },
+  ), []);
 
   const tournament = useMemo(() => tournaments.find(t => t.id === id) || null, [tournaments, id]);
   const stages = useMemo(() => (tournament ? getStageOptions(tournament) : []), [tournament]);

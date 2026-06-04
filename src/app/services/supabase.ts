@@ -14,6 +14,38 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise
   return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
+// ─── Two clients, by purpose ────────────────────────────────────────────────
+// Login only ever happens on /admin. The public pages (home, matches, …) read
+// data anonymously through RLS and must NEVER touch the auth session.
+//
+// Why this split matters: with a single persisted-session client, supabase-js
+// resolves the access token on every PostgREST request — and if a stored
+// session has expired, it awaits an auto-refresh first. When that refresh
+// stalls (cold start / flaky connection), the *data read* is blocked behind it
+// and the page stays blank. A fresh browser has no stored session, so it never
+// hits this path — which is exactly why "new browser works, same browser
+// doesn't, and clearing the HTTP cache doesn't help" (the bad token lives in
+// localStorage, not the cache).
+//
+// `dbClient`  — anonymous, NO session persistence, NO token refresh. Used for
+//               all public/data reads. Cannot be blocked by an auth refresh.
+// `supabase`  — full auth client (persists session, auto-refreshes). Used by
+//               the admin panel for login/session AND for authenticated writes
+//               that must carry the JWT to satisfy is_staff() RLS.
+
+export const dbClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: fetchWithTimeout },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    // Distinct storageKey so this anonymous client never shares the auth
+    // client's GoTrue lock or token storage — avoids the "Multiple
+    // GoTrueClient instances" cross-talk when both live in one tab.
+    storageKey: 'sb-clutchgg-anon',
+  },
+});
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   global: { fetch: fetchWithTimeout },
 });
