@@ -59,18 +59,39 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signOut() {
-  // Always clear local session state regardless of whether the server call
-  // succeeds — a network error on signout must never leave the user stuck on
-  // the admin panel. supabase.auth.signOut() with 'local' scope clears the
-  // stored session without making a network request.
+  // The ONLY thing that reliably logs the user out is clearing the locally
+  // stored session token — `scope: 'local'` does exactly that and makes NO
+  // network call, so it can never hang and always removes the token from
+  // storage synchronously. Do this FIRST and unconditionally; if it's skipped
+  // (e.g. because a global revoke stalled), the next getSession() rehydrates
+  // the old user and "sign out" appears to do nothing.
   try {
-    await Promise.race([
-      supabase.auth.signOut(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5_000)),
-    ]);
-  } catch {
-    // Server-side revocation failed or timed out — force local signout anyway.
     await supabase.auth.signOut({ scope: 'local' });
+  } catch {
+    // ignore — we still hard-purge storage below
+  }
+
+  // Best-effort server-side revocation of other sessions. Fire-and-forget with
+  // a short timeout so a stalled network call never blocks the UI; the local
+  // token is already gone, so the user is logged out regardless of this result.
+  Promise.race([
+    supabase.auth.signOut({ scope: 'global' }),
+    new Promise(resolve => setTimeout(resolve, 3_000)),
+  ]).catch(() => {});
+
+  // Belt-and-suspenders: explicitly purge any Supabase auth keys left in
+  // localStorage. Some supabase-js versions leave a stale key behind on a
+  // partial signout, which would silently restore the session on next load.
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
+        // Don't wipe the anonymous data client's storage — only auth sessions.
+        if (key !== 'sb-clutchgg-anon') localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // localStorage unavailable (private mode / SSR) — nothing more to do.
   }
 }
 

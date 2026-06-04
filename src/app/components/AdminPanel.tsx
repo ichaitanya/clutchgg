@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
-import { supabase, signIn, signOut, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
+import { supabase, signIn, signOut, getSession, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
 import {
   loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
@@ -1386,9 +1386,15 @@ export function AdminPanel({ onClose, onDataChange }: {
     const isInviteFlow = hash.includes('type=invite') || hash.includes('type=recovery');
     if (isInviteFlow) setMustSetPassword(true);
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      setAuthed(!!data.session);
-      await refreshProfile(!!data.session);
+    // Use the timeout-wrapped getSession (not supabase.auth.getSession directly)
+    // so a stalled token refresh can't leave `checking` true forever — the
+    // spinner would never clear and the login screen would never appear.
+    getSession().then(async (session) => {
+      setAuthed(!!session);
+      await refreshProfile(!!session);
+      setChecking(false);
+    }).catch(() => {
+      // Defensive: even if the helper somehow rejects, never get stuck checking.
       setChecking(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -1436,9 +1442,14 @@ export function AdminPanel({ onClose, onDataChange }: {
 
   const logout = async () => {
     await signOut();
-    setAuthed(false);
+    // Reset ALL auth-derived state so the login screen shows immediately and
+    // no stale user/role lingers. Stay on /admin (don't navigate to / and back
+    // — that re-runs getSession(), which is where a not-fully-cleared token
+    // could rehydrate the old user).
     setProfile(null);
-    navigate('/');
+    setNeedsPasswordChange(false);
+    setMustSetPassword(false);
+    setAuthed(false);
   };
 
   // Authenticated but no profile row → NO access. Never fall through to a
