@@ -84,7 +84,11 @@ export function ContactPage() {
     <div className="min-h-screen bg-[#0e0e0e] flex flex-col">
       <Header />
 
-      <main className="flex-1 flex items-center justify-center py-20 px-4">
+      {/* Top-align (items-start) rather than center: on a short viewport a
+          vertically-centered card taller than the viewport gets clipped at the
+          top with no way to scroll to it. Top-aligning keeps the heading
+          reachable and the page scrolls normally. */}
+      <main className="flex-1 flex items-start justify-center py-12 px-4">
         <div className="arena-contact__card">
           <div className="arena-contact__header">
             <h1 className="arena-contact__title">Register Your Tournament</h1>
