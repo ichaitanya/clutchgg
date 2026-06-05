@@ -14,7 +14,7 @@ export function Footer() {
         <div className="arena-footer__cols">
           <div>
             <p className="arena-footer__col-title">Platform</p>
-            <a href="/matches" className="arena-footer__link">Tournament</a>
+            <a href="/tournaments" className="arena-footer__link">Tournament</a>
             <a href="/matches" className="arena-footer__link">Matches</a>
             <a href="/teams" className="arena-footer__link">Teams</a>
             <a href="/stats" className="arena-footer__link">Stats</a>

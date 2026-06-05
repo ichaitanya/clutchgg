@@ -3175,8 +3175,9 @@ body {
 }
 .arena-md-table-card__bar { width: 0.2rem; height: 1rem; background: var(--arena-accent); }
 .arena-md-table-card__team {
-  font-family: 'Playfair Display', Georgia, serif;
-  font-weight: 600;
+  font-family: "Kanit", sans-serif;
+  font-weight: 300;
+  font-style: italic;
   font-size: 1.05rem;
   color: #fff;
 }
