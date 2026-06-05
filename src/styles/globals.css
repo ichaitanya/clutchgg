@@ -2107,11 +2107,12 @@ body {
 .arena-match-card__team--right { justify-content: flex-end; text-align: right; }
 .arena-match-card__team--left { justify-content: flex-start; text-align: left; }
 .arena-match-card__team-name {
-  font-family: 'Playfair Display', Georgia, serif;
-  font-weight: 700;
-  font-size: 1.25rem;
+    font-family: "Kanit", sans-serif;
+  font-weight: 350;
+  font-style: italic;
+  font-size: 1.5rem;
   line-height: 1.1;
-  color: #fff;
+  color: #ffffff;
   margin: 0;
   min-width: 0;
   overflow: hidden;
