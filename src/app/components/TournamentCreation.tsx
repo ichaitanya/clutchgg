@@ -2448,7 +2448,7 @@ function CreateTournamentScreen({
     if (updatedMatch.winner) {
       const winnerId = updatedMatch.winner;
       const winnerName = winnerId === updatedMatch.team1Id ? updatedMatch.team1Name : updatedMatch.team2Name;
-      const loserId = winnerId === updatedMatch.team1Id ? updatedMatch.team2Id : updatedMatch.team1Name;
+      const loserId = winnerId === updatedMatch.team1Id ? updatedMatch.team2Id : updatedMatch.team1Id;
       const loserName = winnerId === updatedMatch.team1Id ? updatedMatch.team2Name : updatedMatch.team1Name;
 
       const applyToSlot = (rounds: BracketMatch[][], matchId: string, slot: 1 | 2, teamId: string, teamName: string) =>

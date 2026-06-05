@@ -1086,13 +1086,16 @@ function RequestsPanel({ onApproved, showToast }: {
     setBusyId(req.id);
     try {
       const result = await approveTournamentRequest(req.id);
-      // Fire email in background — don't block the UI on it. (Re-sends on an
-      // already-approved retry too, which is harmless and re-notifies the organizer.)
-      sendApprovalEmail({
-        email: result.email,
-        organizerName: result.organizerName,
-        tournamentName: result.tournamentName,
-      });
+      // Fire email in background — don't block the UI on it. Only send on a
+      // genuine first approval; an already-approved retry/double-click must NOT
+      // re-notify the organizer that their tournament is "ready" again.
+      if (!result.alreadyApproved) {
+        sendApprovalEmail({
+          email: result.email,
+          organizerName: result.organizerName,
+          tournamentName: result.tournamentName,
+        });
+      }
       if (!mountedRef.current) return;
       showToast(
         result.alreadyApproved
