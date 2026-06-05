@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
-import { supabase, signIn, signOut, getSession, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
+import { supabase, signIn, signOut, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
 import {
   loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
@@ -23,7 +23,7 @@ const ORGANIZER_EMAILJS_SERVICE_ID = 'service_7kaukdv';
 const ORGANIZER_EMAILJS_TEMPLATE_ID = 'template_a6piesm';
 const ORGANIZER_EMAILJS_PUBLIC_KEY = 'p_AaPkV8j41bh5dtO';
 
-function AdminLogin({ onSuccess }: { onSuccess: (rememberMe: boolean) => void }) {
+function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -38,7 +38,7 @@ function AdminLogin({ onSuccess }: { onSuccess: (rememberMe: boolean) => void })
     setError('');
     try {
       await signIn(email, password, rememberMe);
-      onSuccess(rememberMe);
+      onSuccess();
     } catch (e: any) {
       // Distinguish a genuine credential rejection (Supabase AuthApiError,
       // HTTP 400) from a network/timeout/cold-start failure. Reporting a
@@ -148,7 +148,7 @@ function AdminLogin({ onSuccess }: { onSuccess: (rememberMe: boolean) => void })
                   onChange={e => setRememberMe(e.target.checked)}
                   className="w-4 h-4 rounded border border-[#2a2d3a] bg-[#0d0f16] accent-[#ff4655] cursor-pointer"
                 />
-                <span className="text-xs text-gray-400">Remember me on this device</span>
+                <span className="text-xs text-gray-400">Keep me signed in for 30 days</span>
               </label>
 
               <button
@@ -1381,11 +1381,13 @@ export function AdminPanel({ onClose, onDataChange }: {
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const INACTIVITY_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-  // Load the signed-in user's profile (role + tournament scope). Re-runs on auth change.
-  const refreshProfile = async (hasSession: boolean) => {
-    if (!hasSession) { setProfile(null); setNeedsPasswordChange(false); return; }
+  // Load the signed-in user's profile (role + tournament scope). Re-runs on auth
+  // change. `userId` (from the onAuthStateChange session) lets getCurrentProfile
+  // skip a redundant getSession() round-trip.
+  const refreshProfile = async (userId?: string) => {
+    if (!userId) { setProfile(null); setNeedsPasswordChange(false); return; }
     setProfileLoading(true);
-    const p = await getCurrentProfile();
+    const p = await getCurrentProfile(userId);
     setProfile(p);
     setNeedsPasswordChange(!!p?.must_change_password);
     setProfileLoading(false);
@@ -1413,19 +1415,26 @@ export function AdminPanel({ onClose, onDataChange }: {
     const isInviteFlow = hash.includes('type=invite') || hash.includes('type=recovery');
     if (isInviteFlow) setMustSetPassword(true);
 
-    // Use the timeout-wrapped getSession (not supabase.auth.getSession directly)
-    // so a stalled token refresh can't leave `checking` true forever — the
-    // spinner would never clear and the login screen would never appear.
-    getSession().then(async (session) => {
-      setAuthed(!!session);
-      await refreshProfile(!!session);
-      if (session) startInactivityTimer();
-      setChecking(false);
-    }).catch(() => {
-      // Defensive: even if the helper somehow rejects, never get stuck checking.
-      setChecking(false);
-    });
+    let settled = false;
+
+    // SINGLE source of truth for auth state: onAuthStateChange. It fires
+    // INITIAL_SESSION synchronously on mount with the session read from storage
+    // (no blocking network refresh), then SIGNED_IN / SIGNED_OUT / TOKEN_REFRESHED
+    // as they occur. Driving the UI from BOTH a one-shot getSession() AND this
+    // listener (as before) raced them: on a cold connection getSession() would
+    // resolve null first → flash the login box → then this listener fired with
+    // the real session → log back in, a ~12s limbo with a login flash. Using only
+    // this listener removes the race and the blocking 8s getSession() entirely.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Enforce our app-level expiry policy: if the stored session is past its
+      // "keep me signed in" window, sign out cleanly instead of trusting it.
+      if (session && isSessionExpired()) {
+        await signOut();
+        settled = true;
+        setAuthed(false); setProfile(null); setChecking(false);
+        return;
+      }
+
       // PASSWORD_RECOVERY fires for recovery links — but only treat it as a
       // "must set password" flow if this tab actually has the recovery hash in
       // the URL. Without this guard, opening a recovery link in ANY tab causes
@@ -1434,14 +1443,30 @@ export function AdminPanel({ onClose, onDataChange }: {
       if (event === 'PASSWORD_RECOVERY' && window.location.hash.includes('type=recovery')) {
         setMustSetPassword(true);
       }
+
       setAuthed(!!session);
-      await refreshProfile(!!session);
+      // TOKEN_REFRESHED fires ~hourly in the background with the SAME user — no
+      // need to re-fetch the profile (it would needlessly flip the loading
+      // spinner mid-session). Only (re)load the profile when the identity
+      // actually changes: initial load, sign-in, sign-out, recovery.
+      if (event !== 'TOKEN_REFRESHED') {
+        await refreshProfile(session?.user.id);
+      }
+      if (session) startInactivityTimer();
+      settled = true;
+      setChecking(false);
     });
+
+    // Fallback: if for any reason no auth event arrives (SDK init failure), don't
+    // leave the spinner up forever — clear `checking` after a short grace period.
+    const fallback = setTimeout(() => { if (!settled) setChecking(false); }, 5_000);
+
     const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const;
     activityEvents.forEach(ev => window.addEventListener(ev, resetInactivityTimer, { passive: true }));
 
     return () => {
       subscription.unsubscribe();
+      clearTimeout(fallback);
       if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
       activityEvents.forEach(ev => window.removeEventListener(ev, resetInactivityTimer));
     };
@@ -1456,7 +1481,10 @@ export function AdminPanel({ onClose, onDataChange }: {
   }
 
   if (!authed) {
-    return <AdminLogin onSuccess={async () => { setAuthed(true); await refreshProfile(true); startInactivityTimer(); }} />;
+    // onSuccess is a no-op for auth state: signIn() triggers a SIGNED_IN event
+    // that the onAuthStateChange listener handles (setAuthed + profile + timer).
+    // Driving it here too would double-run the profile load.
+    return <AdminLogin onSuccess={() => {}} />;
   }
 
   if (needsPasswordChange || mustSetPassword) {

@@ -48,6 +48,15 @@ export const dbClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   global: { fetch: fetchWithTimeout },
+  auth: {
+    // Explicit (these are the supabase-js defaults, pinned for determinism):
+    persistSession: true,       // keep the session in localStorage across loads
+    autoRefreshToken: true,     // refresh the access token in the background
+    // Parse the invite/recovery token from the URL hash on load and emit
+    // SIGNED_IN — this is how the organizer set-password flow works.
+    detectSessionInUrl: true,
+    flowType: 'implicit',
+  },
 });
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
@@ -188,13 +197,20 @@ export interface Profile {
   must_change_password?: boolean;
 }
 
-export async function getCurrentProfile(): Promise<Profile | null> {
-  const session = await getSession();
-  if (!session) return null;
+// Load the signed-in user's profile. Pass `userId` when the caller already has
+// it (e.g. from an onAuthStateChange session) to skip a redundant getSession()
+// round-trip — that extra call was a meaningful chunk of the post-login delay.
+export async function getCurrentProfile(userId?: string): Promise<Profile | null> {
+  let uid = userId;
+  if (!uid) {
+    const session = await getSession();
+    if (!session) return null;
+    uid = session.user.id;
+  }
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
-    .eq('id', session.user.id)
+    .eq('id', uid)
     .single();
   if (error) return null;
   const profile = data as Profile;
@@ -206,7 +222,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     const { data: rows } = await supabase
       .from('organizer_tournaments')
       .select('tournament_id')
-      .eq('user_id', session.user.id);
+      .eq('user_id', uid);
     const ids = new Set<string>((rows ?? []).map((r: any) => r.tournament_id));
     if (profile.tournament_id) ids.add(profile.tournament_id);
     profile.tournamentIds = [...ids];

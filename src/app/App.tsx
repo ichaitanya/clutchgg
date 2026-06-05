@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { UpcomingMatch } from './components/UpcomingMatch';
@@ -473,9 +473,21 @@ function AdminPage() {
   );
 }
 
+// Reset scroll to the top on every route change. Without this, navigating from
+// the bottom of a long page (e.g. the home CTA → /contact) lands the new page
+// scrolled down, hiding its header. Runs on pathname change only — not on hash
+// changes (e.g. invite/recovery links land on /admin#access_token=… and must
+// not be disturbed).
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 export default function App() {
   return (
     <Router>
+      <ScrollToTop />
       <Suspense fallback={<div className="min-h-screen bg-[#0e0e0e]" />}>
         <Routes>
           <Route path="/" element={<Home />} />
