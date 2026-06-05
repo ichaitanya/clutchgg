@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map as MapIcon, Search, Copy, Check, Youtube, Image as ImageIcon, Lock } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
@@ -1415,6 +1415,7 @@ function MatchEditTeamSelect({
   teamId,
   teamName,
   excludeId,
+  excludeIds,
   teams,
   onChange,
 }: {
@@ -1422,6 +1423,7 @@ function MatchEditTeamSelect({
   teamId: string;
   teamName: string;
   excludeId: string;
+  excludeIds?: Set<string>;
   teams: TeamInTournament[];
   onChange: (id: string, name: string) => void;
 }) {
@@ -1439,7 +1441,7 @@ function MatchEditTeamSelect({
         >
           <option value={teamId} disabled>{teamName}</option>
           {teams
-            .filter(t => t.id !== excludeId)
+            .filter(t => t.id !== excludeId && !excludeIds?.has(t.id))
             .map(t => (
               <option key={t.id} value={t.id}>{t.name}</option>
             ))
@@ -1697,15 +1699,30 @@ function MatchStatsFinder({
 function MatchEditModal({
   match,
   teams,
+  siblingMatches = [],
   onSave,
   onCancel,
 }: {
   match: BracketMatch;
   teams: TeamInTournament[];
+  siblingMatches?: BracketMatch[];
   onSave: (match: BracketMatch) => void;
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<BracketMatch>(match);
+
+  // Build the set of team IDs already assigned in OTHER round-1 matches. These
+  // are hidden from the dropdowns so the same team can't appear in two matches.
+  // Slots that are still unassigned placeholders (isTeamSlotName) are excluded
+  // from this set — they don't represent a real locked-in team yet.
+  const siblingTakenIds = useMemo<Set<string>>(() => {
+    const ids = new Set<string>();
+    for (const m of siblingMatches) {
+      if (!isTeamSlotName(m.team1Name)) ids.add(m.team1Id);
+      if (!isTeamSlotName(m.team2Name)) ids.add(m.team2Id);
+    }
+    return ids;
+  }, [siblingMatches]);
   const [tab, setTab] = useState<'details' | 'maps' | 'stats'>('details');
   // Segment 2: populate from per-map Valorant match IDs (one per map in the BO format).
   // Seed from any match IDs already saved on the maps so reopening Edit retains them.
@@ -1932,6 +1949,7 @@ function MatchEditModal({
                     teamId={form.team1Id}
                     teamName={form.team1Name}
                     excludeId={form.team2Id}
+                    excludeIds={siblingTakenIds}
                     teams={teams}
                     onChange={(id, name) => setForm(f => ({ ...f, team1Id: id, team1Name: name }))}
                   />
@@ -1940,6 +1958,7 @@ function MatchEditModal({
                     teamId={form.team2Id}
                     teamName={form.team2Name}
                     excludeId={form.team1Id}
+                    excludeIds={siblingTakenIds}
                     teams={teams}
                     onChange={(id, name) => setForm(f => ({ ...f, team2Id: id, team2Name: name }))}
                   />
@@ -2338,6 +2357,9 @@ function CreateTournamentScreen({
   const [showTwoStageTournamentModal, setShowTwoStageTournamentModal] = useState(false);
   const [showExcelImportModal, setShowExcelImportModal] = useState(false);
   const [editingMatch, setEditingMatch] = useState<BracketMatch | null>(null);
+  // The other round-1 matches in the same bracket when a round-1 match is being
+  // edited — used to exclude already-assigned teams from the team dropdowns.
+  const [editingMatchSiblings, setEditingMatchSiblings] = useState<BracketMatch[]>([]);
   const [isGeneratingSecondStage, setIsGeneratingSecondStage] = useState(false);
 
   const handleTournamentSave = (name: string, overview: string, tournamentType: 'single' | 'group', event: TournamentEvent, coverImage?: string) => {
@@ -2413,7 +2435,7 @@ function CreateTournamentScreen({
       };
       setTournament(updated);
       persistTournament(updated);
-      setEditingMatch(null);
+      setEditingMatch(null); setEditingMatchSiblings([]);
       return;
     }
 
@@ -2479,7 +2501,7 @@ function CreateTournamentScreen({
     const updated = { ...tournament, generatedBracket: newBracket };
     setTournament(updated);
     persistTournament(updated);
-    setEditingMatch(null);
+    setEditingMatch(null); setEditingMatchSiblings([]);
   };
 
   // Apply a fetched custom-game scoreboard to one map slot of a target match.
@@ -2869,7 +2891,7 @@ function CreateTournamentScreen({
                             </span>
                           ) : (
                             <button
-                              onClick={() => setEditingMatch(match)}
+                              onClick={() => { setEditingMatch(match); setEditingMatchSiblings(roundIdx === 0 ? round.filter(m => m.id !== match.id) : []); }}
                               className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors"
                             >
                               Edit
@@ -2968,7 +2990,7 @@ function CreateTournamentScreen({
                               )}
                             </div>
                             <button
-                              onClick={() => setEditingMatch(match)}
+                              onClick={() => { setEditingMatch(match); setEditingMatchSiblings(roundIdx === 0 ? round.filter(m => m.id !== match.id) : []); }}
                               className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors flex-shrink-0"
                             >
                               Edit
@@ -3073,7 +3095,7 @@ function CreateTournamentScreen({
                             </span>
                           ) : (
                             <button
-                              onClick={() => setEditingMatch(match)}
+                              onClick={() => { setEditingMatch(match); setEditingMatchSiblings(roundIdx === 0 ? round.filter(m => m.id !== match.id) : []); }}
                               className="ml-3 px-3 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded transition-colors flex-shrink-0"
                             >
                               Edit
@@ -3150,7 +3172,7 @@ function CreateTournamentScreen({
                             )}
                           </div>
                           <button
-                            onClick={() => setEditingMatch(match)}
+                            onClick={() => { setEditingMatch(match); setEditingMatchSiblings(roundIdx === 0 ? round.filter(m => m.id !== match.id) : []); }}
                             className="ml-3 px-3 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 rounded transition-colors"
                           >
                             Edit
@@ -3311,8 +3333,9 @@ function CreateTournamentScreen({
         <MatchEditModal
           match={editingMatch}
           teams={tournament.teams}
+          siblingMatches={editingMatchSiblings}
           onSave={handleMatchEdit}
-          onCancel={() => setEditingMatch(null)}
+          onCancel={() => { setEditingMatch(null); setEditingMatchSiblings([]); }}
         />
       )}
 
