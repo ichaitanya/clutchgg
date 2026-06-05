@@ -2,9 +2,9 @@ export function Footer() {
   return (
     <footer className="arena-footer">
       <div className="arena-footer__inner">
-        {/* Brand + tagline */}
-        <div>
-          <a href="/" className="arena-footer__brand" aria-label="Clutch.gg home">
+        {/* Logo with tagline beneath, centred as a unit */}
+        <div className="arena-footer__brand-block">
+          <a href="/" aria-label="Clutch.gg home">
             <img src="/logo.png" alt="Clutch.gg" className="arena-footer__logo" />
           </a>
           <p className="arena-footer__tagline">
