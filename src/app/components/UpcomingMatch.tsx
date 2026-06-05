@@ -69,12 +69,25 @@ export function UpcomingMatch({
 
   const TeamSide = ({ name, logo, align }: { name: string; logo?: string; align: 'left' | 'right' }) => (
     <div className={`arena-upcoming__team arena-upcoming__team--${align}`}>
-      <span className="arena-upcoming__logo">
-        {logo
-          ? <img src={logo} alt="" />
-          : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
-      </span>
-      <span className="arena-upcoming__name">{name}</span>
+      {align === 'right' ? (
+        <>
+          <span className="arena-upcoming__name">{name}</span>
+          <span className="arena-upcoming__logo">
+            {logo
+              ? <img src={logo} alt="" />
+              : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
+          </span>
+        </>
+      ) : (
+        <>
+          <span className="arena-upcoming__logo">
+            {logo
+              ? <img src={logo} alt="" />
+              : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
+          </span>
+          <span className="arena-upcoming__name">{name}</span>
+        </>
+      )}
     </div>
   );
 

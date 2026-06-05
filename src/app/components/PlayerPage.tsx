@@ -211,10 +211,9 @@ export function PlayerPage() {
     for (const t of tournaments) {
       for (const tm of t.teams) {
         if (norm(tm.name) !== norm(resolved.team.name)) continue;
-        const rosterPlayer = tm.players.find(p => statMatchesPlayer(
-          { playerId: resolved.player.id, playerName: resolved.player.name, teamId: tm.id, kills: 0, deaths: 0, assists: 0, kd: 0, acs: 0, hsPercent: 0 },
-          resolved.player,
-        ) || p.id === resolved.player.id || norm(p.name) === norm(resolved.player.name));
+        const rosterPlayer = tm.players.find(p =>
+          p.id === resolved.player.id || norm(p.name) === norm(resolved.player.name)
+        );
         if (!rosterPlayer) continue;
         for (const row of collectPlayerMapStats(t, rosterPlayer, tm.id)) {
           const key = `${row.matchId}|${row.mapName}`;

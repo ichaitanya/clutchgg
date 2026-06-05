@@ -23,10 +23,11 @@ const ORGANIZER_EMAILJS_SERVICE_ID = 'service_7kaukdv';
 const ORGANIZER_EMAILJS_TEMPLATE_ID = 'template_a6piesm';
 const ORGANIZER_EMAILJS_PUBLIC_KEY = 'p_AaPkV8j41bh5dtO';
 
-function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
+function AdminLogin({ onSuccess }: { onSuccess: (rememberMe: boolean) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -36,8 +37,8 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true);
     setError('');
     try {
-      await signIn(email, password);
-      onSuccess();
+      await signIn(email, password, rememberMe);
+      onSuccess(rememberMe);
     } catch (e: any) {
       // Distinguish a genuine credential rejection (Supabase AuthApiError,
       // HTTP 400) from a network/timeout/cold-start failure. Reporting a
@@ -139,6 +140,16 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
                   <span className="text-[#ff4655] text-xs font-medium">{error}</span>
                 </div>
               )}
+
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={e => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border border-[#2a2d3a] bg-[#0d0f16] accent-[#ff4655] cursor-pointer"
+                />
+                <span className="text-xs text-gray-400">Remember me on this device</span>
+              </label>
 
               <button
                 onClick={attempt}
@@ -1362,21 +1373,37 @@ export function AdminPanel({ onClose, onDataChange }: {
   const navigate = useNavigate();
   const [authed, setAuthed] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [needsPasswordChange, setNeedsPasswordChange] = useState(false);
+  // True when the user arrived via a Supabase invite or password-recovery link.
+  const [mustSetPassword, setMustSetPassword] = useState(false);
+  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const INACTIVITY_MS = 2 * 60 * 60 * 1000; // 2 hours
 
   // Load the signed-in user's profile (role + tournament scope). Re-runs on auth change.
   const refreshProfile = async (hasSession: boolean) => {
     if (!hasSession) { setProfile(null); setNeedsPasswordChange(false); return; }
+    setProfileLoading(true);
     const p = await getCurrentProfile();
     setProfile(p);
     setNeedsPasswordChange(!!p?.must_change_password);
+    setProfileLoading(false);
   };
 
-  // True when the user arrived via a Supabase invite or password-recovery link.
-  // In that flow they have a valid session but have NOT set a password yet, so
-  // we must force the set-password screen instead of dropping them into the panel.
-  const [mustSetPassword, setMustSetPassword] = useState(false);
+  const doInactivityLogout = async () => {
+    await signOut();
+    setProfile(null); setNeedsPasswordChange(false); setMustSetPassword(false); setAuthed(false);
+  };
+
+  const startInactivityTimer = () => {
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(doInactivityLogout, INACTIVITY_MS);
+  };
+
+  const resetInactivityTimer = () => {
+    if (inactivityTimer.current) startInactivityTimer();
+  };
 
   useEffect(() => {
     // The invite/recovery link lands here with a token in the URL hash, e.g.
@@ -1409,10 +1436,17 @@ export function AdminPanel({ onClose, onDataChange }: {
       setAuthed(!!session);
       await refreshProfile(!!session);
     });
-    return () => subscription.unsubscribe();
+    const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const;
+    activityEvents.forEach(ev => window.addEventListener(ev, resetInactivityTimer, { passive: true }));
+
+    return () => {
+      subscription.unsubscribe();
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      activityEvents.forEach(ev => window.removeEventListener(ev, resetInactivityTimer));
+    };
   }, []);
 
-  if (checking) {
+  if (checking || (authed && profileLoading)) {
     return (
       <div className="fixed inset-0 z-50 bg-[#0d0f16] flex items-center justify-center">
         <div className="w-6 h-6 border-2 border-[#ff4655] border-t-transparent rounded-full animate-spin" />
@@ -1421,7 +1455,7 @@ export function AdminPanel({ onClose, onDataChange }: {
   }
 
   if (!authed) {
-    return <AdminLogin onSuccess={async () => { setAuthed(true); await refreshProfile(true); }} />;
+    return <AdminLogin onSuccess={async (rememberMe) => { setAuthed(true); await refreshProfile(true); if (!rememberMe) startInactivityTimer(); }} />;
   }
 
   if (needsPasswordChange || mustSetPassword) {

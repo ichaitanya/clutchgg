@@ -52,9 +52,21 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
-export async function signIn(email: string, password: string) {
+export async function signIn(email: string, password: string, rememberMe = true) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  // When "remember me" is off, clear the persisted token immediately after
+  // sign-in so the session only lives in memory and is gone on tab/browser close.
+  if (!rememberMe) {
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key !== 'sb-clutchgg-anon' && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch { /* private mode */ }
+  }
   return data;
 }
 
