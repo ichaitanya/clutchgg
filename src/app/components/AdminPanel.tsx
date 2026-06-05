@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
-import { supabase, signIn, signOut, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
+import { supabase, signIn, signOut, getSession, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
 import {
   loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
@@ -1415,23 +1415,40 @@ export function AdminPanel({ onClose, onDataChange }: {
     const isInviteFlow = hash.includes('type=invite') || hash.includes('type=recovery');
     if (isInviteFlow) setMustSetPassword(true);
 
-    let settled = false;
+    let cancelled = false;
 
-    // SINGLE source of truth for auth state: onAuthStateChange. It fires
-    // INITIAL_SESSION synchronously on mount with the session read from storage
-    // (no blocking network refresh), then SIGNED_IN / SIGNED_OUT / TOKEN_REFRESHED
-    // as they occur. Driving the UI from BOTH a one-shot getSession() AND this
-    // listener (as before) raced them: on a cold connection getSession() would
-    // resolve null first → flash the login box → then this listener fired with
-    // the real session → log back in, a ~12s limbo with a login flash. Using only
-    // this listener removes the race and the blocking 8s getSession() entirely.
+    // Establish the CURRENT auth state on mount with an explicit getSession().
+    // This is required because `supabase` is a module-level singleton: its
+    // onAuthStateChange INITIAL_SESSION event fires only ONCE, when the GoTrue
+    // client first initializes (the first /admin visit of the page's lifetime).
+    // On a SECOND mount (navigate to / and back to /admin without a reload) the
+    // client is already initialized, so NO event fires → relying on the listener
+    // alone left the spinner spinning forever until a hard refresh. So we read
+    // the session directly here, and use the listener only for later CHANGES.
+    const bootstrap = async () => {
+      const session = await getSession(); // timeout-wrapped; enforces expiry → null
+      if (cancelled) return;
+      setAuthed(!!session);
+      await refreshProfile(session?.user.id);
+      if (cancelled) return;
+      if (session) startInactivityTimer();
+      setChecking(false);
+    };
+    bootstrap();
+
+    // React ONLY to subsequent changes (sign-in, sign-out, recovery). The
+    // initial state is owned by bootstrap() above, so we don't touch `checking`
+    // here — preventing the old race where a slow init flashed the login box.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Enforce our app-level expiry policy: if the stored session is past its
-      // "keep me signed in" window, sign out cleanly instead of trusting it.
+      if (cancelled) return;
+      // Ignore the one-shot initial/refresh events — bootstrap() already has the
+      // current state, and a background token refresh keeps the same identity.
+      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return;
+
       if (session && isSessionExpired()) {
         await signOut();
-        settled = true;
-        setAuthed(false); setProfile(null); setChecking(false);
+        if (cancelled) return;
+        setAuthed(false); setProfile(null);
         return;
       }
 
@@ -1445,28 +1462,17 @@ export function AdminPanel({ onClose, onDataChange }: {
       }
 
       setAuthed(!!session);
-      // TOKEN_REFRESHED fires ~hourly in the background with the SAME user — no
-      // need to re-fetch the profile (it would needlessly flip the loading
-      // spinner mid-session). Only (re)load the profile when the identity
-      // actually changes: initial load, sign-in, sign-out, recovery.
-      if (event !== 'TOKEN_REFRESHED') {
-        await refreshProfile(session?.user.id);
-      }
+      await refreshProfile(session?.user.id);
+      if (cancelled) return;
       if (session) startInactivityTimer();
-      settled = true;
-      setChecking(false);
     });
-
-    // Fallback: if for any reason no auth event arrives (SDK init failure), don't
-    // leave the spinner up forever — clear `checking` after a short grace period.
-    const fallback = setTimeout(() => { if (!settled) setChecking(false); }, 5_000);
 
     const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const;
     activityEvents.forEach(ev => window.addEventListener(ev, resetInactivityTimer, { passive: true }));
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
-      clearTimeout(fallback);
       if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
       activityEvents.forEach(ev => window.removeEventListener(ev, resetInactivityTimer));
     };
