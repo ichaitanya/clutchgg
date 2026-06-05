@@ -52,48 +52,76 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
+// Local key recording WHEN the current login should stop being trusted, and
+// whether "remember me" was chosen. This is an app-level session policy that
+// sits ON TOP of Supabase's own token lifecycle — we never delete Supabase's
+// token out from under the live client (doing so makes the auto-refresh worker
+// emit a null session and log the user out within seconds). Instead we read
+// this on load / on a timer and call a clean signOut() when the policy says so.
+const SESSION_POLICY_KEY = 'clutchgg-session-policy';
+
+// "Remember me" off → expire when the browser session ends. We approximate a
+// browser-session lifetime with a generous absolute cap so a forgotten open tab
+// still eventually logs out, while a genuine "I'm working" session isn't cut
+// short. Remember-me on → a long absolute cap (refreshed on each login).
+const SESSION_MAX_AGE_MS = {
+  remember: 30 * 24 * 60 * 60 * 1000, // 30 days
+  session: 12 * 60 * 60 * 1000,       // 12 hours
+};
+
+interface SessionPolicy { rememberMe: boolean; expiresAt: number; }
+
+function writeSessionPolicy(rememberMe: boolean) {
+  try {
+    const ttl = rememberMe ? SESSION_MAX_AGE_MS.remember : SESSION_MAX_AGE_MS.session;
+    const policy: SessionPolicy = { rememberMe, expiresAt: Date.now() + ttl };
+    localStorage.setItem(SESSION_POLICY_KEY, JSON.stringify(policy));
+  } catch { /* private mode — fall back to Supabase's own lifecycle */ }
+}
+
+export function readSessionPolicy(): SessionPolicy | null {
+  try {
+    const raw = localStorage.getItem(SESSION_POLICY_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as SessionPolicy;
+    if (typeof p.expiresAt !== 'number') return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+function clearSessionPolicy() {
+  try { localStorage.removeItem(SESSION_POLICY_KEY); } catch { /* ignore */ }
+}
+
+// True when an app-level session policy exists AND has passed its expiry. A
+// missing policy is NOT treated as expired — it means a pre-policy login or
+// private mode; those fall back to Supabase's own token lifecycle.
+export function isSessionExpired(): boolean {
+  const p = readSessionPolicy();
+  return !!p && Date.now() >= p.expiresAt;
+}
+
 export async function signIn(email: string, password: string, rememberMe = true) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
-  // When "remember me" is off, clear the persisted token immediately after
-  // sign-in so the session only lives in memory and is gone on tab/browser close.
-  if (!rememberMe) {
-    try {
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && key !== 'sb-clutchgg-anon' && (key.startsWith('sb-') || key.includes('supabase.auth'))) {
-          localStorage.removeItem(key);
-        }
-      }
-    } catch { /* private mode */ }
-  }
+  writeSessionPolicy(rememberMe);
   return data;
 }
 
 export async function signOut() {
-  // The ONLY thing that reliably logs the user out is clearing the locally
-  // stored session token — `scope: 'local'` does exactly that and makes NO
-  // network call, so it can never hang and always removes the token from
-  // storage synchronously. Do this FIRST and unconditionally; if it's skipped
-  // (e.g. because a global revoke stalled), the next getSession() rehydrates
-  // the old user and "sign out" appears to do nothing.
-  try {
-    await supabase.auth.signOut({ scope: 'local' });
-  } catch {
-    // ignore — we still hard-purge storage below
-  }
+  // Clear our app-level session policy first so a re-mount can never re-trust
+  // an expired session.
+  clearSessionPolicy();
 
-  // Best-effort server-side revocation of other sessions. Fire-and-forget with
-  // a short timeout so a stalled network call never blocks the UI; the local
-  // token is already gone, so the user is logged out regardless of this result.
-  Promise.race([
-    supabase.auth.signOut({ scope: 'global' }),
-    new Promise(resolve => setTimeout(resolve, 3_000)),
-  ]).catch(() => {});
-
-  // Belt-and-suspenders: explicitly purge any Supabase auth keys left in
-  // localStorage. Some supabase-js versions leave a stale key behind on a
-  // partial signout, which would silently restore the session on next load.
+  // Synchronously purge the persisted auth token from localStorage. This is
+  // what actually logs the user out for the NEXT load, makes no network call,
+  // and cannot hang — so the caller can update the UI immediately after this
+  // returns without waiting on any GoTrue lock or network round-trip. (The old
+  // code awaited supabase.auth.signOut({ scope: 'local' }), which serializes
+  // behind the GoTrue auth lock and could take long enough that the first
+  // "Sign out" click appeared to do nothing and a second was needed.)
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
@@ -105,9 +133,30 @@ export async function signOut() {
   } catch {
     // localStorage unavailable (private mode / SSR) — nothing more to do.
   }
+
+  // Tell the live client to drop its in-memory session too, and best-effort
+  // revoke server-side sessions. Both are fire-and-forget with a short timeout:
+  // the token is already gone from storage, so the user is logged out for the
+  // next load regardless of whether these resolve. NOT awaited → no UI stall.
+  Promise.race([
+    supabase.auth.signOut({ scope: 'local' }),
+    new Promise(resolve => setTimeout(resolve, 3_000)),
+  ]).catch(() => {});
+  Promise.race([
+    supabase.auth.signOut({ scope: 'global' }),
+    new Promise(resolve => setTimeout(resolve, 3_000)),
+  ]).catch(() => {});
 }
 
 export async function getSession() {
+  // Enforce our app-level session policy BEFORE trusting Supabase's token. If
+  // the policy has expired (remember-me window elapsed), sign out cleanly and
+  // report no session — the user must log in again.
+  if (isSessionExpired()) {
+    await signOut();
+    return null;
+  }
+
   // getSession can hang indefinitely when the stored token is expired and the
   // auto-refresh stalls (cold start / flaky connection). Race against a hard
   // timeout so callers never block forever — a null session is safe: it just

@@ -1419,6 +1419,7 @@ export function AdminPanel({ onClose, onDataChange }: {
     getSession().then(async (session) => {
       setAuthed(!!session);
       await refreshProfile(!!session);
+      if (session) startInactivityTimer();
       setChecking(false);
     }).catch(() => {
       // Defensive: even if the helper somehow rejects, never get stuck checking.
@@ -1455,7 +1456,7 @@ export function AdminPanel({ onClose, onDataChange }: {
   }
 
   if (!authed) {
-    return <AdminLogin onSuccess={async (rememberMe) => { setAuthed(true); await refreshProfile(true); if (!rememberMe) startInactivityTimer(); }} />;
+    return <AdminLogin onSuccess={async () => { setAuthed(true); await refreshProfile(true); startInactivityTimer(); }} />;
   }
 
   if (needsPasswordChange || mustSetPassword) {
