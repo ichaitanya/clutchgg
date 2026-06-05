@@ -194,7 +194,7 @@ export function HeroSection({ heroLink, heroVideo, standingsTournamentId, spotli
               Watch Broadcast
             </button>
             <button
-              onClick={() => navigate(standingsTournamentId ? `/tournament/${standingsTournamentId}` : '/matches')}
+              onClick={() => navigate(standingsTournamentId ? `/tournament/${standingsTournamentId}#bracket` : '/matches')}
               className="arena-btn arena-btn--outline"
               style={{ minWidth: '160px' }}
             >

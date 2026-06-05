@@ -9,8 +9,19 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
-import { supabase, signIn, signOut } from '../services/supabase';
-import { loadAdminData, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings, setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache } from '../services/db';
+import { supabase, signIn, signOut, getSession, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
+import {
+  loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
+  setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
+  getTournamentRequests, approveTournamentRequest, denyTournamentRequest, resendInvite, type TournamentRequest,
+} from '../services/db';
+
+// EmailJS config for the "your tournament is ready" email sent to organizers on
+// approval. Fill these when the EmailJS account is set up (same account as the
+// contact form). Until then, approval still works — the email send is skipped.
+const ORGANIZER_EMAILJS_SERVICE_ID = 'service_7kaukdv';
+const ORGANIZER_EMAILJS_TEMPLATE_ID = 'template_a6piesm';
+const ORGANIZER_EMAILJS_PUBLIC_KEY = 'p_AaPkV8j41bh5dtO';
 
 function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('');
@@ -27,8 +38,16 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     try {
       await signIn(email, password);
       onSuccess();
-    } catch {
-      setError('Invalid email or password');
+    } catch (e: any) {
+      // Distinguish a genuine credential rejection (Supabase AuthApiError,
+      // HTTP 400) from a network/timeout/cold-start failure. Reporting a
+      // stalled connection as "wrong password" sends the user down the wrong
+      // path (resetting a password that was actually correct).
+      const status = e?.status ?? e?.statusCode;
+      const isCredentialError = status === 400 || /invalid login|invalid credentials/i.test(e?.message ?? '');
+      setError(isCredentialError
+        ? 'Invalid email or password'
+        : 'Connection problem — please check your network and try again.');
       setShake(true);
       setTimeout(() => setShake(false), 500);
       setPassword('');
@@ -755,7 +774,7 @@ function ArticleBodyEditor({ blocks, onChange, mentionIndex }: { blocks: NewsBlo
   );
 }
 
-function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteArticle, savingId, tournaments }: {
+function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteArticle, savingId, tournaments, lockedTournamentId, defaultTournamentId }: {
   items: NewsItem[];
   onChange: (n: NewsItem[]) => void;
   onSaveArticle: (item: NewsItem) => void;
@@ -763,6 +782,12 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
   onDeleteArticle: (id: string) => void;
   savingId: string | null;
   tournaments: Tournament[];
+  // When set (single-tournament organizer), every new article is tagged to this
+  // tournament and the per-article tournament dropdown is locked to it.
+  lockedTournamentId?: string;
+  // When set (multi-tournament organizer), new articles default to this
+  // tournament but the dropdown stays editable so they can pick among theirs.
+  defaultTournamentId?: string;
 }) {
   const mentionIndex = useMemo(() => buildMentionIndex(tournaments), [tournaments]);
   // Which article is currently expanded for editing (only one at a time).
@@ -775,7 +800,7 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
   const toggleVisible = (item: NewsItem) => onToggleVisible({ ...item, visible: !item.visible });
   const addItem = () => {
     const id = uid();
-    onChange([...items, { id, title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true, author: '', body: [] }]);
+    onChange([...items, { id, title: '', category: 'NEWS', timeAgo: 'Just now', imageUrl: '', link: '', visible: true, author: '', body: [], tournamentId: lockedTournamentId ?? defaultTournamentId }]);
     setExpandedId(id); // open the new article for editing
   };
 
@@ -887,17 +912,23 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
 
           {/* Tournament link */}
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5 font-medium">Tournament <span className="text-gray-600">(optional)</span></label>
+            <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+              Tournament {lockedTournamentId ? '' : <span className="text-gray-600">(optional)</span>}
+            </label>
             <select
-              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none"
-              value={item.tournamentId ?? ''}
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2 text-white text-sm focus:border-[#ff4655] focus:outline-none disabled:opacity-70 disabled:cursor-not-allowed"
+              value={lockedTournamentId ?? item.tournamentId ?? ''}
+              disabled={!!lockedTournamentId}
               onChange={e => update(item.id, { tournamentId: e.target.value || undefined })}
             >
-              <option value="">No tournament</option>
+              {!lockedTournamentId && <option value="">No tournament</option>}
               {tournaments.map(t => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
+            {lockedTournamentId && (
+              <p className="text-xs text-gray-600 mt-1">Articles are automatically linked to your tournament.</p>
+            )}
           </div>
 
           {/* Cover image */}
@@ -961,6 +992,342 @@ function NewsEditor({ items, onChange, onSaveArticle, onToggleVisible, onDeleteA
 
 // ─── Sidebar Tab ──────────────────────────────────────────────────────────────
 
+// ─── Tournament Requests (superadmin) ──────────────────────────────────────────
+// Lists organizer registration requests from the public contact form and lets a
+// superadmin approve (creates account + tournament via Edge Function, then emails
+// the organizer) or deny them.
+
+function RequestsPanel({ onApproved, showToast }: {
+  onApproved: () => void;
+  showToast: (msg: string, type: 'success' | 'error') => void;
+}) {
+  const [requests, setRequests] = useState<TournamentRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<{ email: string; mode: string; link: string } | null>(null);
+
+  // Keep a ref to the current mounted state so async callbacks from a
+  // previous mount don't update state after unmount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 10000)
+        );
+        const data = await Promise.race([getTournamentRequests(), timeout]);
+        if (mountedRef.current) { setRequests(data); setLoading(false); }
+        return;
+      } catch {
+        attempts++;
+        if (attempts < 3) await new Promise(r => setTimeout(r, 1500 * attempts));
+      }
+    }
+    // All attempts failed — keep existing data, just show toast
+    if (mountedRef.current) {
+      setLoading(false);
+      showToast('Connection issue — showing last known data', 'error');
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const sendApprovalEmail = async (to: { email: string; organizerName: string; tournamentName: string }) => {
+    if (ORGANIZER_EMAILJS_SERVICE_ID === 'YOUR_SERVICE_ID') return; // not configured yet
+    try {
+      const emailjs = await import('@emailjs/browser');
+      await emailjs.send(
+        ORGANIZER_EMAILJS_SERVICE_ID,
+        ORGANIZER_EMAILJS_TEMPLATE_ID,
+        {
+          to_email: to.email,
+          organizer_name: to.organizerName,
+          tournament_name: to.tournamentName,
+          admin_email: to.email,
+          admin_panel_link: 'https://clutchgg-five.vercel.app/admin',
+        },
+        ORGANIZER_EMAILJS_PUBLIC_KEY,
+      );
+    } catch (e) {
+      console.warn('[Requests] approval email failed:', e);
+      showToast('Approved, but the email failed to send', 'error');
+    }
+  };
+
+  const approve = async (req: TournamentRequest) => {
+    setBusyId(req.id);
+    try {
+      const result = await approveTournamentRequest(req.id);
+      // Fire email in background — don't block the UI on it
+      sendApprovalEmail({
+        email: result.email,
+        organizerName: result.organizerName,
+        tournamentName: result.tournamentName,
+      });
+      if (!mountedRef.current) return;
+      showToast(`Approved — "${result.tournamentName}" created`, 'success');
+      onApproved();
+      await load(true); // silent=true: don't flash the spinner on a post-approve reload
+    } catch (e) {
+      if (!mountedRef.current) return;
+      showToast(e instanceof Error ? e.message : 'Approval failed', 'error');
+    } finally {
+      if (mountedRef.current) setBusyId(null);
+    }
+  };
+
+  const deny = async (req: TournamentRequest) => {
+    setBusyId(req.id);
+    try {
+      await denyTournamentRequest(req.id);
+      if (!mountedRef.current) return;
+      showToast('Request denied', 'success');
+      await load(true);
+    } catch {
+      if (mountedRef.current) showToast('Failed to deny request', 'error');
+    } finally {
+      if (mountedRef.current) setBusyId(null);
+    }
+  };
+
+  const resend = async (req: TournamentRequest) => {
+    setBusyId(req.id);
+    try {
+      const { mode, link } = await resendInvite(req.email);
+      if (!mountedRef.current) return;
+      setInviteLink({ email: req.email, mode, link });
+    } catch (e) {
+      if (mountedRef.current) showToast(e instanceof Error ? e.message : 'Failed to generate link', 'error');
+    } finally {
+      if (mountedRef.current) setBusyId(null);
+    }
+  };
+
+  const pending = requests.filter(r => r.status === 'pending');
+  const handled = requests.filter(r => r.status !== 'pending');
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-white font-bold text-lg">Tournament Requests</h2>
+          <p className="text-gray-500 text-sm">Approve to create the organizer's account and tournament, or deny.</p>
+        </div>
+        <button onClick={load} className="text-xs text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] px-3 py-1.5 rounded-lg transition-all">
+          Refresh
+        </button>
+      </div>
+
+      {inviteLink && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setInviteLink(null)}>
+          <div className="bg-[#151821] border border-[#2a2d3a] rounded-2xl p-6 max-w-lg w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-white font-bold text-base mb-1">
+              {inviteLink.mode === 'recovery' ? 'Password Reset Link' : 'Invite Link'}
+            </h3>
+            <p className="text-gray-400 text-sm mb-4">
+              Copy this link and send it to <span className="text-white">{inviteLink.email}</span>.
+              It expires in 24 hours. No email was sent — paste it directly into a message.
+            </p>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={inviteLink.link}
+                className="flex-1 bg-[#0e0e0e] border border-[#2a2d3a] rounded-lg px-3 py-2 text-xs text-gray-300 font-mono truncate"
+              />
+              <button
+                onClick={() => { navigator.clipboard.writeText(inviteLink.link); showToast('Link copied!', 'success'); }}
+                className="bg-[#ff4655] hover:bg-[#ff3344] text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all flex-shrink-0"
+              >
+                Copy
+              </button>
+            </div>
+            <button onClick={() => setInviteLink(null)} className="mt-4 text-xs text-gray-600 hover:text-gray-400 w-full text-center">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader className="w-4 h-4 animate-spin" /> Loading…</div>
+      ) : requests.length === 0 ? (
+        <div className="text-center py-12 text-gray-600 text-sm bg-[#151821] border border-[#2a2d3a] rounded-xl">
+          No requests yet.
+        </div>
+      ) : (
+        <>
+          {pending.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-gray-600 text-xs font-semibold uppercase">Pending ({pending.length})</p>
+              {pending.map(req => (
+                <div key={req.id} className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <h3 className="text-white font-bold text-base">{req.tournamentName}</h3>
+                      <p className="text-gray-400 text-sm mt-0.5">
+                        {req.organizerName} · <a href={`mailto:${req.email}`} className="text-[#ff4655] hover:underline">{req.email}</a>
+                        {req.phone ? ` · ${req.phone}` : ''}
+                      </p>
+                      {req.tournamentDetails && (
+                        <p className="text-gray-500 text-sm mt-2 whitespace-pre-wrap">{req.tournamentDetails}</p>
+                      )}
+                      <p className="text-gray-600 text-xs mt-2">{new Date(req.createdAt).toLocaleString()}</p>
+                    </div>
+                    <div className="flex flex-col gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => approve(req)}
+                        disabled={busyId === req.id}
+                        className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all"
+                      >
+                        {busyId === req.id ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => deny(req)}
+                        disabled={busyId === req.id}
+                        className="flex items-center gap-2 text-gray-400 hover:text-[#ff4655] disabled:opacity-50 bg-[#1e2130] border border-[#2a2d3a] text-sm font-medium px-4 py-2 rounded-lg transition-all"
+                      >
+                        <X className="w-4 h-4" /> Deny
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {handled.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-gray-600 text-xs font-semibold uppercase">History</p>
+              {handled.map(req => (
+                <div key={req.id} className="bg-[#101218] border border-[#1e2130] rounded-xl px-5 py-3 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-gray-300 text-sm font-medium truncate">{req.tournamentName}</p>
+                    <p className="text-gray-600 text-xs">{req.organizerName} · {req.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {req.status === 'approved' && (
+                      <button
+                        onClick={() => resend(req)}
+                        disabled={busyId === req.id}
+                        title="Resend the invite / password link to this organizer"
+                        className="flex items-center gap-1.5 text-gray-400 hover:text-[#ff4655] disabled:opacity-50 bg-[#1e2130] border border-[#2a2d3a] text-xs font-medium px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        {busyId === req.id ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                        Resend
+                      </button>
+                    )}
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                      req.status === 'approved' ? 'bg-[#0d1f16] text-[#4ade80] border border-[#1a4a2e]' : 'bg-[#1f0d0d] text-[#f87171] border border-[#4a1a1a]'
+                    }`}>
+                      {req.status.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Forced password change ─────────────────────────────────────────────────────
+// Shown after login when profile.must_change_password is set (default-password
+// path). Organizers must set a personal password before reaching the panel.
+
+function ChangePasswordScreen({ onDone, firstTime = false }: { onDone: () => void; firstTime?: boolean }) {
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    setError('');
+    if (pw.length < 8) { setError('Password must be at least 8 characters'); return; }
+    if (pw !== confirm) { setError('Passwords do not match'); return; }
+    setSaving(true);
+    try {
+      // supabase.auth.updateUser can hang indefinitely when the underlying
+      // fetch aborts (AbortError is swallowed inside supabase-js and the
+      // promise never settles). Race against a hard timeout so the spinner
+      // always clears and the user gets actionable feedback.
+      await Promise.race([
+        changePassword(pw),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timed out — please check your connection and try again')), 15_000)
+        ),
+      ]);
+      onDone();
+    } catch (e: any) {
+      // 422 = token already used or expired. The invite/recovery link is
+      // one-time-use; if they're seeing this, they need a fresh link.
+      const is422 = e?.status === 422 || /422|unprocessable|otp expired|token.*expired/i.test(e?.message ?? '');
+      setError(is422
+        ? 'This link has expired or already been used. Please ask your admin to resend the invite.'
+        : (e instanceof Error ? e.message : 'Failed to update password'));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#0d0f16] flex items-center justify-center px-4">
+      <div className="w-full max-w-sm bg-[#151821] border border-[#2a2d3a] rounded-2xl overflow-hidden shadow-2xl">
+        <div className="h-1 bg-gradient-to-r from-[#ff4655] via-[#ff6670] to-[#ff4655]" />
+        <div className="p-8">
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-14 h-14 bg-[#ff4655]/10 border border-[#ff4655]/20 rounded-2xl flex items-center justify-center mb-4">
+              <KeyRound className="w-7 h-7 text-[#ff4655]" />
+            </div>
+            <h1 className="text-white font-bold text-xl tracking-tight">
+              {firstTime ? 'Welcome — Set Your Password' : 'Set a New Password'}
+            </h1>
+            <p className="text-gray-500 text-sm mt-1 text-center">
+              {firstTime
+                ? 'Your tournament account is ready. Create a password to access your admin panel.'
+                : 'For your security, choose a personal password before continuing.'}
+            </p>
+          </div>
+          <div className="space-y-4">
+            <input
+              type="password" placeholder="New password" value={pw}
+              onChange={e => { setPw(e.target.value); setError(''); }}
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-xl px-4 py-3 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors placeholder:text-gray-600"
+            />
+            <input
+              type="password" placeholder="Confirm password" value={confirm}
+              onChange={e => { setConfirm(e.target.value); setError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-xl px-4 py-3 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors placeholder:text-gray-600"
+            />
+            {error && (
+              <div className="flex items-center gap-2 bg-[#ff4655]/10 border border-[#ff4655]/20 rounded-xl px-3 py-2.5">
+                <AlertCircle className="w-4 h-4 text-[#ff4655] flex-shrink-0" />
+                <span className="text-[#ff4655] text-xs font-medium">{error}</span>
+              </div>
+            )}
+            <button
+              onClick={submit} disabled={saving || !pw || !confirm}
+              className="w-full bg-[#ff4655] hover:bg-[#ff3344] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-all text-sm flex items-center justify-center gap-2"
+            >
+              {saving ? <Loader className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {saving ? 'Saving…' : 'Save & Continue'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SideTab({ icon: Icon, label, active, count, onClick }: {
   icon: any; label: string; active: boolean; count?: number; onClick: () => void
 }) {
@@ -986,7 +1353,7 @@ function SideTab({ icon: Icon, label, active, count, onClick }: {
 
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
-type Tab = 'news' | 'tournaments' | 'settings';
+type Tab = 'news' | 'tournaments' | 'settings' | 'requests';
 
 export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
@@ -995,14 +1362,52 @@ export function AdminPanel({ onClose, onDataChange }: {
   const navigate = useNavigate();
   const [authed, setAuthed] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [needsPasswordChange, setNeedsPasswordChange] = useState(false);
+
+  // Load the signed-in user's profile (role + tournament scope). Re-runs on auth change.
+  const refreshProfile = async (hasSession: boolean) => {
+    if (!hasSession) { setProfile(null); setNeedsPasswordChange(false); return; }
+    const p = await getCurrentProfile();
+    setProfile(p);
+    setNeedsPasswordChange(!!p?.must_change_password);
+  };
+
+  // True when the user arrived via a Supabase invite or password-recovery link.
+  // In that flow they have a valid session but have NOT set a password yet, so
+  // we must force the set-password screen instead of dropping them into the panel.
+  const [mustSetPassword, setMustSetPassword] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setAuthed(!!data.session);
+    // The invite/recovery link lands here with a token in the URL hash, e.g.
+    // #access_token=…&type=invite (or type=recovery). The Supabase client parses
+    // it and emits SIGNED_IN; we read the hash to know it's a first-time setup.
+    const hash = window.location.hash || '';
+    const isInviteFlow = hash.includes('type=invite') || hash.includes('type=recovery');
+    if (isInviteFlow) setMustSetPassword(true);
+
+    // Use the timeout-wrapped getSession (not supabase.auth.getSession directly)
+    // so a stalled token refresh can't leave `checking` true forever — the
+    // spinner would never clear and the login screen would never appear.
+    getSession().then(async (session) => {
+      setAuthed(!!session);
+      await refreshProfile(!!session);
+      setChecking(false);
+    }).catch(() => {
+      // Defensive: even if the helper somehow rejects, never get stuck checking.
       setChecking(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // PASSWORD_RECOVERY fires for recovery links — but only treat it as a
+      // "must set password" flow if this tab actually has the recovery hash in
+      // the URL. Without this guard, opening a recovery link in ANY tab causes
+      // the event to fire in all open admin tabs (via localStorage), which would
+      // hijack a logged-in superadmin's session and show them the password screen.
+      if (event === 'PASSWORD_RECOVERY' && window.location.hash.includes('type=recovery')) {
+        setMustSetPassword(true);
+      }
       setAuthed(!!session);
+      await refreshProfile(!!session);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -1016,22 +1421,92 @@ export function AdminPanel({ onClose, onDataChange }: {
   }
 
   if (!authed) {
-    return <AdminLogin onSuccess={() => setAuthed(true)} />;
+    return <AdminLogin onSuccess={async () => { setAuthed(true); await refreshProfile(true); }} />;
   }
 
-  return <AdminPanelInner onClose={onClose} onDataChange={onDataChange} onLogout={async () => {
+  if (needsPasswordChange || mustSetPassword) {
+    return (
+      <ChangePasswordScreen
+        firstTime={mustSetPassword}
+        onDone={() => {
+          setNeedsPasswordChange(false);
+          setMustSetPassword(false);
+          // Strip the invite token from the URL so a refresh doesn't re-trigger.
+          if (window.location.hash) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }}
+      />
+    );
+  }
+
+  const logout = async () => {
     await signOut();
+    // Reset ALL auth-derived state so the login screen shows immediately and
+    // no stale user/role lingers. Stay on /admin (don't navigate to / and back
+    // — that re-runs getSession(), which is where a not-fully-cleared token
+    // could rehydrate the old user).
+    setProfile(null);
+    setNeedsPasswordChange(false);
+    setMustSetPassword(false);
     setAuthed(false);
-    navigate('/');
-  }} />;
+  };
+
+  // Authenticated but no profile row → NO access. Never fall through to a
+  // default role: a missing profile must mean "no permissions", not admin.
+  // (A user can exist in auth.users without a profile if account setup half-
+  // completed; granting them admin would be a privilege-escalation hole.)
+  if (!profile) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#0d0f16] flex items-center justify-center px-4">
+        <div className="w-full max-w-sm bg-[#151821] border border-[#2a2d3a] rounded-2xl overflow-hidden shadow-2xl">
+          <div className="h-1 bg-gradient-to-r from-[#ff4655] via-[#ff6670] to-[#ff4655]" />
+          <div className="p-8 text-center">
+            <div className="w-14 h-14 bg-[#ff4655]/10 border border-[#ff4655]/20 rounded-2xl flex items-center justify-center mb-4 mx-auto">
+              <Lock className="w-7 h-7 text-[#ff4655]" />
+            </div>
+            <h1 className="text-white font-bold text-xl tracking-tight mb-2">No Access</h1>
+            <p className="text-gray-500 text-sm mb-6">
+              This account isn't set up with a role yet. Please contact a site administrator.
+            </p>
+            <button
+              onClick={logout}
+              className="w-full bg-[#1e2130] border border-[#2a2d3a] hover:border-gray-500 text-gray-300 hover:text-white font-medium py-3 rounded-xl transition-all text-sm flex items-center justify-center gap-2"
+            >
+              <LogOut className="w-4 h-4" /> Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <AdminPanelInner profile={profile} onClose={onClose} onDataChange={onDataChange} onLogout={logout} />;
 }
 
-function AdminPanelInner({ onClose, onDataChange, onLogout }: {
+function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
+  profile: Profile | null;
   onClose: () => void;
   onDataChange?: (data: AdminData) => void;
   onLogout: () => void;
 }) {
   const navigate = useNavigate();
+  // Default to the LEAST-privileged role if somehow absent (the parent already
+  // blocks a null profile, so this is pure defense-in-depth — never grant admin
+  // by default).
+  const role: UserRole = profile?.role ?? 'organizer';
+  const isOrganizer = role === 'organizer';
+  const isSuperadmin = role === 'superadmin';
+  // Organizers are scoped to a SET of tournaments (one organizer can be approved
+  // for several). Falls back to the legacy single tournament_id if the
+  // junction-backed list is absent.
+  const scopedTournamentIds = useMemo(() => {
+    if (!isOrganizer) return [] as string[];
+    const ids = new Set<string>(profile?.tournamentIds ?? []);
+    if (profile?.tournament_id) ids.add(profile.tournament_id);
+    return [...ids];
+  }, [isOrganizer, profile?.tournamentIds, profile?.tournament_id]);
+  const scopedIdSet = useMemo(() => new Set(scopedTournamentIds), [scopedTournamentIds]);
   const [tab, setTab] = useState<Tab>('tournaments');
   const [data, setData] = useState<AdminData>(defaultData);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
@@ -1047,7 +1522,7 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
   // edits the freshest data (not a copy cached during an earlier public-page visit).
   useEffect(() => {
     clearDbCache();
-    loadAdminData()
+    loadAdminDataAuthed()
       .then(d => {
         setData(d);
         persistedNewsIds.current = new Set(d.news.map(n => n.id));
@@ -1067,6 +1542,28 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
     showToast('Changes saved!', 'success');
   };
 
+  // Organizers only ever see/edit their assigned tournament(s). Staff see all.
+  const visibleTournaments = useMemo(
+    () => isOrganizer
+      ? data.tournaments.filter(t => scopedIdSet.has(t.id))
+      : data.tournaments,
+    [data.tournaments, isOrganizer, scopedIdSet],
+  );
+
+  // Organizers only see/manage news scoped to their tournament(s).
+  const visibleNews = useMemo(
+    () => isOrganizer
+      ? data.news.filter(n => !!n.tournamentId && scopedIdSet.has(n.tournamentId))
+      : data.news,
+    [data.news, isOrganizer, scopedIdSet],
+  );
+
+  // Keep organizers off tabs they can't access (e.g. if default 'tournaments'
+  // ever changes, or a stale 'settings'/'requests' selection lingers).
+  useEffect(() => {
+    if (isOrganizer && (tab === 'settings' || tab === 'requests')) setTab('tournaments');
+    if (!isSuperadmin && tab === 'requests') setTab('tournaments');
+  }, [isOrganizer, isSuperadmin, tab]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0d0f16] flex flex-col">
@@ -1084,7 +1581,9 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-[#1e2130] border border-[#2a2d3a] rounded-lg px-3 py-1.5">
             <User className="w-3.5 h-3.5 text-gray-500" />
-            <span className="text-xs text-gray-400 font-medium">admin</span>
+            <span className="text-xs text-gray-400 font-medium">
+              {profile?.display_name ? `${profile.display_name} · ` : ''}{role}
+            </span>
           </div>
           <div className="flex items-center gap-2 bg-[#1e2130] border border-[#2a2d3a] rounded-lg px-3 py-1.5">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
@@ -1110,13 +1609,26 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
         {/* Sidebar */}
         <aside className="w-56 bg-[#0d0f16] border-r border-[#1e2130] flex flex-col p-4 gap-1 flex-shrink-0">
           <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Content</p>
-          <SideTab icon={Trophy} label="Tournaments" active={tab === 'tournaments'} count={data.tournaments.length} onClick={() => setTab('tournaments')} />
-          <SideTab icon={Trophy} label="News" active={tab === 'news'} count={data.news.length} onClick={() => setTab('news')} />
+          <SideTab icon={Trophy} label={isOrganizer ? (visibleTournaments.length === 1 ? 'My Tournament' : 'My Tournaments') : 'Tournaments'} active={tab === 'tournaments'} count={visibleTournaments.length} onClick={() => setTab('tournaments')} />
+          <SideTab icon={Trophy} label="News" active={tab === 'news'} count={visibleNews.length} onClick={() => setTab('news')} />
 
-          <div className="my-3 border-t border-[#1e2130]" />
-          <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Site Settings</p>
-          <SideTab icon={Settings} label="Hero Section" active={tab === 'settings'} onClick={() => setTab('settings')} />
+          {/* Superadmin-only: review tournament registration requests */}
+          {isSuperadmin && (
+            <>
+              <div className="my-3 border-t border-[#1e2130]" />
+              <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Administration</p>
+              <SideTab icon={Users} label="Requests" active={tab === 'requests'} onClick={() => setTab('requests')} />
+            </>
+          )}
 
+          {/* Site-wide settings are staff-only; organizers never see this. */}
+          {!isOrganizer && (
+            <>
+              <div className="my-3 border-t border-[#1e2130]" />
+              <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Site Settings</p>
+              <SideTab icon={Settings} label="Hero Section" active={tab === 'settings'} onClick={() => setTab('settings')} />
+            </>
+          )}
         </aside>
 
         {/* Main content */}
@@ -1126,21 +1638,46 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
           {tab === 'tournaments' && (
             <div className="max-w-6xl">
               <TournamentManager
-                tournaments={data.tournaments}
+                tournaments={visibleTournaments}
+                organizerMode={isOrganizer}
                 onTournamentsChange={async (tournaments) => {
-                  // Upsert new/changed tournaments to Supabase
-                  const prev = new Set(data.tournaments.map(t => t.id));
-                  const curr = new Set(tournaments.map(t => t.id));
-                  // Deleted ones
-                  const deleted = data.tournaments.filter(t => !curr.has(t.id));
-                  const upserted = tournaments; // upsert all current (new + updated)
+                  // For organizers, `tournaments` only contains their scoped tournament(s).
+                  // Merge back into the full list so we never drop other tournaments.
+                  const merged = isOrganizer
+                    ? data.tournaments.map(t => tournaments.find(x => x.id === t.id) ?? t)
+                    : tournaments;
+
+                  // Upsert new/changed tournaments to Supabase. Organizers cannot
+                  // create or delete tournaments — only edit their assigned ones.
+                  const curr = new Set(merged.map(t => t.id));
+                  const deleted = isOrganizer ? [] : data.tournaments.filter(t => !curr.has(t.id));
+                  const upserted = isOrganizer
+                    ? merged.filter(t => scopedIdSet.has(t.id))
+                    : merged;
                   try {
                     await Promise.all([
                       ...upserted.map(upsertTournament),
                       ...deleted.map(t => deleteTournament(t.id)),
                     ]);
                   } catch { showToast('DB sync failed, saved locally', 'error'); }
-                  save({ ...data, tournaments });
+                  save({ ...data, tournaments: merged });
+                }}
+              />
+            </div>
+          )}
+
+          {/* ── REQUESTS TAB (superadmin) ── */}
+          {/* Keep RequestsPanel mounted while the user is in the admin panel
+              so navigating to another tab and back doesn't unmount+remount it
+              (which would reset its state and re-fire the fetch). Hidden via
+              CSS when not on the requests tab. */}
+          {isSuperadmin && (
+            <div style={{ display: tab === 'requests' ? undefined : 'none' }}>
+              <RequestsPanel
+                showToast={showToast}
+                onApproved={() => {
+                  clearDbCache();
+                  loadAdminDataAuthed().then(d => setData(d)).catch(() => {});
                 }}
               />
             </div>
@@ -1151,12 +1688,33 @@ function AdminPanelInner({ onClose, onDataChange, onLogout }: {
             <div className="max-w-3xl space-y-5">
               <div>
                 <h2 className="text-white font-bold text-lg">Latest News</h2>
-                <p className="text-gray-500 text-sm">Manage news articles shown on the homepage. Each article saves on its own.</p>
+                <p className="text-gray-500 text-sm">
+                  {isOrganizer
+                    ? (scopedTournamentIds.length > 1
+                        ? 'Manage news articles for your tournaments. Pick which tournament each article belongs to.'
+                        : 'Manage news articles for your tournament. New articles are automatically tagged to your tournament.')
+                    : 'Manage news articles shown on the homepage. Each article saves on its own.'}
+                </p>
               </div>
               <NewsEditor
-                items={data.news}
-                tournaments={data.tournaments}
-                onChange={news => setData(d => ({ ...d, news }))}
+                items={visibleNews}
+                tournaments={visibleTournaments}
+                // Lock the dropdown only when an organizer has a single tournament.
+                // With multiple, leave it editable but default new articles to the first.
+                lockedTournamentId={isOrganizer && scopedTournamentIds.length === 1 ? scopedTournamentIds[0] : undefined}
+                defaultTournamentId={isOrganizer ? scopedTournamentIds[0] : undefined}
+                onChange={news => setData(d => {
+                  // For organizers, `news` is only their scoped subset — merge it
+                  // back into the full list so other tournaments' news is untouched.
+                  if (!isOrganizer) return { ...d, news };
+                  const editedIds = new Set(news.map(n => n.id));
+                  // Keep every article that is NOT in the organizer's scope and was
+                  // not part of this edited subset.
+                  const others = d.news.filter(n =>
+                    (!n.tournamentId || !scopedIdSet.has(n.tournamentId)) && !editedIds.has(n.id),
+                  );
+                  return { ...d, news: [...others, ...news] };
+                })}
                 savingId={savingNewsId}
                 onSaveArticle={async (item) => {
                   setSavingNewsId(item.id);

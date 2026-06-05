@@ -5,7 +5,7 @@ import { Header } from './Header';
 import { Footer } from './Footer';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { AdminData, NewsItem } from './AdminPanel';
-import { loadAdminData } from '../services/db';
+import { loadAdminData, loadWithRetry } from '../services/db';
 
 // First paragraph of an article body, cleaned of mention/markdown syntax.
 function excerptOf(n: NewsItem): string {
@@ -47,9 +47,7 @@ function ArticleCard({ item }: { item: NewsItem }) {
 export function NewsPage() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
-  useEffect(() => {
-    loadAdminData().then(setAdminData).catch(() => {});
-  }, []);
+  useEffect(() => loadWithRetry(loadAdminData, setAdminData), []);
 
   const articles = (adminData?.news ?? []).filter(n => n.visible);
 

@@ -12,7 +12,7 @@ import { computeRRStandings } from './components/BracketDisplay';
 import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
-import { loadAdminData } from './services/db';
+import { loadAdminData, loadWithRetryPolled } from './services/db';
 
 // Route pages are code-split so a first-time visitor only downloads the home
 // page's JS. The heavy admin editor (TournamentCreation, Excel/Challonge import,
@@ -29,6 +29,7 @@ const StatsPage = lazy(() => import('./components/StatsPage').then(m => ({ defau
 const PlayerPage = lazy(() => import('./components/PlayerPage').then(m => ({ default: m.PlayerPage })));
 const ArticlePage = lazy(() => import('./components/ArticlePage').then(m => ({ default: m.ArticlePage })));
 const TournamentPage = lazy(() => import('./components/TournamentPage').then(m => ({ default: m.TournamentPage })));
+const ContactPage = lazy(() => import('./components/ContactPage').then(m => ({ default: m.ContactPage })));
 
 
 // Helper function to determine match status
@@ -96,9 +97,9 @@ function isPlaceholderSlot(name: string): boolean {
 function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
-  useEffect(() => {
-    loadAdminData().then(setAdminData).catch(() => {});
-  }, []);
+  // Initial retrying load + background polling so the home spotlight/standings
+  // stay current on an open tab, and an immediate refresh on tab refocus.
+  useEffect(() => loadWithRetryPolled(loadAdminData, setAdminData), []);
 
   const handleDataChange = (data: AdminData) => setAdminData(data);
 
@@ -449,12 +450,13 @@ function Home() {
           <h2 className="arena-cta__title">
             ENTER THE <span className="accent">CLUTCH</span>
           </h2>
-              <a  href="mailto:clutch.gg@gmail.com"
+              <Link
+                to="/contact"
                 className="arena-btn arena-btn--primary"
                 style={{ letterSpacing: '0.1em', padding: '1.25rem 3.5rem' }}
               >
-                Contact us
-              </a>
+                Register Your Tournament
+              </Link>
           </div>
         </section>
 
@@ -489,6 +491,7 @@ export default function App() {
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/match/:matchId" element={<MatchScoreboard />} />
           <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />
+          <Route path="/contact" element={<ContactPage />} />
         </Routes>
       </Suspense>
     </Router>

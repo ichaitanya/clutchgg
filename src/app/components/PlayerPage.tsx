@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Trophy, Shield } from 'lucide-react';
+import { ChevronLeft, ChevronDown, Trophy, Shield } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import type {
@@ -8,9 +8,10 @@ import type {
   TeamInTournament,
   TournamentPlayer,
   MatchPlayerStat,
+  PlayerAlias,
 } from './TournamentCreation';
 import { getStageOptions, statMatchesPlayer } from './StatsPage';
-import { getTournaments } from '../services/db';
+import { getTournaments, loadWithRetry } from '../services/db';
 import { agentIconUrl } from '../utils/valorantAssets';
 
 // Render an agent name with its official icon (falls back to a 2-letter chip).
@@ -84,6 +85,9 @@ function collectPlayerMapStats(
   tournament.teams.forEach(t => { teamNameById[t.id] = t.name; });
 
   const out: PlayerMapStat[] = [];
+  // Deduplicate by matchId+mapName so the same map doesn't appear twice when
+  // the same match data is stored across multiple tournament copies.
+  const seen = new Set<string>();
   for (const stage of getStageOptions(tournament)) {
     for (const bracket of stage.brackets) {
       for (const match of bracket.rounds.flat()) {
@@ -94,6 +98,11 @@ function collectPlayerMapStats(
         for (const map of match.maps ?? []) {
           const s = (map.playerStats ?? []).find(ps => statMatchesPlayer(ps, player));
           if (!s) continue;
+          // Deduplicate by matchId + mapName: the same match stored across
+          // multiple tournament copies shares the same matchId so this collapses it.
+          const key = `${match.id}|${map.mapName}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
           out.push({
             ...s,
             matchId: match.id,
@@ -149,13 +158,9 @@ export function PlayerPage() {
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAliases, setShowAliases] = useState(false);
 
-  useEffect(() => {
-    getTournaments()
-      .then(setTournaments)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  useEffect(() => loadWithRetry(getTournaments, ts => { setTournaments(ts); setLoading(false); }), []);
 
   const tournament = useMemo(
     () => tournaments.find(t => t.id === tournamentId) || null,
@@ -197,8 +202,30 @@ export function PlayerPage() {
 
   const mapStats = useMemo(() => {
     if (!resolved) return [];
-    return collectPlayerMapStats(resolved.sourceTournament, resolved.player, resolved.team.id);
-  }, [resolved]);
+    const norm = (s: string) => s.trim().toLowerCase();
+    const allStats: PlayerMapStat[] = [];
+    const seen = new Set<string>();
+    // Collect from every tournament where a team with the same name contains
+    // this player — covers the case where the same squad appears across multiple
+    // tournament entries (e.g. vct + rrb + vvv all having Fire5 Esports).
+    for (const t of tournaments) {
+      for (const tm of t.teams) {
+        if (norm(tm.name) !== norm(resolved.team.name)) continue;
+        const rosterPlayer = tm.players.find(p => statMatchesPlayer(
+          { playerId: resolved.player.id, playerName: resolved.player.name, teamId: tm.id, kills: 0, deaths: 0, assists: 0, kd: 0, acs: 0, hsPercent: 0 },
+          resolved.player,
+        ) || p.id === resolved.player.id || norm(p.name) === norm(resolved.player.name));
+        if (!rosterPlayer) continue;
+        for (const row of collectPlayerMapStats(t, rosterPlayer, tm.id)) {
+          const key = `${row.matchId}|${row.mapName}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          allStats.push(row);
+        }
+      }
+    }
+    return allStats;
+  }, [resolved, tournaments]);
 
   const agg = useMemo(() => aggregate(mapStats), [mapStats]);
 
@@ -220,8 +247,8 @@ export function PlayerPage() {
         <Header />
         <div className="arena-md-state">
           <p className="arena-md-state__text">Player not found.</p>
-          <button onClick={() => navigate('/teams')} className="arena-md__back" style={{ margin: '0 auto' }}>
-            <ChevronLeft className="w-4 h-4" /> Back to Teams
+          <button onClick={() => navigate(-1)} className="arena-md__back" style={{ margin: '0 auto' }}>
+            <ChevronLeft className="w-4 h-4" /> Back
           </button>
         </div>
         <Footer />
@@ -246,9 +273,9 @@ export function PlayerPage() {
 
       <main className="arena-md">
         {/* Back */}
-        <button onClick={() => navigate('/teams')} className="arena-md__back">
+        <button onClick={() => navigate(`/teams/${team.id}`)} className="arena-md__back">
           <ChevronLeft className="w-4 h-4" />
-          Back to Teams
+          Back to Roster
         </button>
 
         {/* Player hero */}
@@ -261,7 +288,46 @@ export function PlayerPage() {
 
           <div className="arena-pp-hero__id">
             <p className="arena-md-section__eyebrow" style={{ margin: '0 0 0.4rem' }}>Player Profile</p>
-            <h1 className="arena-pp-hero__name">{player.name}</h1>
+
+            {/* Name + optional history indicator */}
+            <div className="arena-pp-name-row">
+              <h1 className="arena-pp-hero__name">{player.name}</h1>
+              {(player.nameHistory ?? []).length > 0 && (
+                <div className="arena-pp-alias">
+                  <button
+                    type="button"
+                    className="arena-pp-alias__trigger"
+                    onClick={() => setShowAliases(v => !v)}
+                    title="This player has changed their name"
+                  >
+                    <ChevronDown className={`arena-pp-alias__chevron${showAliases ? ' arena-pp-alias__chevron--open' : ''}`} />
+                  </button>
+                  {showAliases && (
+                    <>
+                      {/* Transparent backdrop — closes the dropdown on click-away. */}
+                      <div
+                        className="arena-pp-alias__backdrop"
+                        onClick={() => setShowAliases(false)}
+                      />
+                      <div className="arena-pp-alias__dropdown">
+                        <p className="arena-pp-alias__label">Previously played as:</p>
+                        <ul className="arena-pp-alias__list">
+                          {(player.nameHistory ?? []).map((alias: PlayerAlias, i: number) => (
+                            <li key={i} className="arena-pp-alias__item">
+                              <span className="arena-pp-alias__name">{alias.name}</span>
+                              {alias.riotId && (
+                                <span className="arena-pp-alias__riot">{alias.riotId}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             {player.riotId && <p className="arena-pp-hero__riot">{player.riotId}</p>}
 
             <div className="arena-pp-hero__chips">

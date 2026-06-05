@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map, Search, Copy, Check, Youtube, Image as ImageIcon } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map as MapIcon, Search, Copy, Check, Youtube, Image as ImageIcon, Lock } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
@@ -181,7 +181,54 @@ export interface Tournament {
   groupStage?: GroupStage;
   knockoutBracket?: BracketGenerated;
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
-  coverImage?: string; // base64 or URL for tournament cover image
+  coverImage?: string;
+}
+
+// True once any map of a match has had Valorant stats pulled (player stats or a
+// source match ID recorded). Editing such a match's structure would corrupt the
+// pulled data, so the per-match editor locks these.
+export function matchHasStats(match: BracketMatch): boolean {
+  if (Array.isArray(match.playerStats) && match.playerStats.length > 0) return true;
+  return (match.maps ?? []).some(
+    m => (Array.isArray(m.playerStats) && m.playerStats.length > 0) || !!m.matchId
+  );
+}
+
+// A tournament has "really begun" once either:
+//   (a) stats have been pulled for at least one match in any bracket, OR
+//   (b) the event's scheduled start date/time has passed.
+// Once begun, organizers can no longer change the *bracket type* (regenerate the
+// bracket). They keep editing teams/players and any match without pulled stats.
+export function tournamentHasBegun(tournament: Tournament): boolean {
+  const brackets = [
+    tournament.generatedBracket,
+    tournament.stage1Bracket,
+    tournament.stage2Bracket,
+    tournament.knockoutBracket,
+  ];
+  for (const b of brackets) {
+    if (!b) continue;
+    for (const m of b.rounds.flat()) {
+      if (matchHasStats(m)) return true;
+    }
+  }
+  // Scheduled-start check: any match whose scheduled date/time is in the past,
+  // or the event start date being today/past.
+  const now = Date.now();
+  for (const b of brackets) {
+    if (!b) continue;
+    for (const m of b.rounds.flat()) {
+      if (m.date) {
+        const t = new Date(`${m.date}T${m.time || '00:00'}`).getTime();
+        if (!Number.isNaN(t) && t <= now) return true;
+      }
+    }
+  }
+  if (tournament.event?.startDate) {
+    const t = new Date(`${tournament.event.startDate}T00:00`).getTime();
+    if (!Number.isNaN(t) && t <= now) return true;
+  }
+  return false;
 }
 
 // Replace a single match (by id) wherever it lives across the tournament's
@@ -245,7 +292,9 @@ function PlayerDetailsForm({
   isMandatory: boolean;
 }) {
   const [form, setForm] = useState<TournamentPlayer>(
-    player || { id: Math.random().toString(36).slice(2, 9), name: '', role: undefined }
+    player
+      ? { ...player, name: player.name ?? '' }
+      : { id: Math.random().toString(36).slice(2, 9), name: '', role: undefined }
   );
   const [photoPreview, setPhotoPreview] = useState(player?.photo || '');
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -264,8 +313,8 @@ function PlayerDetailsForm({
         const idx = new Map<string, string>();
         for (const t of ts) {
           for (const tm of t.teams) {
-            for (const p of tm.players) {
-              const k = p.name.trim().toLowerCase();
+            for (const p of (tm.players ?? [])) {
+              const k = (p.name ?? '').trim().toLowerCase();
               if (p.photo && k && !idx.has(k)) idx.set(k, p.photo);
             }
           }
@@ -279,7 +328,7 @@ function PlayerDetailsForm({
   // exists for the typed name. Only fills — never overrides an explicit photo.
   useEffect(() => {
     if (form.photo) return;
-    const hit = photoIndex.get(form.name.trim().toLowerCase());
+    const hit = photoIndex.get((form.name ?? '').trim().toLowerCase());
     if (hit) {
       setForm(f => ({ ...f, photo: hit }));
       setPhotoPreview(hit);
@@ -325,7 +374,7 @@ function PlayerDetailsForm({
     setPhotoPrefilled(false);
   };
 
-  const isValid = form.name.trim() !== '';
+  const isValid = (form.name ?? '').trim() !== '';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -494,7 +543,7 @@ function AddPlayersScreen({
   onSave: (team: TeamInTournament) => void;
   onBack: () => void;
 }) {
-  const [teamData, setTeamData] = useState(team);
+  const [teamData, setTeamData] = useState({ ...team, players: team.players ?? [] });
   const [editingPlayerIndex, setEditingPlayerIndex] = useState<number | null>(null);
   const [editingIsNew, setEditingIsNew] = useState(false);
 
@@ -529,7 +578,33 @@ function AddPlayersScreen({
 
   const handleSavePlayer = (player: TournamentPlayer) => {
     if (editingPlayerIndex !== null) {
+      const prev = teamData.players[editingPlayerIndex];
       const newPlayers = [...teamData.players];
+
+      // If the player's name or Riot ID changed, push the old values into
+      // nameHistory so historical stat rows still resolve to this player.
+      if (prev) {
+        const nameChanged   = prev.name   && prev.name.trim()   !== player.name.trim();
+        const riotIdChanged = prev.riotId && prev.riotId.trim() !== (player.riotId ?? '').trim();
+        let history = player.nameHistory ?? [];
+        if (nameChanged || riotIdChanged) {
+          const alreadyRecorded = history.some(
+            a => a.name.toLowerCase() === prev.name.toLowerCase() &&
+                 (a.riotId ?? '').toLowerCase() === (prev.riotId ?? '').toLowerCase()
+          );
+          if (!alreadyRecorded) {
+            history = [{ name: prev.name, riotId: prev.riotId }, ...history];
+          }
+        }
+        // Remove any alias whose name+riotId matches the final saved identity —
+        // e.g. if they renamed A→B then back to A, "A" should not appear in history.
+        history = history.filter(
+          a => !(a.name.toLowerCase() === player.name.trim().toLowerCase() &&
+                 (a.riotId ?? '').toLowerCase() === (player.riotId ?? '').trim().toLowerCase())
+        );
+        player = { ...player, nameHistory: history };
+      }
+
       newPlayers[editingPlayerIndex] = player;
       setTeamData(t => ({ ...t, players: newPlayers }));
       setEditingPlayerIndex(null);
@@ -2024,7 +2099,7 @@ function MatchEditModal({
               {/* Populate from Valorant match IDs (Segment 2) — one per map */}
               <div className="pt-4 border-t border-[#2a2d3a]">
                 <label className="block text-xs text-gray-400 mb-1.5 font-medium flex items-center gap-1.5">
-                  <Map className="w-3.5 h-3.5 text-[#ff4655]" /> Match IDs (manual)
+                  <MapIcon className="w-3.5 h-3.5 text-[#ff4655]" /> Match IDs (manual)
                 </label>
                 <p className="text-[11px] text-gray-500 mb-2">
                   Paste one Valorant match ID per map played for this {boFormat.toUpperCase()}.
@@ -2234,10 +2309,16 @@ function CreateTournamentScreen({
   onComplete,
   initialTournament,
   isEditing = false,
+  organizerMode = false,
+  bracketLocked = false,
 }: {
   onComplete: (tournament: Tournament) => void;
   initialTournament?: Tournament;
   isEditing?: boolean;
+  // Scoped organizer editing this tournament.
+  organizerMode?: boolean;
+  // True once the tournament has begun: bracket-type changes are forbidden.
+  bracketLocked?: boolean;
 }) {
   const [step, setStep] = useState<'tournament' | 'teamList' | 'teamForm' | 'players'>(
     'tournament'
@@ -2690,7 +2771,7 @@ function CreateTournamentScreen({
                       <div>
                         <p className="text-white text-sm font-semibold">{t.name}</p>
                         <p className="text-gray-500 text-xs">
-                          {t.players.length} players
+                          {(t.players ?? []).length} players
                         </p>
                       </div>
                     </div>
@@ -2782,12 +2863,18 @@ function CreateTournamentScreen({
                               </p>
                             )}
                           </div>
-                          <button
-                            onClick={() => setEditingMatch(match)}
-                            className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors"
-                          >
-                            Edit
-                          </button>
+                          {bracketLocked && matchHasStats(match) ? (
+                            <span className="ml-3 px-3 py-1 text-xs bg-[#0d0f16] border border-[#2a2d3a] text-gray-600 rounded flex items-center gap-1" title="Stats already pulled — locked">
+                              <Lock className="w-3 h-3" /> Locked
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setEditingMatch(match)}
+                              className="ml-3 px-3 py-1 text-xs bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] rounded transition-colors"
+                            >
+                              Edit
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2980,12 +3067,18 @@ function CreateTournamentScreen({
                               </p>
                             )}
                           </div>
-                          <button
-                            onClick={() => setEditingMatch(match)}
-                            className="ml-3 px-3 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded transition-colors flex-shrink-0"
-                          >
-                            Edit
-                          </button>
+                          {bracketLocked && matchHasStats(match) ? (
+                            <span className="ml-3 px-3 py-1 text-xs bg-[#0d0f16] border border-[#2a2d3a] text-gray-600 rounded flex items-center gap-1 flex-shrink-0" title="Stats already pulled — locked">
+                              <Lock className="w-3 h-3" /> Locked
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setEditingMatch(match)}
+                              className="ml-3 px-3 py-1 text-xs bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded transition-colors flex-shrink-0"
+                            >
+                              Edit
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>

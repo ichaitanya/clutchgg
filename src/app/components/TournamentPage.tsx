@@ -7,7 +7,7 @@ import { Header } from './Header';
 import { Footer } from './Footer';
 import type { Tournament, BracketGenerated, BracketMatch } from './TournamentCreation';
 import type { NewsItem } from './AdminPanel';
-import { getTournaments, getNews } from '../services/db';
+import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
 import { getStageOptions } from './StatsPage';
 import { BracketDisplay } from './BracketDisplay';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
@@ -80,20 +80,27 @@ function isTeamSlotName(name: string) {
     name === 'LB TBD' || name === 'WB Champion' || name === 'LB Champion';
 }
 
+
 export function TournamentPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<TabKey>('bracket');
+  // Initial tab can be deep-linked via the URL hash (e.g. /tournament/x#bracket).
+  // Falls back to Overview for any missing/unknown hash.
+  const [tab, setTab] = useState<TabKey>(() => {
+    const hash = window.location.hash.replace('#', '') as TabKey;
+    return (['overview', 'matches', 'bracket', 'teams', 'news'] as TabKey[]).includes(hash) ? hash : 'overview';
+  });
 
-  useEffect(() => {
-    Promise.all([getTournaments(), getNews()])
-      .then(([ts, ns]) => { setTournaments(ts); setNews(ns); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  // Initial retrying load + background polling so bracket/match updates appear
+  // on an open tournament page. setLoading(false) only on the first success;
+  // subsequent polls swap data in silently without flashing the loader.
+  useEffect(() => loadWithRetryPolled(
+    () => Promise.all([getTournaments(), getNews()]),
+    ([ts, ns]) => { setTournaments(ts); setNews(ns); setLoading(false); },
+  ), []);
 
   const tournament = useMemo(() => tournaments.find(t => t.id === id) || null, [tournaments, id]);
   const stages = useMemo(() => (tournament ? getStageOptions(tournament) : []), [tournament]);
@@ -135,8 +142,8 @@ export function TournamentPage() {
         <Header />
         <div className="arena-md-state">
           <p className="arena-md-state__text">Tournament not found.</p>
-          <button onClick={() => navigate('/matches')} className="arena-md__back" style={{ margin: '0 auto' }}>
-            <ChevronLeft className="w-4 h-4" /> Back to Matches
+          <button onClick={() => navigate('/tournaments')} className="arena-md__back" style={{ margin: '0 auto' }}>
+            <ChevronLeft className="w-4 h-4" /> Back to Tournaments
           </button>
         </div>
         <Footer />
@@ -165,9 +172,9 @@ export function TournamentPage() {
 
       <main className="arena-md">
         {/* Back */}
-        <button onClick={() => navigate('/matches')} className="arena-md__back">
+        <button onClick={() => navigate('/tournaments')} className="arena-md__back">
           <ChevronLeft className="w-4 h-4" />
-          Back to Matches
+          Back to Tournaments
         </button>
 
         {/* Event hero */}

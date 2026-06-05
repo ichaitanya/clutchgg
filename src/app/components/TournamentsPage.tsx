@@ -6,7 +6,7 @@ import { Footer } from './Footer';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { AdminData } from './AdminPanel';
 import type { Tournament } from './TournamentCreation';
-import { loadAdminData } from '../services/db';
+import { loadAdminData, loadWithRetry } from '../services/db';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
 // Total teams across a tournament (single-stage or grouped).
@@ -53,9 +53,7 @@ export function TournamentsPage() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming');
 
-  useEffect(() => {
-    loadAdminData().then(setAdminData).catch(() => {});
-  }, []);
+  useEffect(() => loadWithRetry(loadAdminData, setAdminData), []);
 
   // Override each tournament's stored status with the live, data-derived status.
   const all = (adminData?.tournaments ?? []).map(t => ({
