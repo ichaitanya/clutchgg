@@ -332,33 +332,38 @@ export function MatchesPage() {
   // even if their filters leave that tab empty (we show "No X matches" instead).
   const [userPickedTab, setUserPickedTab] = useState(false);
 
-  // Auto-pick a sensible default tab on first data load only (live → upcoming →
-  // completed). After the user touches the tabs, this stops interfering.
+  // Auto-pick a sensible default tab ONCE, on the first real data load (live →
+  // upcoming → completed). We key this off the UNFILTERED match set so it settles
+  // a default the moment data arrives and is permanently done — a later filter
+  // change must never re-trigger it and yank the user to another tab. After the
+  // user touches the tabs it also stops interfering.
   const didInitTab = useRef(false);
   useEffect(() => {
     if (userPickedTab || didInitTab.current) return;
-    if (matches.length === 0) return;
+    if (allMatches.length === 0) return;
     didInitTab.current = true;
-    const next = byStatus.live.length > 0 ? 'live'
-      : byStatus.upcoming.length > 0 ? 'upcoming'
-      : byStatus.completed.length > 0 ? 'completed'
-      : 'upcoming';
+    const live = allMatches.filter(m => m.status === 'live').length;
+    const upcoming = allMatches.filter(m => m.status === 'upcoming').length;
+    const next = live > 0 ? 'live' : upcoming > 0 ? 'upcoming' : 'completed';
     setActiveTab(next);
-  }, [matches, byStatus, userPickedTab]);
+  }, [allMatches, userPickedTab]);
 
   const pickTab = (tab: MatchStatus) => { setUserPickedTab(true); setActiveTab(tab); };
 
   useEffect(() => { setPage(1); }, [activeTab, filterType, filterTournament, selectedDate]);
 
-  // The `live` tab is only rendered while live matches exist. If the active tab
-  // is no longer in the visible tab list (e.g. the last live match just ended,
-  // or a filter removed every live match), fall back to a tab that actually
-  // exists so the user isn't stranded on a hidden tab showing an empty list.
+  // The `live` tab is the only one conditionally hidden (rendered only while
+  // live matches exist). If it disappears out from under the user — the last
+  // live match ended, or a filter removed every live match — they'd be stranded
+  // on a tab that's no longer in the list. Fall back to Upcoming (always
+  // present). This is the ONLY automatic tab switch after init: Upcoming and
+  // Completed are always in `tabs`, so a filter that merely empties one of them
+  // never moves the user — that tab just shows its own "No … matches" state.
   useEffect(() => {
-    if (!tabs.includes(activeTab)) {
-      setActiveTab(byStatus.upcoming.length > 0 ? 'upcoming' : 'completed');
+    if (activeTab === 'live' && !tabs.includes('live')) {
+      setActiveTab('upcoming');
     }
-  }, [tabs, activeTab, byStatus]);
+  }, [tabs, activeTab]);
 
   const activeList = byStatus[activeTab];
   const totalPages = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));
