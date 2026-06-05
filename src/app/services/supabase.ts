@@ -59,6 +59,78 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+// The localStorage key supabase-js uses for the session, in the DEFAULT format
+// `sb-<project-ref>-auth-token`. We don't override storageKey (that would log
+// out every existing session on deploy), we just need to know where to read.
+const AUTH_STORAGE_KEY = `sb-${SUPABASE_URL.split('//')[1].split('.')[0]}-auth-token`;
+
+// ─── Direct, lock-free session read ─────────────────────────────────────────
+// supabase.auth.getSession() acquires GoTrue's Web Locks lock
+// (`lock:sb-<ref>-auth-token`). If a background auto-refresh stalls (the classic
+// "works on hard refresh, hangs on client-side re-mount" signature — a fresh
+// page has no in-flight refresh holding the lock, an existing singleton does),
+// getSession() blocks until the lock frees. The session JSON is already sitting
+// in localStorage, so for the synchronous "are we logged in right now?" check
+// on mount we read it straight from storage and skip the lock entirely.
+interface StoredSession {
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number; // unix seconds — when the ACCESS token expires (~1h)
+  user: { id: string; email?: string };
+}
+
+// Read the persisted session from localStorage, no lock, no network. Returns
+// the session AND whether its (short-lived, ~1h) access token has expired.
+// Note: an expired access token does NOT mean logged out — the refresh token
+// (valid for weeks) can mint a new one. The caller decides what to do.
+export function getStoredSession(): (StoredSession & { accessTokenExpired: boolean }) | null {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    // supabase-js stores either the session object directly or wrapped in
+    // { currentSession } depending on version — handle both shapes.
+    const parsed = JSON.parse(raw);
+    const session: StoredSession | null =
+      parsed?.access_token ? parsed
+      : parsed?.currentSession?.access_token ? parsed.currentSession
+      : null;
+    if (!session?.access_token || !session?.user?.id || !session?.refresh_token) return null;
+    const accessTokenExpired = !!session.expires_at && Date.now() / 1000 > session.expires_at - 5;
+    return { ...session, accessTokenExpired };
+  } catch {
+    return null;
+  }
+}
+
+// Lock-free refresh: exchange the stored refresh token for a fresh access token
+// via a direct REST call (NOT supabase.auth.refreshSession(), which takes the
+// contended lock). Persists the new session back to the same storage key so the
+// live client and future reads pick it up. Returns the new access token, or
+// null on failure (→ the caller should treat the user as logged out).
+export async function refreshAccessTokenDirect(refreshToken: string): Promise<StoredSession | null> {
+  try {
+    const res = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.access_token || !data?.user?.id) return null;
+    const session: StoredSession = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expires_at: data.expires_at ?? Math.floor(Date.now() / 1000) + (data.expires_in ?? 3600),
+      user: data.user,
+    };
+    // Persist in the shape supabase-js reads back (it accepts the bare object).
+    try { localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session)); } catch { /* ignore */ }
+    return session;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
 // Local key recording WHEN the current login should stop being trusted, and
@@ -197,21 +269,32 @@ export interface Profile {
   must_change_password?: boolean;
 }
 
-// Load the signed-in user's profile. Pass `userId` when the caller already has
-// it (e.g. from an onAuthStateChange session) to skip a redundant getSession()
-// round-trip — that extra call was a meaningful chunk of the post-login delay.
-export async function getCurrentProfile(userId?: string): Promise<Profile | null> {
+// Load the signed-in user's profile.
+//
+// When `accessToken` is supplied (from getStoredSession on mount) we run the
+// queries through `dbClient` — the anonymous client that NEVER touches GoTrue's
+// auth lock — passing the JWT explicitly in the Authorization header. This
+// sidesteps the same lock contention that made getSession() hang: a PostgREST
+// query on the `supabase` client internally resolves the access token through
+// the lock, so if a stalled background refresh is holding it, even the profile
+// read would stall. With the token in hand we bypass all of that — RLS only
+// needs the JWT in the header. Without a token we fall back to resolving the
+// session via getSession() and querying through `supabase`.
+export async function getCurrentProfile(userId?: string, accessToken?: string): Promise<Profile | null> {
   let uid = userId;
+  let token = accessToken;
   if (!uid) {
     const session = await getSession();
     if (!session) return null;
     uid = session.user.id;
+    token = session.access_token;
   }
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', uid)
-    .single();
+
+  const client = token ? dbClient : supabase;
+  const auth = token ? `Bearer ${token}` : '';
+
+  const profileQ = client.from('profiles').select('*').eq('id', uid).single();
+  const { data, error } = token ? await profileQ.setHeader('Authorization', auth) : await profileQ;
   if (error) return null;
   const profile = data as Profile;
 
@@ -219,10 +302,8 @@ export async function getCurrentProfile(userId?: string): Promise<Profile | null
   // junction table (a single organizer may manage several). Union in the legacy
   // single column so a not-yet-migrated profile still works.
   if (profile.role === 'organizer') {
-    const { data: rows } = await supabase
-      .from('organizer_tournaments')
-      .select('tournament_id')
-      .eq('user_id', uid);
+    const scopeQ = client.from('organizer_tournaments').select('tournament_id').eq('user_id', uid);
+    const { data: rows } = token ? await scopeQ.setHeader('Authorization', auth) : await scopeQ;
     const ids = new Set<string>((rows ?? []).map((r: any) => r.tournament_id));
     if (profile.tournament_id) ids.add(profile.tournament_id);
     profile.tournamentIds = [...ids];

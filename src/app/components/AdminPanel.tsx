@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
-import { supabase, signIn, signOut, getSession, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
+import { supabase, signIn, signOut, getStoredSession, refreshAccessTokenDirect, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
 import {
   loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
@@ -1380,17 +1380,28 @@ export function AdminPanel({ onClose, onDataChange }: {
   const [mustSetPassword, setMustSetPassword] = useState(false);
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const INACTIVITY_MS = 2 * 60 * 60 * 1000; // 2 hours
+  // The user id whose profile is currently loaded. Lets us tell a genuine
+  // sign-in from a focus-triggered SIGNED_IN re-emit of the SAME user (GoTrue
+  // re-fires SIGNED_IN every time the tab becomes visible — see the listener).
+  const loadedUserId = useRef<string | null>(null);
 
   // Load the signed-in user's profile (role + tournament scope). Re-runs on auth
-  // change. `userId` (from the onAuthStateChange session) lets getCurrentProfile
-  // skip a redundant getSession() round-trip.
-  const refreshProfile = async (userId?: string) => {
-    if (!userId) { setProfile(null); setNeedsPasswordChange(false); return; }
-    setProfileLoading(true);
-    const p = await getCurrentProfile(userId);
+  // change. Passing `userId` + `accessToken` lets getCurrentProfile read via the
+  // lock-free dbClient and skip a getSession() round-trip (avoids the auth-lock
+  // stall that hung the panel on re-mount). `silent` loads WITHOUT flipping the
+  // full-screen spinner (used for background re-validation on tab focus).
+  const refreshProfile = async (userId?: string, accessToken?: string, silent = false) => {
+    if (!userId) {
+      loadedUserId.current = null;
+      setProfile(null); setNeedsPasswordChange(false);
+      return;
+    }
+    if (!silent) setProfileLoading(true);
+    const p = await getCurrentProfile(userId, accessToken);
+    loadedUserId.current = p ? userId : null;
     setProfile(p);
     setNeedsPasswordChange(!!p?.must_change_password);
-    setProfileLoading(false);
+    if (!silent) setProfileLoading(false);
   };
 
   const doInactivityLogout = async () => {
@@ -1417,22 +1428,67 @@ export function AdminPanel({ onClose, onDataChange }: {
 
     let cancelled = false;
 
-    // Establish the CURRENT auth state on mount with an explicit getSession().
-    // This is required because `supabase` is a module-level singleton: its
-    // onAuthStateChange INITIAL_SESSION event fires only ONCE, when the GoTrue
-    // client first initializes (the first /admin visit of the page's lifetime).
-    // On a SECOND mount (navigate to / and back to /admin without a reload) the
-    // client is already initialized, so NO event fires → relying on the listener
-    // alone left the spinner spinning forever until a hard refresh. So we read
-    // the session directly here, and use the listener only for later CHANGES.
+    // Establish the CURRENT auth state on mount by reading the session token
+    // DIRECTLY from localStorage (getStoredSession) — NOT supabase.auth's
+    // getSession(). Two singleton problems made the lock-guarded getSession()
+    // path fail on a re-mount (navigate to / via "Back to site", then back to
+    // /admin without a hard reload):
+    //   1. onAuthStateChange's INITIAL_SESSION fires only ONCE per client init,
+    //      so the listener can't re-announce existing state on a 2nd mount.
+    //   2. getSession() acquires GoTrue's navigator Web-Locks lock; if a stalled
+    //      background auto-refresh is holding it, getSession() blocks ~8s then
+    //      returns null → the "12s wait then login panel even though I'm logged
+    //      in, but a hard refresh logs me straight in" symptom (a fresh page has
+    //      no in-flight refresh holding the lock).
+    // The token is already in localStorage, so a direct synchronous read needs
+    // no lock and no network and is correct immediately. We enforce our own
+    // expiry policy too. The listener below then handles later CHANGES.
     const bootstrap = async () => {
-      const session = await getSession(); // timeout-wrapped; enforces expiry → null
+      // Invite/recovery flow: the session is being parsed from the URL hash by
+      // detectSessionInUrl and isn't in storage yet. Leave the spinner up and let
+      // the SIGNED_IN event from the listener establish auth + show the password
+      // screen — concluding "not authed" here would flash the login box first.
+      // Safety net: if no SIGNED_IN arrives within 8s (e.g. an expired invite
+      // link), clear the spinner so the login screen shows instead of hanging.
+      if (isInviteFlow) {
+        setTimeout(() => { if (!cancelled) setChecking(false); }, 8_000);
+        return;
+      }
+      // App-level "keep me signed in" expiry takes precedence.
+      if (isSessionExpired()) {
+        await signOut();
+        if (cancelled) return;
+        setAuthed(false); setChecking(false);
+        return;
+      }
+      let stored = getStoredSession();
       if (cancelled) return;
-      setAuthed(!!session);
-      await refreshProfile(session?.user.id);
-      if (cancelled) return;
-      if (session) startInactivityTimer();
-      setChecking(false);
+      if (!stored) {
+        setAuthed(false);
+        setChecking(false);
+        return;
+      }
+      // The persisted access token (~1h life) may be expired even though the
+      // refresh token (weeks) is fine — do a LOCK-FREE direct refresh so we
+      // never 401 the profile query and never wait on GoTrue's stuck lock.
+      let token = stored.access_token;
+      if (stored.accessTokenExpired) {
+        const refreshed = await refreshAccessTokenDirect(stored.refresh_token);
+        if (cancelled) return;
+        if (!refreshed) {
+          // Refresh token rejected → genuinely logged out.
+          await signOut();
+          if (cancelled) return;
+          setAuthed(false); setChecking(false);
+          return;
+        }
+        token = refreshed.access_token;
+      }
+      setAuthed(true);
+      startInactivityTimer();
+      // Load the profile with the uid + token so the query runs on the lock-free
+      // dbClient (no getSession round-trip, no auth-lock stall).
+      refreshProfile(stored.user.id, token).finally(() => { if (!cancelled) setChecking(false); });
     };
     bootstrap();
 
@@ -1448,7 +1504,19 @@ export function AdminPanel({ onClose, onDataChange }: {
       if (session && isSessionExpired()) {
         await signOut();
         if (cancelled) return;
-        setAuthed(false); setProfile(null);
+        setAuthed(false); setProfile(null); loadedUserId.current = null;
+        return;
+      }
+
+      // GoTrue re-emits SIGNED_IN EVERY time the tab becomes visible again (its
+      // visibilitychange → _recoverAndRefresh path). If it's the SAME user we've
+      // already loaded, this is NOT a new login — do a SILENT background refresh
+      // and DON'T flip the full-screen spinner. Without this guard, minimising
+      // and restoring the browser threw the panel back to the loading spinner
+      // (and could wedge there if the concurrent token refresh stalled).
+      if (event === 'SIGNED_IN' && session && loadedUserId.current === session.user.id) {
+        void refreshProfile(session.user.id, session.access_token, /* silent */ true);
+        startInactivityTimer();
         return;
       }
 
@@ -1462,9 +1530,12 @@ export function AdminPanel({ onClose, onDataChange }: {
       }
 
       setAuthed(!!session);
-      await refreshProfile(session?.user.id);
+      await refreshProfile(session?.user.id, session?.access_token);
       if (cancelled) return;
       if (session) startInactivityTimer();
+      // Clear the spinner — matters for the invite/recovery flow, where
+      // bootstrap() intentionally left `checking` true to wait for this event.
+      setChecking(false);
     });
 
     const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const;
