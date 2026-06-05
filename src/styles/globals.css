@@ -2882,8 +2882,8 @@ body {
 .arena-md-hero__score-sep { font-size: 2rem; color: var(--arena-border); }
 .arena-md-hero__score-win { color: #fff; }
 .arena-md-hero__vs {
-  font-family: 'Playfair Display', Georgia, serif;
-  font-weight: 700;
+  font-family: "Kanit", sans-serif;
+  font-weight: 600;
   font-size: 2.75rem;
   font-style: italic;
   color: var(--arena-text-dim);
