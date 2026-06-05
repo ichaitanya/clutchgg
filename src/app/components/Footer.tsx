@@ -4,7 +4,9 @@ export function Footer() {
       <div className="arena-footer__inner">
         {/* Brand + tagline */}
         <div>
-          <div className="arena-footer__brand">CLUTCH.GG</div>
+          <a href="/" className="arena-footer__brand" aria-label="Clutch.gg home">
+            <img src="/logo.png" alt="Clutch.gg" className="arena-footer__logo" />
+          </a>
           <p className="arena-footer__tagline">
             You can't improve what you don't measure.
           </p>

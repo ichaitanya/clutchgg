@@ -148,16 +148,32 @@ body {
   gap: 2rem;
 }
 
-/* Brand wordmark */
+/* Brand: logo (+ wordmark on the home page) */
 .arena-nav__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.arena-nav__brand-text {
   font-family: 'Chivo', system-ui, sans-serif;
   font-weight: 900;
   font-size: 1.375rem;
   color: var(--arena-accent);
   letter-spacing: 0.05em;
-  text-decoration: none;
-  flex-shrink: 0;
 }
+/* Logo sits inside the 65px bar. Default (home, beside the wordmark) is compact;
+   --lg (every other page, logo only) is larger so it reads as the page's brand. */
+.arena-nav__logo {
+  height: 38px;
+  width: auto;
+  display: block;
+  object-fit: contain;
+  transition: transform 0.15s ease;
+}
+.arena-nav__logo--lg { height: 52px; }
+.arena-nav__brand:hover .arena-nav__logo { transform: scale(1.05); }
 
 /* Nav link list */
 .arena-nav__links {
@@ -521,7 +537,10 @@ body {
 /* ── Upcoming match row (homepage) ──────────────────────────── */
 .arena-upcoming {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  /* Fixed-width meta + when columns so the right-hand block lines up on every
+     row even when the tournament name is long (it truncates instead of pushing
+     the layout around). The matchup column takes the remaining space. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem) auto;
   align-items: center;
   gap: 1.5rem;
   width: 100%;
@@ -554,10 +573,16 @@ body {
   gap: 0.6rem;
   min-width: 0;
 }
-/* Group the logo + name together next to the centre VS rather than letting the
-   name stretch the full column (which pushed the logo to the far edge). */
-.arena-upcoming__team--right { justify-content: flex-end; text-align: right; }
+/* Pin each logo adjacent to the centre VS and let the NAME absorb the remaining
+   width outward (truncating with an ellipsis). The logo is flex-shrink:0, so the
+   two crests sit at a constant distance from VS on every row regardless of how
+   long the team or tournament name is — keeping the whole column aligned.
+   On the right side the name comes first in DOM, so reverse the flow to keep the
+   logo nearest VS; on the left the natural order already does that. */
+.arena-upcoming__team--right { flex-direction: row-reverse; justify-content: flex-start; text-align: right; }
 .arena-upcoming__team--left { justify-content: flex-start; text-align: left; }
+/* The name flexes to fill; the logo never shrinks. */
+.arena-upcoming__team .arena-upcoming__name { flex: 1 1 auto; }
 
 /* Team crest: uploaded logo or initials fallback */
 .arena-upcoming__logo {
@@ -582,9 +607,13 @@ body {
 .arena-upcoming:hover .arena-upcoming__logo { border-color: rgba(255, 70, 85, 0.35); }
 
 .arena-upcoming__name {
-  font-family: 'Chivo', system-ui, sans-serif;
-  font-size: 0.9375rem;
-  font-weight: 700;
+  /* Match the matches-page team-name treatment (.arena-match-card__team-name):
+     Kanit, light italic. Sized down to suit this denser upcoming-match row. */
+  font-family: 'Kanit', sans-serif;
+  font-weight: 350;
+  font-style: italic;
+  font-size: 1.15rem;
+  line-height: 1.1;
   color: #fff;
   min-width: 0;
   overflow: hidden;
@@ -616,12 +645,15 @@ body {
   color: #fff;
 }
 
-/* Tournament · format meta */
+/* Tournament · format meta. Right-aligned within its fixed-width grid column so
+   the dot + format anchor consistently and a long tournament name truncates to
+   the left instead of widening the row. */
 .arena-upcoming__meta {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.55rem;
-  flex-shrink: 0;
+  min-width: 0;
 }
 .arena-upcoming__tournament {
   font-family: 'Inter', system-ui, sans-serif;
@@ -630,7 +662,13 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #fff;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.arena-upcoming__dot { flex-shrink: 0; }
+.arena-upcoming__format { flex-shrink: 0; }
 .arena-upcoming__dot {
   width: 0.25rem;
   height: 0.25rem;
@@ -682,7 +720,7 @@ body {
   .arena-upcoming__matchup { grid-area: matchup; }
   .arena-upcoming__when { grid-area: when; }
   .arena-upcoming__meta { grid-area: meta; }
-  .arena-upcoming__name { font-size: 0.85rem; }
+  .arena-upcoming__name { font-size: 1rem; }
   .arena-upcoming__logo { width: 2rem; height: 2rem; }
   .arena-upcoming__vs { width: 1.9rem; height: 1.9rem; }
 }
@@ -957,12 +995,15 @@ body {
 }
 
 .arena-footer__brand {
-  font-family: 'Chivo', system-ui, sans-serif;
-  font-weight: 900;
-  font-size: 1.375rem;
-  color: var(--arena-accent);
-  letter-spacing: 0.05em;
+  display: inline-block;
   margin-bottom: 0.75rem;
+  line-height: 0;
+}
+.arena-footer__logo {
+  height: 56px;
+  width: auto;
+  display: block;
+  object-fit: contain;
 }
 
 .arena-footer__tagline {
