@@ -1014,6 +1014,7 @@ function RequestsPanel({ onApproved, showToast }: {
 }) {
   const [requests, setRequests] = useState<TournamentRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<{ email: string; mode: string; link: string } | null>(null);
 
@@ -1049,6 +1050,15 @@ function RequestsPanel({ onApproved, showToast }: {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Manual Refresh: keep the existing list visible (don't trip the full-page
+  // `loading` gate) and just show a spinner in the button. The arrow wrapper on
+  // the button is also required so React's click event isn't passed as `silent`.
+  const refresh = async () => {
+    setRefreshing(true);
+    await load(true); // silent: don't blank the list while refetching
+    if (mountedRef.current) setRefreshing(false);
+  };
 
   const sendApprovalEmail = async (to: { email: string; organizerName: string; tournamentName: string }) => {
     if (ORGANIZER_EMAILJS_SERVICE_ID === 'YOUR_SERVICE_ID') return; // not configured yet
@@ -1137,8 +1147,13 @@ function RequestsPanel({ onApproved, showToast }: {
           <h2 className="text-white font-bold text-lg">Tournament Requests</h2>
           <p className="text-gray-500 text-sm">Approve to create the organizer's account and tournament, or deny.</p>
         </div>
-        <button onClick={load} className="text-xs text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] px-3 py-1.5 rounded-lg transition-all">
-          Refresh
+        <button
+          onClick={refresh}
+          disabled={refreshing || loading}
+          className="text-xs text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 flex items-center gap-1.5"
+        >
+          {refreshing && <Loader className="w-3 h-3 animate-spin" />}
+          {refreshing ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
