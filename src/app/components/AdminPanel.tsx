@@ -1076,14 +1076,20 @@ function RequestsPanel({ onApproved, showToast }: {
     setBusyId(req.id);
     try {
       const result = await approveTournamentRequest(req.id);
-      // Fire email in background — don't block the UI on it
+      // Fire email in background — don't block the UI on it. (Re-sends on an
+      // already-approved retry too, which is harmless and re-notifies the organizer.)
       sendApprovalEmail({
         email: result.email,
         organizerName: result.organizerName,
         tournamentName: result.tournamentName,
       });
       if (!mountedRef.current) return;
-      showToast(`Approved — "${result.tournamentName}" created`, 'success');
+      showToast(
+        result.alreadyApproved
+          ? `"${result.tournamentName}" was already approved`
+          : `Approved — "${result.tournamentName}" created`,
+        'success',
+      );
       onApproved();
       await load(true); // silent=true: don't flash the spinner on a post-approve reload
     } catch (e) {

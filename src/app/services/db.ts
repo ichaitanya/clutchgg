@@ -309,15 +309,24 @@ export async function denyTournamentRequest(id: string): Promise<void> {
 // creates the empty tournament, and assigns role + scope. Returns the new
 // tournament id. The caller (admin UI) is responsible for sending the EmailJS
 // "your tournament is ready" email after this resolves.
+//
+// The function is IDEMPOTENT on requestId: a retry of an already-approved
+// request returns the same tournament (with `alreadyApproved: true`) instead of
+// creating a duplicate, so a double-click is harmless.
 export async function approveTournamentRequest(requestId: string): Promise<{
   tournamentId: string;
   email: string;
   organizerName: string;
   tournamentName: string;
+  alreadyApproved?: boolean;
 }> {
-  const { data, error } = await supabase.functions.invoke('approve-organizer', {
-    body: { requestId },
-  });
+  // Bound the call so a cold-start / slow invoke can't hang the Approve button
+  // indefinitely (matches resendInvite's behaviour).
+  const invoke = supabase.functions.invoke('approve-organizer', { body: { requestId } });
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Approval timed out — please try again')), 20_000)
+  );
+  const { data, error } = await Promise.race([invoke, timeout]);
   if (error) throw error;
   if (!data || data.error) throw new Error(data?.error || 'Approval failed');
   invalidate(KEY.tournaments);
