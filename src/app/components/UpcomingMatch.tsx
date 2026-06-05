@@ -10,8 +10,6 @@ interface UpcomingMatchProps {
   team2Logo?: string;
   format?: 'bo1' | 'bo3' | 'bo5';
   matchId?: string;
-  // Tournament bracket matches open the rich tournament match page; standalone
-  // admin matches use the legacy scoreboard page.
   isTournamentMatch?: boolean;
 }
 
@@ -21,15 +19,12 @@ const FORMAT_LABEL: Record<'bo1' | 'bo3' | 'bo5', string> = {
   bo5: 'Best of 5',
 };
 
-// Two uppercase initials of a team name, for the logo fallback chip.
 function teamInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
   return name.trim().substring(0, 2).toUpperCase();
 }
 
-// Friendly countdown: "Today", "Tomorrow", "In 3 days", "In 2 hours". Returns
-// null when there's no usable future date (so the row shows "TBD" instead).
 function countdownLabel(date: string, time: string): string | null {
   if (!date) return null;
   const target = new Date(`${date}T${time || '00:00'}`).getTime();
@@ -62,31 +57,23 @@ export function UpcomingMatch({
 
   const formatLabel = format ? FORMAT_LABEL[format] : 'Best of 3';
   const countdown = countdownLabel(date, time);
-  // Exact schedule (e.g. "May 17 · 14:00") shown as the secondary line.
   const exact = date
     ? `${new Date(`${date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${time ? ` · ${time}` : ''}`
     : '';
 
+  // Right: name → logo | VS | Left: logo → name  (logos always face the VS)
   const TeamSide = ({ name, logo, align }: { name: string; logo?: string; align: 'left' | 'right' }) => (
     <div className={`arena-upcoming__team arena-upcoming__team--${align}`}>
-      {align === 'right' ? (
-        <>
-          <span className="arena-upcoming__name">{name}</span>
-          <span className="arena-upcoming__logo">
-            {logo
-              ? <img src={logo} alt="" />
-              : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
-          </span>
-        </>
-      ) : (
-        <>
-          <span className="arena-upcoming__logo">
-            {logo
-              ? <img src={logo} alt="" />
-              : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
-          </span>
-          <span className="arena-upcoming__name">{name}</span>
-        </>
+      {align === 'left' && (
+        <span className="arena-upcoming__logo">
+          {logo ? <img src={logo} alt="" /> : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
+        </span>
+      )}
+      <span className="arena-upcoming__name">{name}</span>
+      {align === 'right' && (
+        <span className="arena-upcoming__logo">
+          {logo ? <img src={logo} alt="" /> : <span className="arena-upcoming__logo-text">{teamInitials(name)}</span>}
+        </span>
       )}
     </div>
   );

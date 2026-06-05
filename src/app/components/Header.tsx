@@ -12,8 +12,16 @@ export function Header() {
   return (
     <nav className="arena-nav" style={{ position: 'relative' }}>
       <div className="arena-nav__inner">
-        {/* Brand wordmark — left */}
-        <a href="/" className="arena-nav__brand">CLUTCH.GG</a>
+        {/* Brand — left. On the home page show the logo BESIDE the wordmark;
+            on every other page show only the logo, larger, still linking home. */}
+        <a href="/" className="arena-nav__brand" aria-label="Clutch.gg home">
+          <img
+            src="/logo.png"
+            alt="Clutch.gg"
+            className={`arena-nav__logo${pathname === '/' ? '' : ' arena-nav__logo--lg'}`}
+          />
+          {pathname === '/' && <span className="arena-nav__brand-text">CLUTCH.GG</span>}
+        </a>
 
         {/* Desktop nav links — right-aligned, original site names */}
         <ul className="arena-nav__links hidden md:flex">

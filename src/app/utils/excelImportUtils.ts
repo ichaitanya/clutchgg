@@ -193,7 +193,7 @@ export function generateExcelTemplate(): void {
     { name: 'ForSaken', riot: 'ForSaken#AP1', role: 'controller' },
     { name: 'papabrainchip', riot: 'papabrainchip#KR1', role: 'sentinel' },
     { name: 'Ghost', riot: 'Ghost#NA2', role: 'initiator' },
-    { name: 'SubOne', riot: '', role: '' },   // optional
+    { name: '', riot: '', role: '' },           // optional
     { name: '', riot: '', role: '' },          // optional
   ];
   const exampleB = [
