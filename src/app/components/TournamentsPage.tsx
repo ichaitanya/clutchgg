@@ -79,7 +79,7 @@ export function TournamentsPage() {
 
       {/* Centered hero */}
       <section className="arena-page-hero">
-        <p className="arena-page-hero__eyebrow">Global Circuit {new Date().getFullYear()}</p>
+        <p className="arena-page-hero__eyebrow">Circuit {new Date().getFullYear()}</p>
         <h1 className="arena-page-hero__title">Master the Arena. Claim Your Glory.</h1>
         <p className="arena-page-hero__subtitle">
           The definitive hub for competitive gaming. Join elite brackets, track

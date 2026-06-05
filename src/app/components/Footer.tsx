@@ -6,10 +6,11 @@ export function Footer() {
         <div className="arena-footer__brand-block">
           <a href="/" aria-label="Clutch.gg home">
             <img src="/logo.png" alt="Clutch.gg" className="arena-footer__logo" />
-          </a>
-          <p className="arena-footer__tagline">
+            <p className="arena-footer__tagline">
             You can't improve what you don't measure.
           </p>
+          </a>
+          
         </div>
 
         {/* Link columns */}
