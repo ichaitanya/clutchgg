@@ -1,13 +1,15 @@
 // Challonge Bracket Importer
-// Maps Challonge v1 match structure into native BracketGenerated format
-// Inverts prerequisite pointers to build winnerGoesTo/loserGoesTo routing
+// Maps Challonge v1 match structure into the native BracketGenerated shape
+// (rounds: BracketMatch[][]), inverting prerequisite pointers to build the
+// { matchId, slot } winnerGoesTo / loserGoesTo routing the renderer expects.
 
 import type { BracketGenerated, BracketMatch, TeamInTournament } from '../components/TournamentCreation';
 import * as ChallongeAPI from './challongeApiDirect';
 
-interface ChallongeMatch {
+// Raw v1 match fields we rely on
+interface V1Match {
   id: number;
-  round: number;
+  round: number; // >0 winners, <0 losers, GF is highest positive
   identifier: string;
   player1_id: number | null;
   player2_id: number | null;
@@ -16,207 +18,230 @@ interface ChallongeMatch {
   player1_is_prereq_match_loser: boolean;
   player2_is_prereq_match_loser: boolean;
   winner_id: number | null;
-  loser_id: number | null;
-  suggested_play_order: number;
-  scores_csv: string;
+  suggested_play_order: number | null;
 }
 
-interface ChallongeParticipant {
-  id: number;
-  name: string;
-  seed: number;
+interface ParsedMatch extends V1Match {
+  idStr: string;
 }
 
 function mapChallongeToNative(
-  challongeMatches: any[],
-  participants: any[],
-  teams: TeamInTournament[]
+  rawMatches: any[],
+  rawParticipants: any[],
+  teams: TeamInTournament[],
+  isDouble: boolean,
 ): BracketGenerated {
-  // Build lookup tables
-  const participantMap = new Map<number, { name: string; seed: number }>();
-  participants.forEach((p: any) => {
-    const attrs = p.attributes || p;
-    participantMap.set(Number(p.id), {
-      name: attrs.name,
-      seed: attrs.seed || 0,
-    });
+  // ── Lookups ──────────────────────────────────────────────────────
+  const participantName = new Map<number, string>();
+  rawParticipants.forEach((p: any) => {
+    const id = Number(p.id);
+    const name = p.attributes?.name ?? p.name;
+    if (!Number.isNaN(id)) participantName.set(id, name);
   });
 
-  // Map team names to team objects for linking
   const teamByName = new Map<string, TeamInTournament>();
-  teams.forEach((t) => {
-    teamByName.set(t.name.toLowerCase(), t);
+  teams.forEach((t) => teamByName.set(t.name.trim().toLowerCase(), t));
+
+  const matches: ParsedMatch[] = rawMatches.map((m: any) => ({ ...m, idStr: String(m.id) }));
+  const byId = new Map<number, ParsedMatch>();
+  matches.forEach((m) => byId.set(Number(m.id), m));
+
+  const isLosersMatch = (id: number | null) =>
+    id != null && byId.has(id) && Number(byId.get(id)!.round) < 0;
+
+  // ── Identify Grand Final + Reset (double elim only) ──────────────
+  // GF = positive-round match fed by a losers-bracket match.
+  // Reset ("if necessary") = positive match fed by the GF itself.
+  let grandFinalId: number | null = null;
+  let resetId: number | null = null;
+
+  if (isDouble) {
+    for (const m of matches) {
+      if (Number(m.round) <= 0) continue;
+      const fedByLosers =
+        isLosersMatch(m.player1_prereq_match_id) || isLosersMatch(m.player2_prereq_match_id);
+      if (fedByLosers) grandFinalId = Number(m.id);
+    }
+    if (grandFinalId != null) {
+      for (const m of matches) {
+        if (Number(m.round) <= 0) continue;
+        if (
+          Number(m.player1_prereq_match_id) === grandFinalId ||
+          Number(m.player2_prereq_match_id) === grandFinalId
+        ) {
+          resetId = Number(m.id);
+        }
+      }
+    }
+  }
+
+  // Matches we keep (drop the conditional reset — the data model can't represent it)
+  const keptMatches = matches.filter((m) => Number(m.id) !== resetId);
+  const keptIds = new Set(keptMatches.map((m) => Number(m.id)));
+
+  // ── Classify each kept match into a section + section-round ───────
+  type Col = { section: 'winners' | 'losers' | 'grand-final'; sectionRound: number; match: ParsedMatch };
+  const cols: Col[] = keptMatches.map((m) => {
+    const r = Number(m.round);
+    if (isDouble && Number(m.id) === grandFinalId) {
+      return { section: 'grand-final', sectionRound: 1, match: m };
+    }
+    if (r < 0) return { section: 'losers', sectionRound: Math.abs(r), match: m };
+    return { section: 'winners', sectionRound: r, match: m };
   });
 
-  // Convert Challonge matches to native format
-  const matchesById = new Map<number, BracketMatch>();
-  const allMatches: BracketMatch[] = [];
+  // ── Build ordered columns: winners → losers → grand-final ─────────
+  const winnersRounds = [...new Set(cols.filter((c) => c.section === 'winners').map((c) => c.sectionRound))].sort((a, b) => a - b);
+  const losersRounds = [...new Set(cols.filter((c) => c.section === 'losers').map((c) => c.sectionRound))].sort((a, b) => a - b);
+  const hasGF = cols.some((c) => c.section === 'grand-final');
 
-  // First pass: create all match objects
-  for (const cmatch of challongeMatches) {
-    const id = Number(cmatch.id);
-    const round = Number(cmatch.round);
-    const section = round > 0 ? 'winners' : round < 0 ? 'losers' : 'grand-final';
+  const orderedColumns: Col[][] = [];
+  winnersRounds.forEach((sr) => orderedColumns.push(cols.filter((c) => c.section === 'winners' && c.sectionRound === sr)));
+  losersRounds.forEach((sr) => orderedColumns.push(cols.filter((c) => c.section === 'losers' && c.sectionRound === sr)));
+  if (hasGF) orderedColumns.push(cols.filter((c) => c.section === 'grand-final'));
 
-    // Determine team slots from participant IDs or prerequisites
-    const participant1 = cmatch.player1_id ? participantMap.get(cmatch.player1_id) : null;
-    const participant2 = cmatch.player2_id ? participantMap.get(cmatch.player2_id) : null;
-
-    const team1Name = participant1?.name || null;
-    const team2Name = participant2?.name || null;
-
-    const team1 = team1Name ? teamByName.get(team1Name.toLowerCase()) : null;
-    const team2 = team2Name ? teamByName.get(team2Name.toLowerCase()) : null;
-
-    const match: BracketMatch = {
-      id: String(id),
-      team1Name: team1Name || 'BYE',
-      team1Id: team1?.id || null,
-      team2Name: team2Name || 'BYE',
-      team2Id: team2?.id || null,
-      winnerGoesTo: null,
-      loserGoesTo: null,
-      section: section,
-      round: Math.abs(round),
-      order: cmatch.suggested_play_order || 0,
-      winnerName: null,
-      loserId: null,
-      status: cmatch.winner_id ? 'completed' : 'pending',
-      scores: cmatch.scores_csv ? cmatch.scores_csv.split('-').map((s: string) => parseInt(s.trim())) : null,
-    };
-
-    matchesById.set(id, match);
-    allMatches.push(match);
-  }
-
-  // Second pass: build routing from inverted prerequisites
-  for (const cmatch of challongeMatches) {
-    const id = Number(cmatch.id);
-    const match = matchesById.get(id)!;
-
-    // Find what matches feed into this match
-    const incomingMatches: Array<{
-      sourceId: number;
-      isLoser: boolean;
-      slot: 'winner' | 'loser';
-    }> = [];
-
-    // Check which matches have this match as a prerequisite
-    for (const other of challongeMatches) {
-      const otherId = Number(other.id);
-
-      // Does other's player1 slot come from this match?
-      if (Number(other.player1_prereq_match_id) === id) {
-        incomingMatches.push({
-          sourceId: otherId,
-          isLoser: other.player1_is_prereq_match_loser,
-          slot: 'winner', // this determines if it's winner or loser who goes here
-        });
-      }
-
-      // Does other's player2 slot come from this match?
-      if (Number(other.player2_prereq_match_id) === id) {
-        incomingMatches.push({
-          sourceId: otherId,
-          isLoser: other.player2_is_prereq_match_loser,
-          slot: 'loser',
-        });
-      }
+  // ── Resolve a slot's team ────────────────────────────────────────
+  const resolveTeam = (
+    matchId: string,
+    slot: 1 | 2,
+    playerId: number | null,
+    section: Col['section'],
+  ): { teamId: string; teamName: string } => {
+    if (playerId != null) {
+      const name = participantName.get(playerId) ?? `Player ${playerId}`;
+      const team = teamByName.get(name.trim().toLowerCase());
+      return { teamId: team?.id ?? `challonge_${playerId}`, teamName: name };
     }
-
-    // Assign routing based on incoming links
-    // winnerGoesTo = where the match winner advances
-    // loserGoesTo = where the match loser advances
-    for (const incoming of incomingMatches) {
-      if (incoming.isLoser) {
-        // Loser advances to the incoming match
-        match.loserGoesTo = String(incoming.sourceId);
-      } else {
-        // Winner advances to the incoming match
-        match.winnerGoesTo = String(incoming.sourceId);
-      }
-    }
-  }
-
-  // Organize by section
-  const sections: { [key: string]: BracketMatch[] } = {
-    winners: [],
-    losers: [],
-    'grand-final': [],
+    // Unfilled slot — fed by routing, shown as a placeholder until decided
+    const tbd =
+      section === 'grand-final'
+        ? slot === 1
+          ? 'WB Champion'
+          : 'LB Champion'
+        : section === 'losers'
+          ? 'LB TBD'
+          : 'Winner TBD';
+    return { teamId: `slot_${matchId}_${slot}`, teamName: tbd };
   };
 
-  allMatches.forEach((m) => {
-    sections[m.section].push(m);
+  // ── Build BracketMatch objects column by column ──────────────────
+  const rounds: BracketMatch[][] = [];
+
+  orderedColumns.forEach((column, columnIndex) => {
+    const sorted = [...column].sort(
+      (a, b) => (a.match.suggested_play_order ?? 0) - (b.match.suggested_play_order ?? 0),
+    );
+
+    const roundMatches: BracketMatch[] = sorted.map((c, position) => {
+      const m = c.match;
+      const s1 = resolveTeam(m.idStr, 1, m.player1_id, c.section);
+      const s2 = resolveTeam(m.idStr, 2, m.player2_id, c.section);
+
+      const winnerTeamId =
+        m.winner_id != null
+          ? m.winner_id === m.player1_id
+            ? s1.teamId
+            : m.winner_id === m.player2_id
+              ? s2.teamId
+              : undefined
+          : undefined;
+
+      const bm: BracketMatch = {
+        id: m.idStr,
+        team1Id: s1.teamId,
+        team2Id: s2.teamId,
+        team1Name: s1.teamName,
+        team2Name: s2.teamName,
+        round: columnIndex,
+        position,
+        autoPopulated: m.player1_id == null || m.player2_id == null,
+        needsAssignment: false,
+      };
+      if (isDouble) bm.bracketSection = c.section;
+      if (winnerTeamId) bm.winner = winnerTeamId;
+      return bm;
+    });
+
+    rounds.push(roundMatches);
   });
 
-  // Sort within each section by round and order
-  Object.values(sections).forEach((sectionMatches) => {
-    sectionMatches.sort((a, b) => a.round - b.round || (a.order || 0) - (b.order || 0));
-  });
+  // ── Wire routing by inverting prerequisite pointers ───────────────
+  const bmById = new Map<string, BracketMatch>();
+  rounds.flat().forEach((bm) => bmById.set(bm.id, bm));
+
+  for (const m of keptMatches) {
+    const sourceId = Number(m.id);
+    for (const other of keptMatches) {
+      if (!keptIds.has(Number(other.id))) continue;
+      // other.player1 fed by this match?
+      if (Number(other.player1_prereq_match_id) === sourceId) {
+        const target = { matchId: other.idStr, slot: 1 as const };
+        if (other.player1_is_prereq_match_loser) bmById.get(m.idStr)!.loserGoesTo = target;
+        else bmById.get(m.idStr)!.winnerGoesTo = target;
+      }
+      // other.player2 fed by this match?
+      if (Number(other.player2_prereq_match_id) === sourceId) {
+        const target = { matchId: other.idStr, slot: 2 as const };
+        if (other.player2_is_prereq_match_loser) bmById.get(m.idStr)!.loserGoesTo = target;
+        else bmById.get(m.idStr)!.winnerGoesTo = target;
+      }
+    }
+  }
 
   return {
-    matches: allMatches,
-    sections: sections as any,
+    rounds,
+    bracketType: isDouble ? 'double' : 'single',
+    customizationHistory: [
+      {
+        timestamp: new Date().toISOString(),
+        changes: `Imported ${isDouble ? 'double' : 'single'} elimination bracket from Challonge (${teams.length} teams)`,
+      },
+    ],
   };
+}
+
+async function fetchV1(path: string): Promise<any> {
+  const res = await fetch(`/api/challonge?path=${encodeURIComponent(path)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to fetch ${path} (HTTP ${res.status})`);
+  }
+  return res.json();
 }
 
 export async function importChallongeBracket(
   tournamentName: string,
   teams: TeamInTournament[],
-  tournamentType: 'single' | 'double' = 'double'
+  tournamentType: 'single' | 'double' = 'double',
 ): Promise<{ bracket: BracketGenerated; challongeId: string; challongeUrl: string }> {
-  try {
-    console.log(`[Importer] Creating Challonge tournament: ${tournamentName}`);
+  const isDouble = tournamentType === 'double';
+  const challongeType = isDouble ? 'double elimination' : 'single elimination';
 
-    // Map UI bracket type to Challonge's expected tournament_type value
-    const challongeType =
-      tournamentType === 'single' ? 'single elimination' : 'double elimination';
+  console.log(`[Importer] Creating Challonge tournament: ${tournamentName}`);
+  const result = await ChallongeAPI.createFullTournament(tournamentName, teams, challongeType);
+  const tournamentId = result.tournamentId;
+  console.log(`[Importer] Tournament created + started: ${tournamentId}`);
 
-    // Create and start the tournament via API
-    const result = await ChallongeAPI.createFullTournament(tournamentName, teams, challongeType);
-    const tournamentId = result.tournamentId;
+  // Fetch via v1 — only v1 exposes prereq routing fields.
+  const matchesData = await fetchV1(`/v1/tournaments/${tournamentId}/matches.json`);
+  const partsData = await fetchV1(`/v1/tournaments/${tournamentId}/participants.json`);
 
-    console.log(`[Importer] Tournament created: ${tournamentId}`);
+  // v1 returns raw arrays: [{ match: {...} }] and [{ participant: {...} }]
+  const rawMatches = Array.isArray(matchesData)
+    ? matchesData.map((x: any) => x.match)
+    : matchesData.data?.map((m: any) => m.attributes) ?? [];
+  const rawParticipants = Array.isArray(partsData)
+    ? partsData.map((x: any) => x.participant)
+    : partsData.data ?? [];
 
-    // Fetch the generated matches and participants
-    console.log(`[Importer] Fetching bracket structure...`);
+  console.log(`[Importer] Fetched ${rawMatches.length} matches, ${rawParticipants.length} participants`);
 
-    // Get matches via v1 API (for full routing info)
-    const matchesResponse = await fetch(
-      `/api/challonge?path=${encodeURIComponent(`/tournaments/${tournamentId}/matches.json`)}`
-    );
-    if (!matchesResponse.ok) throw new Error('Failed to fetch matches');
-    const matchesData = await matchesResponse.json();
+  const bracket = mapChallongeToNative(rawMatches, rawParticipants, teams, isDouble);
+  console.log(`[Importer] Mapped to ${bracket.rounds.length} columns, ${bracket.rounds.flat().length} matches`);
 
-    // Get participants
-    const partsResponse = await fetch(
-      `/api/challonge?path=${encodeURIComponent(`/tournaments/${tournamentId}/participants.json`)}`
-    );
-    if (!partsResponse.ok) throw new Error('Failed to fetch participants');
-    const partsData = await partsResponse.json();
-
-    // Extract v1 format from v2.1 response (v2.1 wraps in .data, v1 is raw array in .match field)
-    const matches = matchesData.data
-      ? matchesData.data.map((m: any) => m.attributes)
-      : matchesData.map((item: any) => item.match);
-
-    const participants = partsData.data
-      ? partsData.data
-      : partsData.map((item: any) => item.participant);
-
-    // Map to native format
-    const bracket = mapChallongeToNative(matches, participants, teams);
-
-    console.log(`[Importer] Bracket imported successfully`);
-    console.log(`[Importer] Total matches: ${bracket.matches.length}`);
-
-    return {
-      bracket,
-      challongeId: tournamentId,
-      challongeUrl: result.tournamentUrl,
-    };
-  } catch (error) {
-    console.error('[Importer] Error importing bracket:', error);
-    throw error;
-  }
+  return {
+    bracket,
+    challongeId: tournamentId,
+    challongeUrl: result.tournamentUrl,
+  };
 }

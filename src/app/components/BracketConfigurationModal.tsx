@@ -51,22 +51,25 @@ export function BracketConfigurationModal({
       description: 'Every team plays every other team once. Standings based on wins.',
     },
   ];
-  const bracketTypes = isSecondStage
+  // Challonge import only supports single/double elimination (no round robin).
+  const bracketTypes = (isSecondStage || useChallonge)
     ? allBracketTypes.filter(t => t.id !== 'roundrobin')
     : allBracketTypes;
 
   const handleGenerateStandard = () => {
+    // Standard path uses the roster order directly (no reorder step) — keep
+    // using the `teams` prop, not the async seededTeams state.
     let bracket: BracketGenerated;
 
     switch (bracketType) {
       case 'single':
-        bracket = generateSimplifiedSingleEliminationBracket(seededTeams, qualifiedTeamsCount);
+        bracket = generateSimplifiedSingleEliminationBracket(teams, qualifiedTeamsCount);
         break;
       case 'double':
-        bracket = generateSimplifiedDoubleEliminationBracket(seededTeams, qualifiedTeamsCount);
+        bracket = generateSimplifiedDoubleEliminationBracket(teams, qualifiedTeamsCount);
         break;
       case 'roundrobin':
-        bracket = generateSimplifiedRoundRobinBracket(seededTeams);
+        bracket = generateSimplifiedRoundRobinBracket(teams);
         break;
     }
 
@@ -173,7 +176,11 @@ export function BracketConfigurationModal({
                   </button>
 
                   <button
-                    onClick={() => setUseChallonge(true)}
+                    onClick={() => {
+                      setUseChallonge(true);
+                      // Challonge supports only single/double — drop round robin if selected
+                      if (bracketType === 'roundrobin') setBracketType('double');
+                    }}
                     className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
                       useChallonge
                         ? 'border-[#ff4655] bg-[#ff4655]/10'
@@ -188,9 +195,8 @@ export function BracketConfigurationModal({
                 </div>
               </div>
 
-              {/* Bracket Type Selection (only for standard) */}
-              {!useChallonge && (
-                <div>
+              {/* Bracket Type Selection (single/double for both; +RR for standard) */}
+              <div>
                   <label className="flex items-center gap-2 text-white font-semibold text-sm mb-3">
                     <Swords className="w-4 h-4 text-[#ff4655]" />
                     Select Bracket Type
@@ -213,8 +219,7 @@ export function BracketConfigurationModal({
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
+              </div>
 
               {/* Info Box */}
               <div className={`border rounded-lg p-4 ${isSecondStage ? 'bg-purple-900/20 border-purple-700/30' : 'bg-[#0d0f16] border-[#2a2d3a]'}`}>

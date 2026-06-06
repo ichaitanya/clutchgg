@@ -111,15 +111,18 @@ export async function startTournament(tournamentId: string): Promise<void> {
 }
 
 export async function getTournamentMatches(tournamentId: string): Promise<any[]> {
-  // Use v1 API for detailed match routing info
-  const response = await fetch(`/api/challonge?path=/tournaments/${tournamentId}/matches.json`);
+  // Use v1 API for detailed match routing info (prereq fields)
+  const response = await fetch(
+    `/api/challonge?path=${encodeURIComponent(`/v1/tournaments/${tournamentId}/matches.json`)}`
+  );
 
   if (!response.ok) {
     throw new Error('Failed to fetch matches');
   }
 
   const data = await response.json();
-  return data.data || [];
+  // v1 returns a raw array of { match: {...} }
+  return Array.isArray(data) ? data.map((x: any) => x.match) : data.data || [];
 }
 
 export async function createFullTournament(

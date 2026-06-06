@@ -84,7 +84,20 @@ export default async function handler(req: any, res: any) {
     fullPath = '/' + fullPath;
   }
   
-  const url = `${API_BASE}${fullPath}`;
+  // Route to v1 API when the path is explicitly prefixed with /v1/.
+  // v1 is the only version exposing match prerequisite/routing fields, and it
+  // authenticates via an api_key query parameter rather than the v2.1 header.
+  const isV1 = fullPath.startsWith('/v1/');
+  const baseUrl = isV1 ? 'https://api.challonge.com/v1' : API_BASE;
+  if (isV1) {
+    fullPath = fullPath.substring('/v1'.length); // strip the /v1 prefix
+  }
+
+  let url = `${baseUrl}${fullPath}`;
+  if (isV1) {
+    const sep = url.includes('?') ? '&' : '?';
+    url = `${url}${sep}api_key=${encodeURIComponent(API_KEY)}`;
+  }
   const method = req.method || 'GET';
 
   // Vercel may deliver the body as a raw string (esp. with vnd.api+json content-type)
