@@ -1,18 +1,7 @@
-// Direct Challonge API Service - Works in both development and production
-// Uses Challonge API directly from frontend
+// Challonge API Service - proxied through backend for security
+// All requests go through /api/challonge (never exposes API key to frontend)
 
-const API_BASE = 'https://api.challonge.com/v2.1';
-
-// ⚠️ WARNING: This API key is exposed in frontend code
-// For production, move this to backend environment variables
-const API_KEY = 'd716a14287e44fcb38ef819c2fae046dd2225fc1a410abad';
-
-const headers = {
-  'Content-Type': 'application/vnd.api+json',
-  'Accept': 'application/json',
-  'Authorization-Type': 'v1',
-  'Authorization': API_KEY,
-};
+const PROXY_BASE = '/api/challonge';
 
 interface ChallongeTournament {
   id: string;
@@ -25,222 +14,137 @@ interface ChallongeTournament {
 interface ChallongeParticipant {
   id: string;
   name: string;
-  email: string;
   seed?: number;
 }
 
-/**
- * Test if API key is valid
- */
-export async function testApiKey(): Promise<{ valid: boolean; message: string }> {
-  try {
-    console.log('Testing Challonge API key...');
-    const response = await fetch(`${API_BASE}/tournaments?state=all&limit=1`, {
-      method: 'GET',
-      headers,
-    });
+async function proxyRequest(path: string, method: string = 'GET', body?: any) {
+  const url = new URL(PROXY_BASE, window.location.origin);
+  url.searchParams.set('path', path);
 
-    console.log(`API test response: ${response.status}`);
+  const options: RequestInit = {
+    method,
+    headers: {
+      'Accept': 'application/json',
+    },
+  };
 
-    if (response.status === 401 || response.status === 403) {
-      return { 
-        valid: false, 
-        message: 'Invalid API key (401). Please update API_KEY in challongeApiDirect.ts' 
-      };
-    }
-
-    if (response.ok) {
-      return { valid: true, message: '✓ API key is valid!' };
-    }
-
-    const data = await response.json().catch(() => ({}));
-    return { 
-      valid: false, 
-      message: `API returned ${response.status}: ${data?.errors?.[0]?.detail || 'Unknown error'}` 
-    };
-  } catch (error: any) {
-    return { 
-      valid: false, 
-      message: `Connection error: ${error.message}` 
-    };
+  if (body && (method === 'POST' || method === 'PUT')) {
+    options.headers = { ...options.headers, 'Content-Type': 'application/vnd.api+json' };
+    options.body = JSON.stringify(body);
   }
+
+  const response = await fetch(url.toString(), options);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || `API error: ${response.status}`);
+  }
+
+  return response.json();
 }
 
-/**
- * Make request to Challonge API
- */
-async function makeRequest(
-  path: string,
-  method: 'GET' | 'POST' | 'PUT' = 'GET',
-  body?: any
-) {
-  try {
-    console.log(`[Challonge] ${method} ${path}`);
-
-    const fullUrl = `${API_BASE}${path}`;
-    const options: RequestInit = {
-      method,
-      headers,
-    };
-
-    if (body && (method === 'POST' || method === 'PUT')) {
-      options.body = JSON.stringify(body);
-      console.log(`[Challonge] Body:`, body);
-    }
-
-    const response = await fetch(fullUrl, options);
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      const error = data?.errors?.[0]?.detail || data?.error || `HTTP ${response.status}`;
-      console.error(`[Challonge] Error: ${error}`, data);
-      throw new Error(error);
-    }
-
-    console.log(`[Challonge] Success:`, data);
-    return data;
-  } catch (error) {
-    console.error('[Challonge] Request failed:', error);
-    throw error;
-  }
-}
-
-/**
- * Create a new tournament on Challonge
- */
 export async function createChallongeTournament(
   tournamentName: string,
-  tournamentType: 'single elimination' | 'double elimination' | 'round robin' | 'swiss' = 'single elimination'
+  tournamentType: string = 'double elimination'
 ): Promise<ChallongeTournament> {
-  const uniqueUrl = `${tournamentName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
-  const challongeType = tournamentType.replace(/\s+/g, '_');
-
-  console.log(`Creating tournament: ${tournamentName} (${challongeType})`);
-
-  const data = await makeRequest('/tournaments', 'POST', {
-    tournament: {
-      name: tournamentName,
-      url: uniqueUrl,
-      tournament_type: challongeType,
-      description: 'Tournament created from Clutchgg',
-      open_signup: false,
-      hold_third_place_match: false,
-    },
-  });
-
-  return data.data;
-}
-
-/**
- * Add a single participant to a tournament
- */
-export async function addParticipant(
-  tournamentId: string,
-  teamName: string,
-  seedNumber?: number
-): Promise<ChallongeParticipant> {
-  const data = await makeRequest(
-    `/tournaments/${tournamentId}/participants`,
-    'POST',
-    {
-      participant: {
-        name: teamName,
-        email: `${teamName.replace(/\s+/g, '')}${Date.now()}@clutchgg.local`,
-        seed: seedNumber,
+  const body = {
+    data: {
+      type: 'tournament',
+      attributes: {
+        name: tournamentName,
+        tournament_type: tournamentType,
+        private: false,
       },
-    }
-  );
+    },
+  };
 
-  return data.data;
+  const result = await proxyRequest('/tournaments', 'POST', body);
+  return {
+    id: result.data.id,
+    name: result.data.attributes.name,
+    url: result.data.attributes.url,
+    tournament_type: result.data.attributes.tournament_type,
+    state: result.data.attributes.state,
+  };
 }
 
-/**
- * Add multiple participants in bulk
- */
 export async function bulkAddParticipants(
   tournamentId: string,
-  teams: string[]
+  teams: Array<{ id: string; name: string }>
 ): Promise<ChallongeParticipant[]> {
   const participants = teams.map((team, index) => ({
-    name: team,
-    email: `${team.replace(/\s+/g, '')}${Date.now()}_${index}@clutchgg.local`,
+    name: team.name,
+    seed: index + 1,
   }));
 
-  const data = await makeRequest(
-    `/tournaments/${tournamentId}/participants/bulk`,
-    'POST',
-    { participants }
-  );
+  const body = {
+    data: participants.map((p) => ({
+      type: 'participant',
+      attributes: {
+        name: p.name,
+        seed: p.seed,
+      },
+    })),
+  };
 
-  return data.data;
+  const result = await proxyRequest(`/tournaments/${tournamentId}/participants/bulk`, 'POST', body);
+
+  return result.data.map((p: any) => ({
+    id: p.id,
+    name: p.attributes.name,
+    seed: p.attributes.seed,
+  }));
 }
 
-/**
- * Start a tournament
- */
-export async function startTournament(tournamentId: string): Promise<ChallongeTournament> {
-  const data = await makeRequest(
-    `/tournaments/${tournamentId}/start`,
-    'POST',
-    {}
-  );
+export async function startTournament(tournamentId: string): Promise<void> {
+  const body = {
+    data: {
+      type: 'TournamentState',
+      attributes: {
+        state: 'start',
+      },
+    },
+  };
 
-  return data.data;
+  await proxyRequest(`/tournaments/${tournamentId}/change_state.json`, 'PUT', body);
 }
 
-/**
- * Get tournament bracket URL
- */
-export function getBracketUrl(tournamentUrl: string): string {
-  return `https://challonge.com/${tournamentUrl}`;
+export async function getTournamentMatches(tournamentId: string): Promise<any[]> {
+  // Use v1 API for detailed match routing info
+  const response = await fetch(`/api/challonge?path=/tournaments/${tournamentId}/matches.json`);
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch matches');
+  }
+
+  const data = await response.json();
+  return data.data || [];
 }
 
-/**
- * Get tournament matches
- */
-export async function getTournamentMatches(tournamentId: string) {
-  const data = await makeRequest(
-    `/tournaments/${tournamentId}/matches`,
-    'GET'
-  );
-
-  return data.data;
-}
-
-/**
- * Create a full tournament with teams and start it
- */
 export async function createFullTournament(
   tournamentName: string,
-  teams: string[],
-  tournamentType: 'single elimination' | 'double elimination' | 'round robin' | 'swiss' = 'single elimination'
-) {
+  teams: Array<{ id: string; name: string }>,
+  tournamentType: string = 'double elimination'
+): Promise<{ tournamentId: string; tournamentUrl: string; bracketUrl: string; name: string; state: string }> {
   try {
-    // Step 1: Create tournament
-    console.log('Step 1: Creating Challonge tournament...');
     const tournament = await createChallongeTournament(tournamentName, tournamentType);
-    console.log('Tournament created:', tournament);
+    console.log('[Challonge] Created tournament:', tournament.id);
 
-    // Step 2: Add teams as participants
-    console.log('Step 2: Adding participants...');
     await bulkAddParticipants(tournament.id, teams);
-    console.log('Participants added');
+    console.log('[Challonge] Added participants');
 
-    // Step 3: Start tournament
-    console.log('Step 3: Starting tournament...');
-    const startedTournament = await startTournament(tournament.id);
-    console.log('Tournament started:', startedTournament);
+    await startTournament(tournament.id);
+    console.log('[Challonge] Started tournament');
 
-    // Return bracket info
     return {
       tournamentId: tournament.id,
-      tournamentUrl: tournament.url,
-      bracketUrl: getBracketUrl(tournament.url),
+      tournamentUrl: `https://challonge.com/${tournament.url}`,
+      bracketUrl: `https://challonge.com/${tournament.url}`,
       name: tournament.name,
-      state: startedTournament.state,
+      state: tournament.state,
     };
   } catch (error) {
-    console.error('Error creating full tournament:', error);
+    console.error('[Challonge] Error creating tournament:', error);
     throw error;
   }
 }

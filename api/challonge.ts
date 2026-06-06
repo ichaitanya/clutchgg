@@ -1,5 +1,9 @@
 const API_BASE = 'https://api.challonge.com/v2.1';
-const API_KEY = 'c43776f9eee466bc9b150a16075beb0f5cd32ad4c0b05260';
+const API_KEY = process.env.CHALLONGE_API_KEY || '';
+
+if (!API_KEY) {
+  console.warn('[Challonge Proxy] CHALLONGE_API_KEY env variable is not set. API calls will fail.');
+}
 
 const headers = {
   'Content-Type': 'application/vnd.api+json',
