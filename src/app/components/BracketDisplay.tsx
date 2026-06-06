@@ -304,30 +304,83 @@ function BracketTree({
   onResetMatch: (globalRoundIdx: number, matchIdx: number) => void;
   onAssignTeam: (globalRoundIdx: number, matchIdx: number, slot: 1 | 2, teamId: string, teamName: string) => void;
 }) {
-  const getMatchTopOffset = (roundIdx: number, matchIdx: number): number => {
-    const baseMatchHeight = 64;
-    const baseGap = 12;
-    const factor = Math.pow(2, roundIdx);
-    const slotHeight = (baseMatchHeight + baseGap) * factor;
-    return matchIdx * slotHeight + (slotHeight - baseMatchHeight) / 2;
-  };
-
-  const getColumnHeight = (roundIdx: number): number => {
-    const count = rounds[roundIdx]?.length || 0;
-    const baseMatchHeight = 64;
-    const baseGap = 12;
-    const factor = Math.pow(2, roundIdx);
-    const slotHeight = (baseMatchHeight + baseGap) * factor;
-    return count * slotHeight;
-  };
-
-  // Matches are absolutely positioned at `top + 24` (the 24px round-header row)
-  // and each card is ~64px tall, so the real content bottom is the tallest
-  // column plus the header offset and one card height. Add that so the last
-  // match in a column isn't clipped (which previously forced a scrollbar).
-  const HEADER_OFFSET = 24;
+  // ── Routing-graph-driven vertical layout ─────────────────────────
+  // Position each match by the matches that actually feed it (winnerGoesTo),
+  // not by assuming every round halves the previous. This correctly lays out
+  // bye-compressed brackets (e.g. Challonge imports where round 1 has fewer
+  // matches than round 2) AND standard power-of-two brackets, which fall out as
+  // the special case where the first column is the widest.
+  const ROW = 76;            // 64px card + 12px gap
   const CARD_HEIGHT = 64;
-  const maxHeight = Math.max(...rounds.map((_, i) => getColumnHeight(i))) + HEADER_OFFSET + CARD_HEIGHT;
+  const HEADER_OFFSET = 24;
+  const FIRST_CENTER = CARD_HEIGHT / 2 + 6; // 38 — matches the prior tight stack
+
+  const centers = (() => {
+    const map = new Map<string, number>();
+    if (rounds.length === 0) return map;
+
+    const inSet = new Set(rounds.flat().map(m => m.id));
+    const destOf = new Map<string, string>();        // match -> the in-set match its winner feeds
+    const feedersOf = new Map<string, string[]>();   // match -> in-set matches feeding it
+    rounds.flat().forEach(m => {
+      const dest = m.winnerGoesTo?.matchId;
+      if (dest && inSet.has(dest)) {
+        destOf.set(m.id, dest);
+        const arr = feedersOf.get(dest) ?? [];
+        arr.push(m.id);
+        feedersOf.set(dest, arr);
+      }
+    });
+
+    // Base column = the widest one; lay it out as a tight, even stack.
+    let baseIdx = 0;
+    rounds.forEach((r, i) => { if (r.length > rounds[baseIdx].length) baseIdx = i; });
+    rounds[baseIdx].forEach((m, j) => map.set(m.id, j * ROW + FIRST_CENTER));
+
+    // Rightward of base: a match sits at the average center of its feeders.
+    for (let c = baseIdx + 1; c < rounds.length; c++) {
+      rounds[c].forEach((m, j) => {
+        const feeders = (feedersOf.get(m.id) ?? []).filter(id => map.has(id));
+        map.set(
+          m.id,
+          feeders.length > 0
+            ? feeders.reduce((s, id) => s + map.get(id)!, 0) / feeders.length
+            : j * ROW + FIRST_CENTER,
+        );
+      });
+    }
+
+    // Leftward of base (play-in rounds): a match aligns to the match it feeds,
+    // with siblings that feed the same destination stacked around it.
+    for (let c = baseIdx - 1; c >= 0; c--) {
+      const byDest = new Map<string, BracketMatch[]>();
+      rounds[c].forEach(m => {
+        const d = destOf.get(m.id) ?? `__none_${m.id}`;
+        const arr = byDest.get(d) ?? [];
+        arr.push(m);
+        byDest.set(d, arr);
+      });
+      let fallbackRow = 0;
+      byDest.forEach((group, d) => {
+        const destCenter = map.get(d);
+        group.forEach((m, k) => {
+          if (destCenter != null) {
+            map.set(m.id, destCenter + (k - (group.length - 1) / 2) * ROW);
+          } else {
+            map.set(m.id, fallbackRow++ * ROW + FIRST_CENTER);
+          }
+        });
+      });
+    }
+
+    return map;
+  })();
+
+  const centerOf = (id: string) => centers.get(id) ?? FIRST_CENTER;
+
+  const allCenters = [...centers.values()];
+  const maxHeight = (allCenters.length ? Math.max(...allCenters) : FIRST_CENTER)
+    + CARD_HEIGHT / 2 + HEADER_OFFSET + CARD_HEIGHT;
 
   return (
     <div className="overflow-x-auto overflow-y-hidden pb-4">
@@ -336,7 +389,6 @@ function BracketTree({
         style={{ minWidth: `${rounds.length * 220}px`, height: `${maxHeight}px` }}
       >
         {rounds.map((round, roundIdx) => {
-          const isLastRound = roundIdx === rounds.length - 1;
           return (
             <div key={roundIdx} className="flex flex-col" style={{ width: 220 }}>
               <div className="px-4 mb-3 h-6 flex items-center">
@@ -347,16 +399,19 @@ function BracketTree({
 
               <div className="relative flex-1">
                 {round.map((match, matchIdx) => {
-                  const top = getMatchTopOffset(roundIdx, matchIdx);
-                  const nextMatchIdx = Math.floor(matchIdx / 2);
-                  const nextMatchTop = !isLastRound ? getMatchTopOffset(roundIdx + 1, nextMatchIdx) : 0;
-                  const thisMatchCenter = top + 32;
-                  const nextMatchCenter = nextMatchTop + 32;
+                  const thisMatchCenter = centerOf(match.id);
+                  const top = thisMatchCenter - 32;
+                  // Connector follows the real routing: draw to the match this
+                  // one's winner feeds, when that destination is in this tree.
+                  const destId = match.winnerGoesTo && centers.has(match.winnerGoesTo.matchId)
+                    ? match.winnerGoesTo.matchId
+                    : null;
+                  const nextMatchCenter = destId ? centerOf(destId) : thisMatchCenter;
 
                   const minCenter = Math.min(thisMatchCenter, nextMatchCenter);
                   const svgHeight = Math.abs(nextMatchCenter - thisMatchCenter) + 2;
                   const svgTop = thisMatchCenter > nextMatchCenter
-                    ? nextMatchCenter - (top + 24) + 24 - 32
+                    ? nextMatchCenter - thisMatchCenter
                     : 0;
                   const y1 = thisMatchCenter - minCenter;
                   const y2 = nextMatchCenter - minCenter;
@@ -373,7 +428,7 @@ function BracketTree({
                         onAssignTeam={(slot, id, name) => onAssignTeam(globalRoundOffset + roundIdx, matchIdx, slot, id, name)}
                       />
 
-                      {!isLastRound && (
+                      {destId && (
                         <svg
                           className="absolute pointer-events-none"
                           style={{ left: '176px', top: svgTop, width: 44, height: svgHeight }}
