@@ -29,7 +29,9 @@ async function proxyRequest(path: string, method: string = 'GET', body?: any) {
   };
 
   if (body && (method === 'POST' || method === 'PUT')) {
-    options.headers = { ...options.headers, 'Content-Type': 'application/vnd.api+json' };
+    // Use application/json so Vercel auto-parses req.body on the proxy.
+    // The proxy re-sends to Challonge with the correct vnd.api+json content-type.
+    options.headers = { ...options.headers, 'Content-Type': 'application/json' };
     options.body = JSON.stringify(body);
   }
 
@@ -58,7 +60,7 @@ export async function createChallongeTournament(
     },
   };
 
-  const result = await proxyRequest('/tournaments', 'POST', body);
+  const result = await proxyRequest('/tournaments.json', 'POST', body);
   return {
     id: result.data.id,
     name: result.data.attributes.name,
@@ -78,16 +80,15 @@ export async function bulkAddParticipants(
   }));
 
   const body = {
-    data: participants.map((p) => ({
-      type: 'participant',
+    data: {
+      type: 'Participants',
       attributes: {
-        name: p.name,
-        seed: p.seed,
+        participants,
       },
-    })),
+    },
   };
 
-  const result = await proxyRequest(`/tournaments/${tournamentId}/participants/bulk`, 'POST', body);
+  const result = await proxyRequest(`/tournaments/${tournamentId}/participants/bulk_add.json`, 'POST', body);
 
   return result.data.map((p: any) => ({
     id: p.id,

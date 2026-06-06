@@ -87,6 +87,30 @@ export default async function handler(req: any, res: any) {
   const url = `${API_BASE}${fullPath}`;
   const method = req.method || 'GET';
 
+  // Vercel may deliver the body as a raw string (esp. with vnd.api+json content-type)
+  // or not parse it at all. Normalize to a parsed object.
+  let parsedBody: any = req.body;
+  if (typeof parsedBody === 'string' && parsedBody.length > 0) {
+    try {
+      parsedBody = JSON.parse(parsedBody);
+    } catch {
+      // leave as-is if not JSON
+    }
+  }
+  // If body still missing on a write, try reading the raw stream
+  if (!parsedBody && (method === 'POST' || method === 'PUT')) {
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      }
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (raw) parsedBody = JSON.parse(raw);
+    } catch (e) {
+      console.log('Could not read raw body stream:', e);
+    }
+  }
+
   console.log(`Path parameter: "${path}"`);
   console.log(`Full path: "${fullPath}"`);
   console.log(`Full URL: ${url}`);
@@ -96,8 +120,8 @@ export default async function handler(req: any, res: any) {
     'Authorization': headers['Authorization'].substring(0, 20) + '...',
   });
 
-  if (req.body) {
-    console.log(`Request body:`, JSON.stringify(req.body, null, 2));
+  if (parsedBody) {
+    console.log(`Request body:`, JSON.stringify(parsedBody, null, 2));
   }
 
   try {
@@ -106,8 +130,8 @@ export default async function handler(req: any, res: any) {
       headers,
     };
 
-    if (req.body && (method === 'POST' || method === 'PUT')) {
-      fetchOptions.body = JSON.stringify(req.body);
+    if (parsedBody && (method === 'POST' || method === 'PUT')) {
+      fetchOptions.body = JSON.stringify(parsedBody);
     }
 
     // Try with header-based authentication first

@@ -168,8 +168,12 @@ export async function importChallongeBracket(
   try {
     console.log(`[Importer] Creating Challonge tournament: ${tournamentName}`);
 
+    // Map UI bracket type to Challonge's expected tournament_type value
+    const challongeType =
+      tournamentType === 'single' ? 'single elimination' : 'double elimination';
+
     // Create and start the tournament via API
-    const result = await ChallongeAPI.createFullTournament(tournamentName, teams, tournamentType);
+    const result = await ChallongeAPI.createFullTournament(tournamentName, teams, challongeType);
     const tournamentId = result.tournamentId;
 
     console.log(`[Importer] Tournament created: ${tournamentId}`);
