@@ -318,7 +318,14 @@ export function MatchesPage() {
   const byStatus = useMemo<Record<MatchStatus, ScheduleMatch[]>>(() => ({
     live: matches.filter(m => m.status === 'live'),
     upcoming: matches.filter(m => m.status === 'upcoming'),
-    completed: matches.filter(m => m.status === 'completed'),
+    // Completed shows most-recently-played first (descending by scheduled time);
+    // undated completed matches sort to the bottom. Upcoming/live stay ascending.
+    completed: matches.filter(m => m.status === 'completed').slice().sort((a, b) => {
+      const ta = Number.isFinite(a.sortTs) ? a.sortTs : -Infinity;
+      const tb = Number.isFinite(b.sortTs) ? b.sortTs : -Infinity;
+      if (tb !== ta) return tb - ta;
+      return a.tournamentName.localeCompare(b.tournamentName) || a.stage.localeCompare(b.stage);
+    }),
   }), [matches]);
 
   const tabs = useMemo<MatchStatus[]>(
