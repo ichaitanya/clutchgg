@@ -172,23 +172,31 @@ export function findLatestMatchOnMap(
 }
 
 // Count how many of `playerRiotIds` (each "name#tag") match a roster entry.
+// Normalize a Riot ID / name for comparison: Unicode NFKC (so width/encoding
+// variants of CJK and special glyphs match), lowercased, trimmed, and with
+// internal whitespace collapsed. Handles names like "AaG 火#000",
+// "カウシク#Hard", "EL1TE 悪魔#垩aei" that exact-match comparison misses.
+function normalizeId(s: string): string {
+  return s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 // Roster entries may be "name#tag" or a bare display name (matched on name).
 export function countRiotIdOverlap(playerRiotIds: string[], roster: string[]): number {
-  const rosterLc = roster.map(r => r.toLowerCase());
+  const rosterN = roster.map(normalizeId);
   return playerRiotIds.filter(rid => {
-    const lc = rid.toLowerCase();
-    const name = lc.split('#')[0];
-    return rosterLc.some(r => r === lc || r === name);
+    const n = normalizeId(rid);
+    const name = n.split('#')[0];
+    return rosterN.some(r => r === n || r === name);
   }).length;
 }
 
 // Does an API player match any roster entry? Roster entries may be "name#tag"
 // (Riot ID) or a bare display name.
 function apiPlayerMatchesRoster(player: PlayerMatchStats, roster: string[]): boolean {
-  const riotId = `${player.name}#${player.tag}`.toLowerCase();
-  const name = player.name.toLowerCase();
+  const riotId = normalizeId(`${player.name}#${player.tag}`);
+  const name = normalizeId(player.name);
   return roster.some(r => {
-    const v = r.toLowerCase();
+    const v = normalizeId(r);
     return v === riotId || v === name;
   });
 }
@@ -241,42 +249,24 @@ export function mapPlayersToTeams(
   const blueTeam = apiPlayers.filter(p => p.team === 'Blue');
   const redTeam = apiPlayers.filter(p => p.team === 'Red');
 
-  const blueMatches = blueTeam.filter(p =>
-    tournamentTeam1Players.some(
-      tp => tp.toLowerCase() === `${p.name.toLowerCase()}#${p.tag.toLowerCase()}`
-        || tp.toLowerCase() === p.name.toLowerCase()
-    )
-  ).length;
+  const countIn = (players: PlayerMatchStats[], roster: string[]) =>
+    players.filter(p => apiPlayerMatchesRoster(p, roster)).length;
 
-  const redMatches = redTeam.filter(p =>
-    tournamentTeam1Players.some(
-      tp => tp.toLowerCase() === `${p.name.toLowerCase()}#${p.tag.toLowerCase()}`
-        || tp.toLowerCase() === p.name.toLowerCase()
-    )
-  ).length;
+  const blueMatches = countIn(blueTeam, tournamentTeam1Players);
+  const redMatches = countIn(redTeam, tournamentTeam1Players);
 
   // Determine which API team maps to tournament team 1
   if (blueMatches >= redMatches) {
     return {
       team1Matches: blueMatches,
-      team2Matches: redTeam.filter(p =>
-        tournamentTeam2Players.some(
-          tp => tp.toLowerCase() === `${p.name.toLowerCase()}#${p.tag.toLowerCase()}`
-            || tp.toLowerCase() === p.name.toLowerCase()
-        )
-      ).length,
+      team2Matches: countIn(redTeam, tournamentTeam2Players),
       team1Name: 'Blue',
       team2Name: 'Red',
     };
   } else {
     return {
       team1Matches: redMatches,
-      team2Matches: blueTeam.filter(p =>
-        tournamentTeam2Players.some(
-          tp => tp.toLowerCase() === `${p.name.toLowerCase()}#${p.tag.toLowerCase()}`
-            || tp.toLowerCase() === p.name.toLowerCase()
-        )
-      ).length,
+      team2Matches: countIn(blueTeam, tournamentTeam2Players),
       team1Name: 'Red',
       team2Name: 'Blue',
     };
@@ -300,7 +290,10 @@ export function buildPlayerStatsFromAPI(
     const totalShots = player.stats.headshots + player.stats.bodyshots + player.stats.legshots;
     const hsPercent = totalShots > 0 ? (player.stats.headshots / totalShots) * 100 : 0;
     const riotId = `${player.name}#${player.tag}`;
-    const displayName = displayNameByRiotId[riotId.toLowerCase()] ?? player.name;
+    const displayName =
+      displayNameByRiotId[riotId.toLowerCase()] ??
+      displayNameByRiotId[normalizeId(riotId)] ??
+      player.name;
 
     return {
       playerId: riotId,
@@ -401,6 +394,11 @@ export async function getCustomGamesForBothTeams(
   const scan = history.slice(0, count);
   const out: BothTeamsCandidate[] = [];
 
+  // TEMP DIAGNOSTIC — remove once Riot ID matching is verified.
+  console.log('[StatsFinder] history fetched:', history.length, 'custom games for', `${playerName}#${playerTag}`, '(region', region + ')');
+  console.log('[StatsFinder] team1 roster:', JSON.stringify(team1Roster));
+  console.log('[StatsFinder] team2 roster:', JSON.stringify(team2Roster));
+
   for (const h of scan) {
     if (!h.uuid) continue;
     let details: MatchDetails;
@@ -412,6 +410,14 @@ export async function getCustomGamesForBothTeams(
 
     const t1 = countRosterMatches(details.players, team1Roster);
     const t2 = countRosterMatches(details.players, team2Roster);
+
+    // TEMP DIAGNOSTIC — per-game breakdown of who matched.
+    console.log(
+      `[StatsFinder] game ${h.uuid.slice(0, 8)} (${details.metadata.map}) players:`,
+      details.players.map(p => `${p.name}#${p.tag}`).join(', '),
+      `| team1 matched=${t1} team2 matched=${t2} (need ${minPerTeam} each)`,
+    );
+
     if (t1 < minPerTeam || t2 < minPerTeam) continue; // both teams must be present
 
     out.push({
