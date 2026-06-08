@@ -388,7 +388,7 @@ export async function getCustomGamesForBothTeams(
   team1Roster: string[],
   team2Roster: string[],
   region: string = 'ap',
-  count: number = 15,
+  count: number = 20,
 ): Promise<BothTeamsCandidate[]> {
   const history = await getPlayerMatchHistory(playerName, playerTag, region, 'custom', count);
   const scan = history.slice(0, count);

@@ -1509,7 +1509,7 @@ function MatchStatsFinder({
     const team2Roster = team2.players.map(p => p.riotId || p.name);
     setLoading(true);
     try {
-      const result = await ValorantAPI.getCustomGamesForBothTeams(name, tag, team1Roster, team2Roster, 'ap', 15);
+      const result = await ValorantAPI.getCustomGamesForBothTeams(name, tag, team1Roster, team2Roster, 'ap', 20);
       setCandidates(result);
       if (result.length === 0) setError('No recent custom games found for this player. Try another player.');
     } catch (e) {
