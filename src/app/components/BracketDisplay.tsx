@@ -320,58 +320,53 @@ function BracketTree({
     if (rounds.length === 0) return map;
 
     const inSet = new Set(rounds.flat().map(m => m.id));
-    const destOf = new Map<string, string>();        // match -> the in-set match its winner feeds
     const feedersOf = new Map<string, string[]>();   // match -> in-set matches feeding it
+    const matchById = new Map<string, BracketMatch>();
     rounds.flat().forEach(m => {
+      matchById.set(m.id, m);
       const dest = m.winnerGoesTo?.matchId;
       if (dest && inSet.has(dest)) {
-        destOf.set(m.id, dest);
         const arr = feedersOf.get(dest) ?? [];
         arr.push(m.id);
         feedersOf.set(dest, arr);
       }
     });
+    // Keep feeders in column order so pairs read top-to-bottom consistently.
+    const colIndexOf = new Map<string, number>();
+    rounds.forEach((r, ci) => r.forEach(m => colIndexOf.set(m.id, ci)));
+    feedersOf.forEach(arr => arr.sort((a, b) => {
+      const ca = colIndexOf.get(a)!, cb = colIndexOf.get(b)!;
+      return ca !== cb ? ca - cb : 0;
+    }));
 
-    // Base column = the widest one; lay it out as a tight, even stack.
-    let baseIdx = 0;
-    rounds.forEach((r, i) => { if (r.length > rounds[baseIdx].length) baseIdx = i; });
-    rounds[baseIdx].forEach((m, j) => map.set(m.id, j * ROW + FIRST_CENTER));
+    // Challonge-style layout: a match is centered exactly between the matches
+    // that feed it; "leaf" matches (no in-tree feeders — first round / bye
+    // entries) get evenly spaced slots. Computed via post-order so feeders are
+    // always positioned before the match they feed.
+    let nextLeafSlot = 0;
+    const place = (id: string): number => {
+      if (map.has(id)) return map.get(id)!;
+      const feeders = feedersOf.get(id) ?? [];
+      let center: number;
+      if (feeders.length === 0) {
+        center = nextLeafSlot * ROW + FIRST_CENTER;
+        nextLeafSlot += 1;
+      } else {
+        const fc = feeders.map(place);
+        center = (Math.min(...fc) + Math.max(...fc)) / 2;
+      }
+      map.set(id, center);
+      return center;
+    };
 
-    // Rightward of base: a match sits at the average center of its feeders.
-    for (let c = baseIdx + 1; c < rounds.length; c++) {
-      rounds[c].forEach((m, j) => {
-        const feeders = (feedersOf.get(m.id) ?? []).filter(id => map.has(id));
-        map.set(
-          m.id,
-          feeders.length > 0
-            ? feeders.reduce((s, id) => s + map.get(id)!, 0) / feeders.length
-            : j * ROW + FIRST_CENTER,
-        );
-      });
-    }
-
-    // Leftward of base (play-in rounds): a match aligns to the match it feeds,
-    // with siblings that feed the same destination stacked around it.
-    for (let c = baseIdx - 1; c >= 0; c--) {
-      const byDest = new Map<string, BracketMatch[]>();
-      rounds[c].forEach(m => {
-        const d = destOf.get(m.id) ?? `__none_${m.id}`;
-        const arr = byDest.get(d) ?? [];
-        arr.push(m);
-        byDest.set(d, arr);
-      });
-      let fallbackRow = 0;
-      byDest.forEach((group, d) => {
-        const destCenter = map.get(d);
-        group.forEach((m, k) => {
-          if (destCenter != null) {
-            map.set(m.id, destCenter + (k - (group.length - 1) / 2) * ROW);
-          } else {
-            map.set(m.id, fallbackRow++ * ROW + FIRST_CENTER);
-          }
-        });
-      });
-    }
+    // Roots = matches whose winner doesn't feed anything in this tree (the
+    // final, plus any stray). Placing each root lays out its whole subtree.
+    rounds.flat().forEach(m => {
+      const dest = m.winnerGoesTo?.matchId;
+      if (!dest || !inSet.has(dest)) place(m.id);
+    });
+    // Safety: place anything not yet reached (shouldn't happen in a connected tree).
+    rounds.flat().forEach(m => { if (!map.has(m.id)) place(m.id); });
 
     return map;
   })();
