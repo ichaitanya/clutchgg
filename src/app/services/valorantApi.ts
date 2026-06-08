@@ -378,9 +378,10 @@ export interface BothTeamsCandidate {
   team2RosterSize: number;
 }
 
-// Fetch a player's recent custom games and keep only those where BOTH rosters
-// have at least `minPerTeam` players present. Rosters are "name#tag" Riot IDs
-// and/or bare display names.
+// Fetch a player's recent custom games. Returns all of them with per-team
+// roster overlap counts for the admin's reference (no longer filtered by a
+// minimum-players-per-team rule). Rosters are "name#tag" Riot IDs and/or bare
+// display names.
 export async function getCustomGamesForBothTeams(
   playerName: string,
   playerTag: string,
@@ -388,16 +389,10 @@ export async function getCustomGamesForBothTeams(
   team2Roster: string[],
   region: string = 'ap',
   count: number = 15,
-  minPerTeam: number = 2,
 ): Promise<BothTeamsCandidate[]> {
   const history = await getPlayerMatchHistory(playerName, playerTag, region, 'custom', count);
   const scan = history.slice(0, count);
   const out: BothTeamsCandidate[] = [];
-
-  // TEMP DIAGNOSTIC — remove once Riot ID matching is verified.
-  console.log('[StatsFinder] history fetched:', history.length, 'custom games for', `${playerName}#${playerTag}`, '(region', region + ')');
-  console.log('[StatsFinder] team1 roster:', JSON.stringify(team1Roster));
-  console.log('[StatsFinder] team2 roster:', JSON.stringify(team2Roster));
 
   for (const h of scan) {
     if (!h.uuid) continue;
@@ -408,17 +403,11 @@ export async function getCustomGamesForBothTeams(
       continue;
     }
 
+    // Roster overlap is reported for the admin's reference, but no longer used
+    // to filter games out — all the queried player's custom games are returned
+    // so the admin can pick and assign any of them to a map slot.
     const t1 = countRosterMatches(details.players, team1Roster);
     const t2 = countRosterMatches(details.players, team2Roster);
-
-    // TEMP DIAGNOSTIC — per-game breakdown of who matched.
-    console.log(
-      `[StatsFinder] game ${h.uuid.slice(0, 8)} (${details.metadata.map}) players:`,
-      details.players.map(p => `${p.name}#${p.tag}`).join(', '),
-      `| team1 matched=${t1} team2 matched=${t2} (need ${minPerTeam} each)`,
-    );
-
-    if (t1 < minPerTeam || t2 < minPerTeam) continue; // both teams must be present
 
     out.push({
       matchId: h.uuid,

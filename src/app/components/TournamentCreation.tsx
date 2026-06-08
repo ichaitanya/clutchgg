@@ -1509,9 +1509,9 @@ function MatchStatsFinder({
     const team2Roster = team2.players.map(p => p.riotId || p.name);
     setLoading(true);
     try {
-      const result = await ValorantAPI.getCustomGamesForBothTeams(name, tag, team1Roster, team2Roster, 'ap', 15, 2);
+      const result = await ValorantAPI.getCustomGamesForBothTeams(name, tag, team1Roster, team2Roster, 'ap', 15);
       setCandidates(result);
-      if (result.length === 0) setError('No custom games found where both teams have at least 2 players. Try another player.');
+      if (result.length === 0) setError('No recent custom games found for this player. Try another player.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch custom games.');
     } finally {
@@ -1552,8 +1552,8 @@ function MatchStatsFinder({
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-gray-500">
-        Pick a player from either team and find custom games where <span className="text-gray-300">both teams have ≥2/5 players</span>.
-        View a game's scoreboard, then apply it to a map slot.
+        Pick a player from either team to list their recent custom games. Roster
+        overlap is shown for reference. View a game's scoreboard, then apply it to a map slot.
       </p>
 
       <div className="flex gap-2">
@@ -1585,7 +1585,7 @@ function MatchStatsFinder({
 
       {candidates && candidates.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Matching Custom Games</p>
+          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Recent Custom Games</p>
           {candidates.map(c => (
             <div key={c.matchId} className="rounded-lg border border-green-700/40 bg-green-900/10 p-3">
               <div className="flex items-center justify-between gap-3">
