@@ -25,6 +25,8 @@ interface TournamentManagerProps {
   // teams, players and match results, but cannot create or delete tournaments,
   // and cannot change the bracket type once the tournament has begun.
   organizerMode?: boolean;
+  // Superadmin: unlocks maintenance actions like the one-time bracket re-sync.
+  isSuperAdmin?: boolean;
 }
 
 function EventDetailsForm({
@@ -307,6 +309,7 @@ export function TournamentManager({
   tournaments,
   onTournamentsChange,
   organizerMode = false,
+  isSuperAdmin = false,
 }: TournamentManagerProps) {
   const [showCreateTournament, setShowCreateTournament] = useState(false);
   const [editingTournamentId, setEditingTournamentId] = useState<string | null>(null);
@@ -354,6 +357,7 @@ export function TournamentManager({
         initialTournament={editingTournament}
         isEditing={!!editingTournamentId}
         organizerMode={organizerMode}
+        isSuperAdmin={isSuperAdmin}
         bracketLocked={organizerMode && !!editingTournament && tournamentHasBegun(editingTournament)}
         onComplete={(tournament) => handleSaveTournament(tournament)}
       />

@@ -1804,6 +1804,7 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
               <TournamentManager
                 tournaments={visibleTournaments}
                 organizerMode={isOrganizer}
+                isSuperAdmin={isSuperadmin}
                 onTournamentsChange={async (tournaments) => {
                   // For organizers, `tournaments` only contains their scoped tournament(s).
                   // Merge back into the full list so we never drop other tournaments.

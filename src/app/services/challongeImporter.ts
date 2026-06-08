@@ -25,6 +25,15 @@ interface ParsedMatch extends V1Match {
   idStr: string;
 }
 
+// Challonge's `identifier` (A, B, … Z, AA, AB, …) is its true top-to-bottom
+// position label within a round — NOT suggested_play_order. Ordering columns by
+// it reproduces Challonge's exact vertical placement (critical for the losers
+// bracket, whose rows don't follow play order).
+function compareIdentifier(a: string, b: string): number {
+  if (a.length !== b.length) return a.length - b.length; // A..Z before AA..
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function mapChallongeToNative(
   rawMatches: any[],
   rawParticipants: any[],
@@ -135,9 +144,10 @@ function mapChallongeToNative(
   const rounds: BracketMatch[][] = [];
 
   orderedColumns.forEach((column, columnIndex) => {
-    const sorted = [...column].sort(
-      (a, b) => (a.match.suggested_play_order ?? 0) - (b.match.suggested_play_order ?? 0),
-    );
+    // Order rows by Challonge's identifier (its real vertical position), so the
+    // losers bracket placement matches Challonge exactly. displayNumber still
+    // shows suggested_play_order, so the "Winner of N" labels stay consistent.
+    const sorted = [...column].sort((a, b) => compareIdentifier(a.match.identifier, b.match.identifier));
 
     const roundMatches: BracketMatch[] = sorted.map((c, position) => {
       const m = c.match;

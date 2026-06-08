@@ -571,3 +571,59 @@ export function getBracketStats(bracket: BracketGenerated) {
     totalRounds: bracket.rounds.length,
   };
 }
+
+/**
+ * Re-sort the matches WITHIN each column of an imported bracket into the order
+ * Challonge uses (its `identifier` order), derived purely from the saved routing
+ * graph — no Challonge call needed. This fixes brackets imported before the
+ * importer ordered columns correctly (the losers bracket looked scrambled).
+ *
+ * It ONLY changes the array order and each match's `position`/`displayNumber`
+ * indices. Every other field on every match — id, team names/ids, winner, maps,
+ * playerStats, date/time, format, streamUrl, clips, and the winnerGoesTo /
+ * loserGoesTo routing — is preserved byte-for-byte. Returns a NEW bracket; the
+ * input is not mutated. Safe to call on any bracket (returns it unchanged if
+ * there's nothing to reorder).
+ *
+ * Ordering rule (matches Challonge exactly — verified against live data):
+ * a column is ordered by (a) the in-column rank of the match each one's WINNER
+ * feeds into, then (b) which slot it feeds (slot 1 above slot 2). Columns are
+ * processed right-to-left so downstream ranks are known first.
+ */
+export function resortBracketColumns(bracket: BracketGenerated): BracketGenerated {
+  if (!bracket?.rounds?.length) return bracket;
+
+  // rank[matchId] = its position within its own (already-reordered) column.
+  const rank = new Map<string, number>();
+
+  // Reorder each column from the rightmost (final) leftward.
+  const reordered: BracketMatch[][] = bracket.rounds.map(r => [...r]);
+  for (let c = reordered.length - 1; c >= 0; c--) {
+    const col = reordered[c];
+    const keyOf = (m: BracketMatch): [number, number] => {
+      const dest = m.winnerGoesTo;
+      if (dest && rank.has(dest.matchId)) return [rank.get(dest.matchId)!, dest.slot];
+      // Final / no downstream in this tree — keep current relative order.
+      return [Number.MAX_SAFE_INTEGER, m.position ?? 0];
+    };
+    col.sort((a, b) => {
+      const ka = keyOf(a), kb = keyOf(b);
+      return ka[0] - kb[0] || ka[1] - kb[1];
+    });
+    col.forEach((m, i) => rank.set(m.id, i));
+  }
+
+  // Reassign `position` to the new in-column index. displayNumber is the
+  // human match number and is intentionally left as-is (it tracks the match,
+  // not its row), so "Winner of N" references stay correct.
+  const rounds = reordered.map(col => col.map((m, i) => ({ ...m, position: i })));
+
+  return {
+    ...bracket,
+    rounds,
+    customizationHistory: [
+      ...(bracket.customizationHistory ?? []),
+      { timestamp: new Date().toISOString(), changes: 'Re-synced bracket column order to match Challonge layout' },
+    ],
+  };
+}

@@ -8,6 +8,7 @@ import {
   generateSimplifiedSingleEliminationBracket,
   generateSimplifiedDoubleEliminationBracket,
   generateSimplifiedRoundRobinBracket,
+  resortBracketColumns,
 } from '../utils/bracketUtils';
 import * as ValorantAPI from '../services/valorantApi';
 import { upsertTournament, uploadImage, getTournaments } from '../services/db';
@@ -2333,6 +2334,7 @@ function CreateTournamentScreen({
   isEditing = false,
   organizerMode = false,
   bracketLocked = false,
+  isSuperAdmin = false,
 }: {
   onComplete: (tournament: Tournament) => void;
   initialTournament?: Tournament;
@@ -2341,6 +2343,8 @@ function CreateTournamentScreen({
   organizerMode?: boolean;
   // True once the tournament has begun: bracket-type changes are forbidden.
   bracketLocked?: boolean;
+  // Superadmin: unlocks maintenance actions like the one-time bracket re-sync.
+  isSuperAdmin?: boolean;
 }) {
   const [step, setStep] = useState<'tournament' | 'teamList' | 'teamForm' | 'players'>(
     'tournament'
@@ -2422,6 +2426,30 @@ function CreateTournamentScreen({
   const handleBracketConfigurationGenerated = (bracket: BracketGenerated) => {
     setTournament(t => ({ ...t, generatedBracket: scopeBracketIds(bracket, t.id) }));
     setShowBracketModal(false);
+  };
+
+  // One-time fix for tournaments imported before the importer ordered losers-
+  // bracket columns correctly. Re-sorts each column to match Challonge's layout
+  // using only the saved routing graph — every entered result/stat/date is
+  // preserved (matches are matched by id; only their row order changes).
+  const handleResyncBracketOrder = () => {
+    const snapshot = JSON.stringify({
+      generatedBracket: tournament.generatedBracket,
+      stage1Bracket: tournament.stage1Bracket,
+      stage2Bracket: tournament.stage2Bracket,
+    });
+    console.log('[ResyncBracket] BACKUP (copy to recover if needed):', snapshot);
+
+    const fix = (b?: BracketGenerated) => (b ? resortBracketColumns(b) : b);
+    const updated: Tournament = {
+      ...tournament,
+      generatedBracket: fix(tournament.generatedBracket),
+      stage1Bracket: fix(tournament.stage1Bracket),
+      stage2Bracket: fix(tournament.stage2Bracket),
+    };
+    setTournament(updated);
+    persistTournament(updated);
+    alert('Bracket column order re-synced to Challonge layout. All match results and data were preserved. A recovery backup was logged to the browser console.');
   };
 
   const handleMatchEdit = (updatedMatch: BracketMatch) => {
@@ -2860,10 +2888,21 @@ function CreateTournamentScreen({
             <div className="bg-[#151821] border border-[#ff4655]/50 rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-white font-semibold">Bracket Matches</h3>
-                <div className="px-2.5 py-1 rounded-lg bg-[#ff4655]/10 border border-[#ff4655]/30">
-                  <p className="text-xs text-[#ff4655] font-semibold">
-                    {tournament.generatedBracket.rounds.reduce((sum, round) => sum + round.length, 0)} matches
-                  </p>
+                <div className="flex items-center gap-2">
+                  {isSuperAdmin && tournament.generatedBracket.bracketType === 'double' && (
+                    <button
+                      onClick={handleResyncBracketOrder}
+                      title="Re-sort losers-bracket columns to match Challonge's layout. Preserves all match results and data."
+                      className="px-2.5 py-1 rounded-lg border border-[#2a2d3a] text-gray-400 text-xs font-semibold hover:border-[#ff4655]/50 hover:text-white transition-colors"
+                    >
+                      Re-sync order
+                    </button>
+                  )}
+                  <div className="px-2.5 py-1 rounded-lg bg-[#ff4655]/10 border border-[#ff4655]/30">
+                    <p className="text-xs text-[#ff4655] font-semibold">
+                      {tournament.generatedBracket.rounds.reduce((sum, round) => sum + round.length, 0)} matches
+                    </p>
+                  </div>
                 </div>
               </div>
               <div className="space-y-4">
