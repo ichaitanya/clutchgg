@@ -101,27 +101,34 @@ function mapChallongeToNative(
   if (hasGF) orderedColumns.push(cols.filter((c) => c.section === 'grand-final'));
 
   // ── Resolve a slot's team ────────────────────────────────────────
+  // For an empty slot, name it after its source — "Winner of 6" / "Loser of 11"
+  // (referencing the source match's displayNumber) so the bracket flow is
+  // readable, mirroring Challonge.
   const resolveTeam = (
-    matchId: string,
+    m: ParsedMatch,
     slot: 1 | 2,
-    playerId: number | null,
     section: Col['section'],
   ): { teamId: string; teamName: string } => {
+    const playerId = slot === 1 ? m.player1_id : m.player2_id;
     if (playerId != null) {
       const name = participantName.get(playerId) ?? `Player ${playerId}`;
       const team = teamByName.get(name.trim().toLowerCase());
       return { teamId: team?.id ?? `challonge_${playerId}`, teamName: name };
     }
-    // Unfilled slot — fed by routing, shown as a placeholder until decided
-    const tbd =
-      section === 'grand-final'
-        ? slot === 1
-          ? 'WB Champion'
-          : 'LB Champion'
-        : section === 'losers'
-          ? 'LB TBD'
-          : 'Winner TBD';
-    return { teamId: `slot_${matchId}_${slot}`, teamName: tbd };
+
+    const prereqId = slot === 1 ? m.player1_prereq_match_id : m.player2_prereq_match_id;
+    const isLoser = slot === 1 ? m.player1_is_prereq_match_loser : m.player2_is_prereq_match_loser;
+    const srcNum = prereqId != null ? byId.get(prereqId)?.suggested_play_order : null;
+
+    let teamName: string;
+    if (srcNum != null) {
+      teamName = `${isLoser ? 'Loser' : 'Winner'} of ${srcNum}`;
+    } else if (section === 'grand-final') {
+      teamName = slot === 1 ? 'WB Champion' : 'LB Champion';
+    } else {
+      teamName = section === 'losers' ? 'LB TBD' : 'Winner TBD';
+    }
+    return { teamId: `slot_${m.idStr}_${slot}`, teamName };
   };
 
   // ── Build BracketMatch objects column by column ──────────────────
@@ -134,8 +141,8 @@ function mapChallongeToNative(
 
     const roundMatches: BracketMatch[] = sorted.map((c, position) => {
       const m = c.match;
-      const s1 = resolveTeam(m.idStr, 1, m.player1_id, c.section);
-      const s2 = resolveTeam(m.idStr, 2, m.player2_id, c.section);
+      const s1 = resolveTeam(m, 1, c.section);
+      const s2 = resolveTeam(m, 2, c.section);
 
       const winnerTeamId =
         m.winner_id != null
@@ -157,6 +164,7 @@ function mapChallongeToNative(
         autoPopulated: m.player1_id == null || m.player2_id == null,
         needsAssignment: false,
       };
+      if (m.suggested_play_order != null) bm.displayNumber = m.suggested_play_order;
       if (isDouble) bm.bracketSection = c.section;
       if (winnerTeamId) bm.winner = winnerTeamId;
       return bm;

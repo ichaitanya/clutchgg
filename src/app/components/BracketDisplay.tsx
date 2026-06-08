@@ -418,6 +418,14 @@ function BracketTree({
 
                   return (
                     <div key={match.id} className="absolute" style={{ top: top + 24, left: 8 }}>
+                      {match.displayNumber != null && (
+                        <span
+                          className="absolute -left-1.5 top-1/2 -translate-y-1/2 z-10 min-w-[16px] h-4 px-1 flex items-center justify-center rounded bg-[#0d0f16] border border-[#2a2d3a] text-[9px] font-bold text-gray-400"
+                          title={`Match ${match.displayNumber}`}
+                        >
+                          {match.displayNumber}
+                        </span>
+                      )}
                       <MatchCard
                         match={match}
                         editable={editable}

@@ -91,6 +91,9 @@ export interface BracketMatch {
   winner?: string; // team ID of winner
   round: number;
   position: number; // Position in the round
+  // Optional human-facing match number (e.g. Challonge's play order) used for
+  // "Winner of 6" / "Loser of 11" slot references in the bracket view.
+  displayNumber?: number;
   date?: string; // YYYY-MM-DD format
   time?: string; // HH:MM format
   bracketSection?: 'winners' | 'losers' | 'grand-final';
