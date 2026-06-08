@@ -8,7 +8,7 @@ import {
   generateSimplifiedSingleEliminationBracket,
   generateSimplifiedDoubleEliminationBracket,
   generateSimplifiedRoundRobinBracket,
-  resortBracketColumns,
+  applyChallongeWebsiteLayout,
 } from '../utils/bracketUtils';
 import * as ValorantAPI from '../services/valorantApi';
 import { upsertTournament, uploadImage, getTournaments } from '../services/db';
@@ -2428,28 +2428,27 @@ function CreateTournamentScreen({
     setShowBracketModal(false);
   };
 
-  // One-time fix for tournaments imported before the importer ordered losers-
-  // bracket columns correctly. Re-sorts each column to match Challonge's layout
-  // using only the saved routing graph — every entered result/stat/date is
-  // preserved (matches are matched by id; only their row order changes).
+  // One-time fix: rebuild the losers bracket to the challonge.com reference
+  // layout for a 10-team double-elim imported via the Challonge API. Winners-
+  // bracket matches keep all entered data; only the LB structure/numbering
+  // changes. Guarded — throws (and changes nothing) if the bracket isn't the
+  // exact expected structure or the LB already has results.
   const handleResyncBracketOrder = () => {
-    const snapshot = JSON.stringify({
-      generatedBracket: tournament.generatedBracket,
-      stage1Bracket: tournament.stage1Bracket,
-      stage2Bracket: tournament.stage2Bracket,
-    });
-    console.log('[ResyncBracket] BACKUP (copy to recover if needed):', snapshot);
+    if (!tournament.generatedBracket) return;
+    const snapshot = JSON.stringify(tournament.generatedBracket);
+    console.log('[FixLB] BACKUP (copy to recover if needed):', snapshot);
 
-    const fix = (b?: BracketGenerated) => (b ? resortBracketColumns(b) : b);
-    const updated: Tournament = {
-      ...tournament,
-      generatedBracket: fix(tournament.generatedBracket),
-      stage1Bracket: fix(tournament.stage1Bracket),
-      stage2Bracket: fix(tournament.stage2Bracket),
-    };
+    let fixed: BracketGenerated;
+    try {
+      fixed = applyChallongeWebsiteLayout(tournament.generatedBracket);
+    } catch (e) {
+      alert(`Could not apply the Challonge layout: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const updated: Tournament = { ...tournament, generatedBracket: fixed };
     setTournament(updated);
     persistTournament(updated);
-    alert('Bracket column order re-synced to Challonge layout. All match results and data were preserved. A recovery backup was logged to the browser console.');
+    alert('Losers bracket rebuilt to match the Challonge layout. All winners-bracket results and data were preserved. A recovery backup was logged to the browser console.');
   };
 
   const handleMatchEdit = (updatedMatch: BracketMatch) => {
@@ -2892,10 +2891,10 @@ function CreateTournamentScreen({
                   {isSuperAdmin && tournament.generatedBracket.bracketType === 'double' && (
                     <button
                       onClick={handleResyncBracketOrder}
-                      title="Re-sort losers-bracket columns to match Challonge's layout. Preserves all match results and data."
+                      title="One-time: rebuild the losers bracket to the challonge.com reference layout. Winners-bracket results and all entered data are preserved."
                       className="px-2.5 py-1 rounded-lg border border-[#2a2d3a] text-gray-400 text-xs font-semibold hover:border-[#ff4655]/50 hover:text-white transition-colors"
                     >
-                      Re-sync order
+                      Fix LB layout
                     </button>
                   )}
                   <div className="px-2.5 py-1 rounded-lg bg-[#ff4655]/10 border border-[#ff4655]/30">

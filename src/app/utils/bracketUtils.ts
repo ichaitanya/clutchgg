@@ -627,3 +627,166 @@ export function resortBracketColumns(bracket: BracketGenerated): BracketGenerate
     ],
   };
 }
+
+/**
+ * ONE-TIME fix for a single 10-team double-elimination tournament that was
+ * imported via the Challonge API, whose losers-bracket drop routing differs
+ * from the layout that tournament was originally run with on challonge.com.
+ *
+ * It rebuilds ONLY the losers bracket + grand final to the canonical
+ * website-reference layout and renumbers matches to match it. The winners
+ * bracket matches are kept intact — same ids and ALL entered data (winner,
+ * maps, playerStats, streamUrl, clips, date/time) — with only their
+ * displayNumber and loserGoesTo updated. Known winners-bracket losers are
+ * propagated into the new LB slots so actual teams show.
+ *
+ * Strongly guarded: throws if the bracket isn't the exact expected imported
+ * structure, or if any losers/GF match already has entered data — so it can
+ * never silently corrupt a different or partially-played bracket.
+ */
+export function applyChallongeWebsiteLayout(bracket: BracketGenerated): BracketGenerated {
+  const all = bracket.rounds.flat();
+  const byNum = new Map<number, BracketMatch>();
+  all.forEach(m => { if (m.displayNumber != null) byNum.set(m.displayNumber, m); });
+
+  // ── Guard 1: exact imported structure ───────────────────────────
+  const winnersNums = all.filter(m => m.bracketSection === 'winners').map(m => m.displayNumber).sort((a, b) => (a ?? 0) - (b ?? 0));
+  const losersNums = all.filter(m => m.bracketSection === 'losers').map(m => m.displayNumber).sort((a, b) => (a ?? 0) - (b ?? 0));
+  const gf = all.find(m => m.bracketSection === 'grand-final');
+  const expectWinners = [1, 2, 3, 4, 5, 6, 11, 12, 16];
+  const expectLosers = [7, 8, 9, 10, 13, 14, 15, 17];
+  const sameSet = (a: (number | undefined)[], b: number[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+  if (!sameSet(winnersNums, expectWinners) || !sameSet(losersNums, expectLosers) || gf?.displayNumber !== 18) {
+    throw new Error('Bracket is not the expected 10-team Challonge import structure — aborting (no changes made).');
+  }
+  // ── Guard 2: losers/GF must have NO entered data ─────────────────
+  const lbHasData = all.some(m =>
+    m.bracketSection !== 'winners' &&
+    (m.winner || (m.maps?.length ?? 0) > 0 || (m.playerStats?.length ?? 0) > 0),
+  );
+  if (lbHasData) {
+    throw new Error('Losers bracket already has entered results — aborting to avoid data loss.');
+  }
+
+  const id = (curNum: number) => byNum.get(curNum)!.id;
+  const loserOf = (curNum: number): { id: string; name: string } | null => {
+    const m = byNum.get(curNum);
+    if (!m?.winner) return null;
+    return m.winner === m.team1Id ? { id: m.team2Id, name: m.team2Name } : { id: m.team1Id, name: m.team1Name };
+  };
+  const winnerOf = (curNum: number): { id: string; name: string } | null => {
+    const m = byNum.get(curNum);
+    if (!m?.winner) return null;
+    return m.winner === m.team1Id ? { id: m.team1Id, name: m.team1Name } : { id: m.team2Id, name: m.team2Name };
+  };
+
+  // Reuse existing LB/GF match ids for the rebuilt roles (they carry no data).
+  const roleId: Record<string, string> = {
+    lb1a: id(7), lb1b: id(8), lb2a: id(9), lb2b: id(10),
+    lb3a: id(13), lb3b: id(14), lb4: id(15), lb5: id(17), gf: id(18),
+  };
+
+  // WB current# → reference#
+  const reNum: Record<number, number> = { 1: 1, 2: 2, 5: 3, 3: 4, 4: 5, 6: 6, 11: 9, 12: 10, 16: 15 };
+
+  // Each LB/GF role: [refNum, section, slot1 source, slot2 source].
+  // Source kinds: {Lcur} = loser of WB match (current#); {Wcur} = winner of WB
+  // match; {Wrole} = winner of another LB role. Drop-ins sit in slot 1 (top),
+  // LB-advancing teams in slot 2 (bottom) — matching the reference layout.
+  type Src = { Lcur?: number; Wcur?: number; Wrole?: string };
+  const tmpl: [string, number, 'losers' | 'grand-final', Src, Src][] = [
+    ['lb1a', 7, 'losers', { Lcur: 6 }, { Lcur: 1 }],
+    ['lb1b', 8, 'losers', { Lcur: 5 }, { Lcur: 2 }],
+    ['lb2a', 11, 'losers', { Lcur: 4 }, { Wrole: 'lb1a' }],
+    ['lb2b', 12, 'losers', { Lcur: 3 }, { Wrole: 'lb1b' }],
+    ['lb3a', 13, 'losers', { Lcur: 11 }, { Wrole: 'lb2a' }],
+    ['lb3b', 14, 'losers', { Lcur: 12 }, { Wrole: 'lb2b' }],
+    ['lb4', 16, 'losers', { Wrole: 'lb3a' }, { Wrole: 'lb3b' }],
+    ['lb5', 17, 'losers', { Lcur: 16 }, { Wrole: 'lb4' }],
+    ['gf', 18, 'grand-final', { Wcur: 16 }, { Wrole: 'lb5' }],
+  ];
+  const refNumOfRole = (role: string) => tmpl.find(t => t[0] === role)![1];
+
+  const resolveSlot = (slotKey: string, src: Src): { teamId: string; teamName: string } => {
+    if (src.Lcur != null) {
+      const t = loserOf(src.Lcur);
+      return t ? { teamId: t.id, teamName: t.name } : { teamId: `slot_${slotKey}`, teamName: `Loser of ${reNum[src.Lcur] ?? src.Lcur}` };
+    }
+    if (src.Wcur != null) {
+      const t = winnerOf(src.Wcur);
+      return t ? { teamId: t.id, teamName: t.name } : { teamId: `slot_${slotKey}`, teamName: `Winner of ${reNum[src.Wcur] ?? src.Wcur}` };
+    }
+    // Winner of another LB match — always TBD (LB unplayed)
+    return { teamId: `slot_${slotKey}`, teamName: `Winner of ${refNumOfRole(src.Wrole!)}` };
+  };
+
+  // Build LB/GF matches.
+  const lbByRole: Record<string, BracketMatch> = {};
+  tmpl.forEach(([role, num, section, s1, s2]) => {
+    const mid = roleId[role];
+    const a = resolveSlot(`${mid}_1`, s1);
+    const b = resolveSlot(`${mid}_2`, s2);
+    lbByRole[role] = {
+      id: mid,
+      displayNumber: num,
+      bracketSection: section,
+      team1Id: a.teamId, team1Name: a.teamName,
+      team2Id: b.teamId, team2Name: b.teamName,
+      round: 0, position: 0, // set during assembly
+      autoPopulated: true,
+      needsAssignment: false,
+    };
+  });
+  // LB winnerGoesTo routing (LB-advancing team lands in slot 2 of next round).
+  const wTo: [string, string, 1 | 2][] = [
+    ['lb1a', 'lb2a', 2], ['lb1b', 'lb2b', 2],
+    ['lb2a', 'lb3a', 2], ['lb2b', 'lb3b', 2],
+    ['lb3a', 'lb4', 1], ['lb3b', 'lb4', 2],
+    ['lb4', 'lb5', 2], ['lb5', 'gf', 2],
+  ];
+  wTo.forEach(([from, to, slot]) => { lbByRole[from].winnerGoesTo = { matchId: roleId[to], slot }; });
+
+  // WB loserGoesTo re-pointing (current# → [role, slot]).
+  const wbLoser: Record<number, [string, 1 | 2]> = {
+    1: ['lb1a', 2], 6: ['lb1a', 1], 2: ['lb1b', 2], 5: ['lb1b', 1],
+    4: ['lb2a', 1], 3: ['lb2b', 1], 11: ['lb3a', 1], 12: ['lb3b', 1], 16: ['lb5', 1],
+  };
+
+  // Rebuild winners-bracket matches: clone (preserve ALL data), renumber, re-point loser.
+  const curNumById = new Map(all.map(m => [m.id, m.displayNumber]));
+  const newWinners: BracketMatch[] = all
+    .filter(m => m.bracketSection === 'winners')
+    .map(m => {
+      const cur = curNumById.get(m.id)!;
+      const clone: BracketMatch = { ...m };
+      if (reNum[cur] != null) clone.displayNumber = reNum[cur];
+      const lt = wbLoser[cur];
+      if (lt) clone.loserGoesTo = { matchId: roleId[lt[0]], slot: lt[1] };
+      return clone;
+    });
+
+  // Assemble columns: winners (R1, QF, SF, Final) → losers (R1..R5) → GF.
+  const col = (nums: number[]) => nums.map(n => newWinners.find(m => m.displayNumber === n)!).filter(Boolean);
+  const columns: BracketMatch[][] = [
+    col([1, 2]),
+    col([3, 4, 5, 6]),
+    col([9, 10]),
+    col([15]),
+    [lbByRole.lb1a, lbByRole.lb1b],
+    [lbByRole.lb2a, lbByRole.lb2b],
+    [lbByRole.lb3a, lbByRole.lb3b],
+    [lbByRole.lb4],
+    [lbByRole.lb5],
+    [lbByRole.gf],
+  ];
+  const rounds = columns.map((c, ci) => c.map((m, pi) => ({ ...m, round: ci, position: pi })));
+
+  return {
+    ...bracket,
+    rounds,
+    customizationHistory: [
+      ...(bracket.customizationHistory ?? []),
+      { timestamp: new Date().toISOString(), changes: 'Applied Challonge website reference layout to losers bracket (one-time)' },
+    ],
+  };
+}
