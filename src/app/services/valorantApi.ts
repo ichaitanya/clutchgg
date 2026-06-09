@@ -251,21 +251,34 @@ export function mapPlayersToTeams(
   const countIn = (players: PlayerMatchStats[], roster: string[]) =>
     players.filter(p => apiPlayerMatchesRoster(p, roster)).length;
 
-  const blueMatches = countIn(blueTeam, tournamentTeam1Players);
-  const redMatches = countIn(redTeam, tournamentTeam1Players);
+  // Score BOTH possible orientations using BOTH rosters, then pick the better
+  // global fit. Counting only team1's roster against each side (the old approach)
+  // could mis-assign sides when team1's roster was sparse/dirty or tied — and
+  // ignored team2's roster entirely. Cross-checking both sides is far more robust.
+  //
+  // Orientation A: Blue → team1, Red → team2
+  // Orientation B: Red  → team1, Blue → team2
+  const blueAsT1 = countIn(blueTeam, tournamentTeam1Players);
+  const redAsT2  = countIn(redTeam, tournamentTeam2Players);
+  const redAsT1  = countIn(redTeam, tournamentTeam1Players);
+  const blueAsT2 = countIn(blueTeam, tournamentTeam2Players);
 
-  // Determine which API team maps to tournament team 1
-  if (blueMatches >= redMatches) {
+  const scoreA = blueAsT1 + redAsT2; // Blue=team1
+  const scoreB = redAsT1 + blueAsT2; // Red=team1
+
+  // Prefer the higher-scoring orientation. On a tie, keep the historical default
+  // (Blue → team1), which preserves prior behaviour for unambiguous matches.
+  if (scoreA >= scoreB) {
     return {
-      team1Matches: blueMatches,
-      team2Matches: countIn(redTeam, tournamentTeam2Players),
+      team1Matches: blueAsT1,
+      team2Matches: redAsT2,
       team1Name: 'Blue',
       team2Name: 'Red',
     };
   } else {
     return {
-      team1Matches: redMatches,
-      team2Matches: countIn(blueTeam, tournamentTeam2Players),
+      team1Matches: redAsT1,
+      team2Matches: blueAsT2,
       team1Name: 'Red',
       team2Name: 'Blue',
     };
@@ -273,8 +286,9 @@ export function mapPlayersToTeams(
 }
 
 // Build player stats from API response.
-// `displayNameByRiotId` maps a lowercased Riot ID (name#tag) to the tournament
-// display name, so the scoreboard shows the player's name (no tag).
+// `displayNameByRiotId` maps a canonically-normalized Riot ID (name#tag, via
+// normalizeId) to the tournament display name, so the scoreboard shows the
+// player's name without the tag.
 export function buildPlayerStatsFromAPI(
   apiPlayers: PlayerMatchStats[],
   team1Name: string, // 'Blue' or 'Red'
@@ -289,10 +303,8 @@ export function buildPlayerStatsFromAPI(
     const totalShots = player.stats.headshots + player.stats.bodyshots + player.stats.legshots;
     const hsPercent = totalShots > 0 ? (player.stats.headshots / totalShots) * 100 : 0;
     const riotId = `${player.name}#${player.tag}`;
-    const displayName =
-      displayNameByRiotId[riotId.toLowerCase()] ??
-      displayNameByRiotId[normalizeId(riotId)] ??
-      player.name;
+    // Keys are canonical (normalizeId), which already lowercases — one lookup.
+    const displayName = displayNameByRiotId[normalizeId(riotId)] ?? player.name;
 
     return {
       playerId: riotId,
@@ -377,17 +389,19 @@ export interface BothTeamsCandidate {
   team2RosterSize: number;
 }
 
-// Fetch a player's recent custom games. Returns all of them with per-team
-// roster overlap counts for the admin's reference (no longer filtered by a
-// minimum-players-per-team rule). Rosters are "name#tag" Riot IDs and/or bare
-// display names.
+// Fetch a player's recent custom games and keep only those that look like the
+// actual match between THESE two teams: a game qualifies when at least
+// `minPerTeam` of each team's roster appears in it. This filters out unrelated
+// scrims/customs the queried player happened to play. Rosters are "name#tag"
+// Riot IDs and/or bare display names. `count` caps the scan to the last N games.
 export async function getCustomGamesForBothTeams(
   playerName: string,
   playerTag: string,
   team1Roster: string[],
   team2Roster: string[],
   region: string = 'ap',
-  count: number = 20,
+  count: number = 15,
+  minPerTeam: number = 2,
 ): Promise<BothTeamsCandidate[]> {
   const history = await getPlayerMatchHistory(playerName, playerTag, region, 'custom', count);
   const scan = history.slice(0, count);
@@ -402,11 +416,13 @@ export async function getCustomGamesForBothTeams(
       continue;
     }
 
-    // Roster overlap is reported for the admin's reference, but no longer used
-    // to filter games out — all the queried player's custom games are returned
-    // so the admin can pick and assign any of them to a map slot.
     const t1 = countRosterMatches(details.players, team1Roster);
     const t2 = countRosterMatches(details.players, team2Roster);
+
+    // Only keep games where BOTH teams are present (≥ minPerTeam roster players
+    // each), so the candidate list is the real head-to-head, not every custom
+    // the queried player joined.
+    if (t1 < minPerTeam || t2 < minPerTeam) continue;
 
     out.push({
       matchId: h.uuid,

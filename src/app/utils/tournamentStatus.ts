@@ -80,17 +80,6 @@ function hasStartArrived(t: Tournament): boolean {
 }
 
 /**
- * Derive a tournament's live status from its data, per these rules:
- *  - registration: teams added but schedule not generated, or start date not yet reached
- *  - planning:     start date reached, schedule exists, but no match has started
- *  - in-progress:  at least one match has started / has a result, but not all complete
- *  - completed:    every match across every stage is complete
- *                  (two-stage → both stages must be complete)
- *
- * Returns the tournament's manually-set status when there isn't enough data to
- * compute (e.g. no teams yet), so admin intent is preserved during setup.
- */
-/**
  * Resolve the "spotlight" tournament shown on the home page / hero.
  *
  * When the admin explicitly picks one (`spotlightId`), that wins. Otherwise we
@@ -114,6 +103,17 @@ export function resolveSpotlightTournament(
   );
 }
 
+/**
+ * Derive a tournament's live status from its data, per these rules:
+ *  - registration: teams added but schedule not generated, or start date not yet reached
+ *  - planning:     start date reached, schedule exists, but no match has started
+ *  - in-progress:  at least one match has started / has a result, but not all complete
+ *  - completed:    every match across every stage is complete
+ *                  (two-stage → both stages must be complete)
+ *
+ * Returns the tournament's manually-set status when there isn't enough data to
+ * compute (e.g. no teams yet), so admin intent is preserved during setup.
+ */
 export function deriveTournamentStatus(t: Tournament): TournamentStatus {
   const stages = tournamentStages(t);
 

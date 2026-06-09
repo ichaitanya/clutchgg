@@ -72,13 +72,15 @@ export interface PrizePool {
   currency?: CurrencyCode;   // Defaults to INR when unset (legacy pools have no currency)
 }
 
-// Display a prize value with its currency symbol. If the stored string already
-// begins with a currency symbol (legacy pools typed "$50,000"), it's shown
-// as-is; otherwise the pool's currency symbol is prepended.
+// Display a prize value with its currency symbol. The symbol is only prepended
+// when the value is a bare amount (starts with a digit) — so legacy pools that
+// already carry a symbol ("$50,000") or a text currency / non-money note
+// ("Rs 5,000", "USD 5000", "TBD", "Trip to LAN") are shown verbatim instead of
+// getting a stray symbol glued in front (e.g. "₹Rs 5,000").
 export function formatPrize(value: string | undefined, currency?: CurrencyCode): string {
   const v = (value ?? '').trim();
   if (!v) return '';
-  if (/^[₹$€£]/.test(v)) return v;            // already has a symbol — leave it
+  if (!/^\d/.test(v)) return v;               // not a bare number — leave as-is
   const symbol = CURRENCY_SYMBOLS[currency ?? 'INR'];
   return `${symbol}${v}`;
 }
@@ -1540,9 +1542,11 @@ function MatchStatsFinder({
     const team2Roster = team2.players.map(p => p.riotId || p.name);
     setLoading(true);
     try {
-      const result = await ValorantAPI.getCustomGamesForBothTeams(name, tag, team1Roster, team2Roster, 'ap', 20);
+      // Scan the last 15 custom games; keep only those where ≥2 of each team's
+      // roster appear (the real head-to-head between these two teams).
+      const result = await ValorantAPI.getCustomGamesForBothTeams(name, tag, team1Roster, team2Roster, 'ap', 15, 2);
       setCandidates(result);
-      if (result.length === 0) setError('No recent custom games found for this player. Try another player.');
+      if (result.length === 0) setError('No recent matches found with both teams. Try querying a different player from either roster.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch custom games.');
     } finally {
@@ -2499,54 +2503,76 @@ function CreateTournamentScreen({
       return;
     }
 
+    // The previous state of this match, so we can detect a winner that CHANGED
+    // or was CLEARED — and undo the stale team it pushed downstream.
+    const prevMatch = tournament.generatedBracket!.rounds.flat().find(m => m.id === updatedMatch.id);
+
     // Replace the match in the bracket
     let newRounds = tournament.generatedBracket!.rounds.map(round =>
       round.map(match => match.id === updatedMatch.id ? updatedMatch : match)
     );
 
-    // Propagate winner to the next slot if a winner was set
+    const isDouble = tournament.generatedBracket!.bracketType === 'double';
+    const isRoundRobin = tournament.generatedBracket!.bracketType === 'roundrobin';
+
+    // Write a team into one slot of a destination match. `teamId === undefined`
+    // RESETS the slot back to an unfilled auto-populated placeholder (used when a
+    // result is changed/cleared so a previously-advanced team doesn't get stranded
+    // there). The placeholder matches the generator's convention for an unfilled
+    // downstream slot ('Winner TBD', autoPopulated, NOT needsAssignment) so the
+    // bracket view renders it as awaiting a result, not as a manual dropdown.
+    // Either way the destination's own winner is cleared, since an upstream change
+    // invalidates any result already recorded there.
+    const setSlot = (
+      rounds: BracketMatch[][], matchId: string, slot: 1 | 2,
+      teamId: string | undefined, teamName: string,
+    ) =>
+      rounds.map(round => round.map(m => {
+        if (m.id !== matchId) return m;
+        const id = teamId ?? `winner_tbd_${matchId}_${slot}`;
+        const name = teamId ? teamName : 'Winner TBD';
+        return slot === 1
+          ? { ...m, team1Id: id, team1Name: name, winner: undefined, autoPopulated: true }
+          : { ...m, team2Id: id, team2Name: name, winner: undefined, autoPopulated: true };
+      }));
+
+    // Resolve the destination (matchId + slot) for this match's WINNER, plus the
+    // single-elim case which is computed positionally rather than via routing.
+    const winnerDest = (): { matchId: string; slot: 1 | 2 } | null => {
+      if (isDouble || isRoundRobin) return updatedMatch.winnerGoesTo ?? null;
+      // Single elim: winner advances to floor(i/2) of the next round, slot by parity.
+      const rIdx = newRounds.findIndex(r => r.some(m => m.id === updatedMatch.id));
+      const mIdx = newRounds[rIdx]?.findIndex(m => m.id === updatedMatch.id) ?? -1;
+      const nextRound = newRounds[rIdx + 1];
+      if (!nextRound || mIdx < 0) return null;
+      const destMatch = nextRound[Math.floor(mIdx / 2)];
+      if (!destMatch) return null;
+      return { matchId: destMatch.id, slot: mIdx % 2 === 0 ? 1 : 2 };
+    };
+
+    const nameOf = (m: BracketMatch, id: string) => id === m.team1Id ? m.team1Name : m.team2Name;
+    const otherId = (m: BracketMatch, id: string) => id === m.team1Id ? m.team2Id : m.team1Id;
+
+    // 1) Undo the PREVIOUS winner's advancement if the result changed or cleared.
+    if (prevMatch?.winner && prevMatch.winner !== updatedMatch.winner) {
+      const dest = winnerDest();
+      if (dest) newRounds = setSlot(newRounds, dest.matchId, dest.slot, undefined, '');
+      // Double-elim: also undo the previous loser's drop into the losers bracket.
+      if (isDouble && updatedMatch.loserGoesTo) {
+        newRounds = setSlot(newRounds, updatedMatch.loserGoesTo.matchId, updatedMatch.loserGoesTo.slot, undefined, '');
+      }
+    }
+
+    // 2) Propagate the CURRENT winner (and, for double-elim, the loser) forward.
     if (updatedMatch.winner) {
       const winnerId = updatedMatch.winner;
-      const winnerName = winnerId === updatedMatch.team1Id ? updatedMatch.team1Name : updatedMatch.team2Name;
-      const loserId = winnerId === updatedMatch.team1Id ? updatedMatch.team2Id : updatedMatch.team1Id;
-      const loserName = winnerId === updatedMatch.team1Id ? updatedMatch.team2Name : updatedMatch.team1Name;
-
-      const applyToSlot = (rounds: BracketMatch[][], matchId: string, slot: 1 | 2, teamId: string, teamName: string) =>
-        rounds.map(round => round.map(m => {
-          if (m.id !== matchId) return m;
-          return slot === 1
-            ? { ...m, team1Id: teamId, team1Name: teamName, winner: undefined, autoPopulated: true }
-            : { ...m, team2Id: teamId, team2Name: teamName, winner: undefined, autoPopulated: true };
-        }));
-
-      if (tournament.generatedBracket!.bracketType === 'double' && updatedMatch.winnerGoesTo) {
-        newRounds = applyToSlot(newRounds, updatedMatch.winnerGoesTo.matchId, updatedMatch.winnerGoesTo.slot, winnerId, winnerName);
-        if (updatedMatch.loserGoesTo) {
-          const actualLoserId = winnerId === updatedMatch.team1Id ? updatedMatch.team2Id : updatedMatch.team1Id;
-          const actualLoserName = winnerId === updatedMatch.team1Id ? updatedMatch.team2Name : updatedMatch.team1Name;
-          newRounds = applyToSlot(newRounds, updatedMatch.loserGoesTo.matchId, updatedMatch.loserGoesTo.slot, actualLoserId, actualLoserName);
-        }
-      } else if (tournament.generatedBracket!.bracketType !== 'roundrobin') {
-        // Single elim: find the round and advance winner
-        const roundIdx = newRounds.findIndex(r => r.some(m => m.id === updatedMatch.id));
-        const matchIdx = newRounds[roundIdx]?.findIndex(m => m.id === updatedMatch.id) ?? -1;
-        const nextRound = newRounds[roundIdx + 1];
-        if (nextRound && matchIdx >= 0) {
-          const nextMatchIdx = Math.floor(matchIdx / 2);
-          const isTeam1Slot = matchIdx % 2 === 0;
-          newRounds = newRounds.map((r, rIdx) => {
-            if (rIdx !== roundIdx + 1) return r;
-            return r.map((m, j) => {
-              if (j !== nextMatchIdx) return m;
-              return isTeam1Slot
-                ? { ...m, team1Id: winnerId, team1Name: winnerName, winner: undefined, autoPopulated: true }
-                : { ...m, team2Id: winnerId, team2Name: winnerName, winner: undefined, autoPopulated: true };
-            });
-          });
-        }
+      const winnerName = nameOf(updatedMatch, winnerId);
+      const dest = winnerDest();
+      if (dest) newRounds = setSlot(newRounds, dest.matchId, dest.slot, winnerId, winnerName);
+      if (isDouble && updatedMatch.loserGoesTo) {
+        const lId = otherId(updatedMatch, winnerId);
+        newRounds = setSlot(newRounds, updatedMatch.loserGoesTo.matchId, updatedMatch.loserGoesTo.slot, lId, nameOf(updatedMatch, lId));
       }
-
-      void loserId; void loserName; // used above via destructuring
     }
 
     const newBracket = {
