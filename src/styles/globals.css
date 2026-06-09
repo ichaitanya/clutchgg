@@ -4948,11 +4948,12 @@ html, body { overflow-x: clip; max-width: 100%; }
   /* Footer: stack the two columns */
   .arena-footer__inner { grid-template-columns: 1fr; gap: 2rem; }
 
-  /* Player lineup band: 5 portraits is too many for one row. Switch from a
-     fixed grid (which leaves a phantom empty cell on the last row) to a wrapping
-     flex row. Tiles grow to fill their row, so the last row's 2 tiles each take
-     half-width — no dead/empty tile. Each tile carries its own hairline border,
-     replacing the grid's gap-bleed (the grid background is now transparent). */
+  /* Player lineup band — balanced 2+3 split for a 5-man roster. A flat 3-across
+     grid leaves an empty third cell on row 2; instead we force the FIRST TWO
+     tiles onto a 50%-wide top row and the LAST THREE onto a 33%-wide bottom row.
+     Every tile grows to fill its row, so both rows are flush edge-to-edge with
+     no dead space. Tiles carry their own hairline border (grid bg is now
+     transparent). Falls back gracefully for rosters of other sizes. */
   .arena-md-lineup__grid {
     display: flex;
     flex-wrap: wrap;
@@ -4960,13 +4961,20 @@ html, body { overflow-x: clip; max-width: 100%; }
     background: transparent;
   }
   .arena-md-lineup__grid .arena-md-player {
-    /* fixed 1/3 basis, no grow → every tile is the same width across both rows;
-       the last row's 2 tiles sit left-aligned and the leftover third is just
-       transparent card surface (no bordered phantom tile). */
-    flex: 0 0 calc(33.333% - 0.667px);
+    flex: 1 1 calc(33.333% - 0.667px);
     outline: 1px solid var(--arena-border);
     aspect-ratio: auto;
     min-height: 9.5rem;
+  }
+  /* Exactly 5 players → 2 on top (half each), 3 on the bottom (third each). */
+  .arena-md-lineup__grid .arena-md-player:first-child:nth-last-child(5),
+  .arena-md-lineup__grid .arena-md-player:first-child:nth-last-child(5) + .arena-md-player {
+    flex-basis: calc(50% - 0.5px);
+  }
+  /* Exactly 4 players → a clean 2×2 grid (every tile half-width). */
+  .arena-md-lineup__grid .arena-md-player:first-child:nth-last-child(4),
+  .arena-md-lineup__grid .arena-md-player:first-child:nth-last-child(4) ~ .arena-md-player {
+    flex-basis: calc(50% - 0.5px);
   }
 }
 
@@ -5003,9 +5011,8 @@ html, body { overflow-x: clip; max-width: 100%; }
   .arena-stats-table { min-width: 0; }
   .arena-stats-table__hide-mobile { display: none; }
 
-  /* Lineup stays 3-across on phones (inherited from the ≤900px rule): 5 players
-     wrap to 3 + 2, and the bottom row's two tiles grow to fill the width — no
-     lone over-wide tile and no empty cell. Just shrink the name text a touch. */
+  /* Lineup keeps the balanced 2+3 split (inherited from the ≤900px rule); just
+     trim the tile height a touch on phones. */
   .arena-md-lineup__grid .arena-md-player { min-height: 8.5rem; }
 
   /* Section headers that sit as a row (title + action) should stack */
