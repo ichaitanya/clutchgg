@@ -11,6 +11,7 @@ import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
 import { getStageOptions } from './StatsPage';
 import { BracketDisplay } from './BracketDisplay';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
+import { orderRosterIglFirst } from '../utils/roster';
 
 type TabKey = 'overview' | 'matches' | 'bracket' | 'teams' | 'news';
 
@@ -266,7 +267,7 @@ export function TournamentPage() {
                       <span className="arena-tp-team__name">{team.name}</span>
                     </Link>
                     <div className="arena-tp-team__players">
-                      {team.players.slice(0, 5).map(p => (
+                      {orderRosterIglFirst(team.players).slice(0, 5).map(p => (
                         <Link key={p.id} to={`/player/${tournament.id}/${p.id}`} className="arena-tp-team__player">
                           {p.name || 'TBD'}
                         </Link>

@@ -9,6 +9,7 @@ import { getTournaments, loadWithRetry } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { computeRRStandings } from './BracketDisplay';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
+import { orderRosterIglFirst } from '../utils/roster';
 
 type ViewMode = 'teams' | 'players';
 
@@ -228,6 +229,13 @@ export function TeamsPage() {
     }
     return undefined;
   }, [selectedTeamId, allTeams, tournaments]);
+
+  // Roster ordered with the IGL first, so the featured mosaic tile and the
+  // substitutes list both lead with the in-game leader.
+  const rosterPlayers = useMemo(
+    () => (selectedTeam ? orderRosterIglFirst(selectedTeam.players) : []),
+    [selectedTeam],
+  );
 
   useEffect(() => {
     if (allTeams.length > 0 && !selectedTeamId && viewMode === 'teams') {
@@ -478,7 +486,7 @@ export function TeamsPage() {
               )}
             </div>
 
-            {/* Roster mosaic */}
+            {/* Roster mosaic — IGL leads (featured tile), rest keep their order. */}
             {selectedTeam.players.length === 0 ? (
               <div className="text-center py-12 bg-[#161616] border border-[#2b2b2b] rounded-xl">
                 <User className="w-10 h-10 mx-auto text-gray-600 mb-2" />
@@ -486,20 +494,20 @@ export function TeamsPage() {
               </div>
             ) : (
               <div className="arena-roster-grid">
-                {/* Featured player — large, spans two rows */}
+                {/* Featured player — large, spans two rows (the IGL). */}
                 <div className="arena-roster-grid__feature">
-                  <PlayerTile player={selectedTeam.players[0]} featured />
+                  <PlayerTile player={rosterPlayers[0]} featured />
                 </div>
 
                 {/* Up to two stacked tiles on the right */}
-                {selectedTeam.players.slice(1, 3).map(p => (
+                {rosterPlayers.slice(1, 3).map(p => (
                   <div key={p.id} className="arena-roster-grid__cell">
                     <PlayerTile player={p} />
                   </div>
                 ))}
 
                 {/* Bottom row: remaining players + win-rate stat card */}
-                {selectedTeam.players.slice(3, 5).map(p => (
+                {rosterPlayers.slice(3, 5).map(p => (
                   <div key={p.id} className="arena-roster-grid__cell">
                     <PlayerTile player={p} />
                   </div>
@@ -532,7 +540,7 @@ export function TeamsPage() {
                 </button>
                 {showAllRoster && (
                   <ul className="arena-roster-extra__list">
-                    {selectedTeam.players.slice(5).map(p => (
+                    {rosterPlayers.slice(5).map(p => (
                       <li key={p.id}>
                         <button
                           type="button"

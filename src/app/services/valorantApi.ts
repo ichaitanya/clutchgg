@@ -1,6 +1,8 @@
 // Valorant API Service using Henrikdev API
 // API Key: HDEV-97d92e1f-2fc9-49c5-9e49-bd959e394385
 
+import { normalizeRiotId } from '../utils/riotId';
+
 const API_KEY = 'HDEV-97d92e1f-2fc9-49c5-9e49-bd959e394385';
 const BASE_URL = 'https://api.henrikdev.xyz/valorant';
 
@@ -172,13 +174,10 @@ export function findLatestMatchOnMap(
 }
 
 // Count how many of `playerRiotIds` (each "name#tag") match a roster entry.
-// Normalize a Riot ID / name for comparison: Unicode NFKC (so width/encoding
-// variants of CJK and special glyphs match), lowercased, trimmed, and with
-// internal whitespace collapsed. Handles names like "AaG 火#000",
-// "カウシク#Hard", "EL1TE 悪魔#垩aei" that exact-match comparison misses.
-function normalizeId(s: string): string {
-  return s.normalize('NFKC').toLowerCase().trim().replace(/\s+/g, ' ');
-}
+// Canonical Riot ID / name normalization, shared with the matching layer so both
+// sides collapse identically (NFKC, spaces around "#" removed, whitespace
+// collapsed, trimmed, lowercased). See utils/riotId.ts for the rationale.
+const normalizeId = normalizeRiotId;
 
 // Roster entries may be "name#tag" or a bare display name (matched on name).
 export function countRiotIdOverlap(playerRiotIds: string[], roster: string[]): number {

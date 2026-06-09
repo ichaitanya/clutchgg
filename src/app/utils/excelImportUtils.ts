@@ -1,6 +1,18 @@
 import * as XLSX from 'xlsx';
 import { TeamInTournament, TournamentPlayer, PlayerRole } from '../components/TournamentCreation';
 
+// Clean a spreadsheet-entered Riot ID into canonical "name#tag" form: strip
+// stray spaces around the "#" ("AE Slash #ESNN" → "AE Slash#ESNN"), drop trailing
+// carriage returns from CSV line endings, and collapse internal whitespace. The
+// raw text often carries these artifacts and they break API/stat matching later.
+function sanitizeRiotId(raw: string): string {
+  return raw
+    .replace(/\r|\n/g, '')      // CSV line-ending leftovers
+    .replace(/\s*#\s*/g, '#')   // spaces hugging the name#tag separator
+    .replace(/\s+/g, ' ')       // collapse internal whitespace runs
+    .trim();
+}
+
 export interface ExcelTeamData {
   teamName: string;
   players: Array<{
@@ -159,7 +171,8 @@ function extractTeamsFromData(jsonData: any[]): ExcelImportResult {
       }
 
       const riotIdCol = riotIdCols[index];
-      const riotId = riotIdCol ? row[riotIdCol]?.toString().trim() || undefined : undefined;
+      const rawRiotId = riotIdCol ? row[riotIdCol]?.toString() : undefined;
+      const riotId = rawRiotId ? sanitizeRiotId(rawRiotId) || undefined : undefined;
 
       players.push({ name: playerName, role, riotId });
       if (index < 5) mandatoryPlayerCount++;

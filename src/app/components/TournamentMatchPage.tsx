@@ -8,6 +8,7 @@ import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, Matc
 import { getTournaments, loadWithRetryPolled } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { mapImageUrl, agentIconUrl } from '../utils/valorantAssets';
+import { orderRosterIglFirst } from '../utils/roster';
 
 interface MatchContext {
   match: BracketMatch;
@@ -913,7 +914,7 @@ export function TournamentMatchPage() {
                 </div>
                 {side.team && side.team.players.length > 0 ? (
                   <div className="arena-md-lineup__grid">
-                    {side.team.players.slice(0, 5).map(player => (
+                    {orderRosterIglFirst(side.team.players).slice(0, 5).map(player => (
                       <button
                         key={player.id}
                         type="button"

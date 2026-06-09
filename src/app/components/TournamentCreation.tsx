@@ -13,6 +13,7 @@ import {
 import * as ValorantAPI from '../services/valorantApi';
 import { upsertTournament, uploadImage, getTournaments } from '../services/db';
 import { normalizePhotoUrl } from '../utils/excelImportUtils';
+import { normalizeRiotId } from '../utils/riotId';
 import { computeRRStandings } from './BracketDisplay';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -1830,7 +1831,7 @@ function MatchEditModal({
     const team2Roster = team2.players.map(p => p.riotId || p.name);
     const displayNameByRiotId: Record<string, string> = {};
     for (const p of [...team1.players, ...team2.players]) {
-      if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
+      if (p.riotId) displayNameByRiotId[normalizeRiotId(p.riotId)] = p.name;
     }
 
     setFetching(true);
@@ -1884,7 +1885,7 @@ function MatchEditModal({
     const team2Roster = team2.players.map(p => p.riotId || p.name);
     const displayNameByRiotId: Record<string, string> = {};
     for (const p of [...team1.players, ...team2.players]) {
-      if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
+      if (p.riotId) displayNameByRiotId[normalizeRiotId(p.riotId)] = p.name;
     }
     const result = await ValorantAPI.buildMatchResultFromId(
       apiMatchId, team1Roster, team2Roster, form.team1Id, form.team2Id, displayNameByRiotId
@@ -2564,7 +2565,7 @@ function CreateTournamentScreen({
     const team2Roster = team2.players.map(p => p.riotId || p.name);
     const displayNameByRiotId: Record<string, string> = {};
     for (const p of [...team1.players, ...team2.players]) {
-      if (p.riotId) displayNameByRiotId[p.riotId.toLowerCase()] = p.name;
+      if (p.riotId) displayNameByRiotId[normalizeRiotId(p.riotId)] = p.name;
     }
 
     const result = await ValorantAPI.buildMatchResultFromId(
