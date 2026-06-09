@@ -90,6 +90,30 @@ function hasStartArrived(t: Tournament): boolean {
  * Returns the tournament's manually-set status when there isn't enough data to
  * compute (e.g. no teams yet), so admin intent is preserved during setup.
  */
+/**
+ * Resolve the "spotlight" tournament shown on the home page / hero.
+ *
+ * When the admin explicitly picks one (`spotlightId`), that wins. Otherwise we
+ * mirror the admin dropdown's promise of "Auto (first in-progress, then first)":
+ * the first tournament whose live status is in-progress, else the first overall.
+ * Returns null only when there are no tournaments at all.
+ */
+export function resolveSpotlightTournament(
+  tournaments: Tournament[],
+  spotlightId?: string,
+): Tournament | null {
+  if (spotlightId) {
+    const explicit = tournaments.find(t => t.id === spotlightId);
+    if (explicit) return explicit;
+    // Fall through to auto if the saved id no longer matches a tournament.
+  }
+  return (
+    tournaments.find(t => deriveTournamentStatus(t) === 'in-progress') ??
+    tournaments[0] ??
+    null
+  );
+}
+
 export function deriveTournamentStatus(t: Tournament): TournamentStatus {
   const stages = tournamentStages(t);
 

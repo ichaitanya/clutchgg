@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Newspaper } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { LoadingState } from './LoadingState';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { AdminData, NewsItem } from './AdminPanel';
 import { loadAdminData, loadWithRetry } from '../services/db';
@@ -66,7 +67,9 @@ export function NewsPage() {
       </section>
 
       <div className="arena-page" style={{ paddingBottom: '5rem' }}>
-        {articles.length > 0 ? (
+        {adminData === null ? (
+          <LoadingState label="Loading articles…" inline />
+        ) : articles.length > 0 ? (
           <div className="arena-news-grid">
             {articles.map(n => <ArticleCard key={n.id} item={n} />)}
           </div>

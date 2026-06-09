@@ -508,10 +508,9 @@ export function TournamentMatchPage() {
   const team1Name = team1?.name ?? match.team1Name;
   const team2Name = team2?.name ?? match.team2Name;
   const isCompleted = status === 'completed' || !!match.winner;
-  const team1Won = match.winner === match.team1Id;
-  const team2Won = match.winner === match.team2Id;
-
   const { s1, s2 } = deriveScore(match);
+  const team1Won = match.winner === match.team1Id || (!match.winner && s1 > s2 && isMatchDecidedByMaps(match));
+  const team2Won = match.winner === match.team2Id || (!match.winner && s2 > s1 && isMatchDecidedByMaps(match));
 
   const hasMaps = (match.maps ?? []).some(isPlayedMap);
 

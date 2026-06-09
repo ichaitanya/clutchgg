@@ -201,6 +201,57 @@ body {
   color: var(--arena-accent);
 }
 
+/* Mobile hamburger button — hidden on desktop, revealed at the mobile
+   breakpoint (see the responsive layer at the bottom of this file). */
+.arena-nav__burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-right: -8px;        /* nudge to the gutter edge for thumb reach */
+  background: none;
+  border: none;
+  color: var(--arena-text-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.arena-nav__burger:hover { color: var(--arena-accent); }
+
+/* Mobile dropdown panel + its links */
+.arena-nav__mobile {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--arena-nav-bg);
+  border-bottom: 1px solid var(--arena-nav-border);
+  z-index: 50;
+}
+.arena-nav__mobile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+}
+.arena-nav__mobile-list a {
+  display: block;
+  padding: 0.95rem var(--arena-gutter);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arena-text-muted);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.arena-nav__mobile-list li:last-child a { border-bottom: none; }
+.arena-nav__mobile-list a:hover,
+.arena-nav__mobile-list a.arena-nav__link--active { color: var(--arena-accent); }
+
 .arena-nav__link--active {
   color: var(--arena-accent);
   position: relative;
@@ -1892,7 +1943,7 @@ body {
   margin: 0.6rem 0 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 0.5rem;
 }
 .arena-roster-extra__row {
@@ -2996,7 +3047,7 @@ body {
 /* ── Map result tiles (compact horizontal rows) ───────────────── */
 .arena-md-maps {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 0.5rem;
 }
 .arena-md-map {
@@ -3290,7 +3341,7 @@ body {
 /* ── Lineups — player face tiles ──────────────────────────────── */
 .arena-md-lineups {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
   gap: 1rem;
 }
 .arena-md-lineup {
@@ -3596,6 +3647,55 @@ body {
   padding: 4rem var(--arena-gutter);
   text-align: center;
 }
+
+/* ── Shared loading indicator (LoadingState component) ───────── */
+.arena-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  min-height: 50vh;
+  padding: 4rem var(--arena-gutter);
+  text-align: center;
+}
+.arena-loading--inline { min-height: 0; padding: 3rem var(--arena-gutter); }
+.arena-loading__spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid var(--arena-border);
+  border-top-color: var(--arena-accent);
+  border-radius: 50%;
+  animation: arena-spin 0.8s linear infinite;
+}
+.arena-loading__text {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--arena-text-dim);
+  margin: 0;
+}
+.arena-loading__retry {
+  margin-top: 0.25rem;
+  padding: 0.55rem 1.25rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arena-text-primary);
+  background: none;
+  border: 1px solid var(--arena-border);
+  border-radius: 0.4rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.arena-loading__retry:hover { border-color: var(--arena-accent); color: var(--arena-accent); }
+@keyframes arena-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .arena-loading__spinner { animation-duration: 1.6s; }
+}
 .arena-md-state__text {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 1.05rem;
@@ -3791,7 +3891,7 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 
 .arena-team-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 1rem;
 }
 /* Every team card shows the logo (or initials watermark) filling the card, with
@@ -4793,5 +4893,84 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   .arena-contact__card { padding: 1.5rem 1.25rem; }
   .arena-contact__row { grid-template-columns: 1fr; }
   .arena-toast { right: 1rem; left: 1rem; max-width: unset; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   MOBILE WEB — consolidated responsive layer
+   Tablet ≤900px, phone ≤600px, small phone ≤375px. Keep new UI work
+   mirrored here so the site stays mobile-compatible. See [[mobile-parity-rule]].
+   ════════════════════════════════════════════════════════════════ */
+
+/* Belt-and-suspenders: nothing should ever push the page wider than the
+   viewport (a stray fixed-width child would otherwise cause horizontal scroll).
+   `overflow-x: clip` (not `hidden`) avoids creating a scroll container, so
+   `position: sticky` elements like the matches sidebar keep working. */
+html, body { overflow-x: clip; max-width: 100%; }
+
+/* Nav: swap desktop link row for the hamburger menu below 768px. This rule
+   beats the base `.arena-nav__links { display: flex }` on specificity+order,
+   which is why the desktop links were leaking onto mobile before. */
+@media (max-width: 768px) {
+  .arena-nav__links { display: none; }
+  .arena-nav__burger { display: inline-flex; }
+}
+
+@media (max-width: 900px) {
+  :root { --arena-section-gap: 3.5rem; }
+
+  /* Hero scales down from its fixed 630px so it doesn't dominate small screens */
+  .arena-hero { height: 30rem; }
+
+  /* Footer: stack the two columns */
+  .arena-footer__inner { grid-template-columns: 1fr; gap: 2rem; }
+
+  /* Player lineup band: 5 portraits is too many — go to 3 across */
+  .arena-md-lineup__grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 600px) {
+  :root { --arena-gutter: 16px; --arena-section-gap: 2.75rem; }
+
+  .arena-hero { height: 26rem; }
+  .arena-hero__content { padding-bottom: 2.5rem; }
+
+  /* Right-edge tournament rail can overlap content on narrow screens —
+     keep the bars but never let the expanded label cover the page. */
+  .arena-hero__rail-item:hover,
+  .arena-hero__rail-item--active { width: 8px; }
+  .arena-hero__rail-label { display: none; }
+
+  /* Tighten headings so display type wraps cleanly */
+  .arena-heading--lg { font-size: 1.75rem; }
+
+  /* Match-detail stats table: reduce min-width so there's less sideways scroll
+     inside the (already overflow-x:auto) table card. */
+  .arena-md-table { min-width: 480px; }
+
+  /* Leaderboard: drop the secondary columns (Team, Maps, non-selected metrics,
+     K/D/A) so only Rank + Player + the selected sort metric remain. This fits a
+     phone with no horizontal scroll instead of cutting columns off. */
+  .arena-stats-table { min-width: 0; }
+  .arena-stats-table__hide-mobile { display: none; }
+
+  /* Player lineup band: 2 portraits across reads better than 3 cramped ones */
+  .arena-md-lineup__grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Section headers that sit as a row (title + action) should stack */
+  .arena-section-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+}
+
+@media (max-width: 375px) {
+  .arena-hero { height: 22rem; }
+  .arena-md-lineup__name { font-size: 0.95rem; }
+}
+
+/* Touch targets: on coarse (touch) pointers, ensure interactive controls are
+   at least 44px tall so they're comfortably tappable. Desktop is unaffected. */
+@media (pointer: coarse) {
+  .arena-btn,
+  .arena-md__back,
+  .matches-mobile-filter-btn,
+  .arena-match-pager__nav { min-height: 44px; }
 }
 

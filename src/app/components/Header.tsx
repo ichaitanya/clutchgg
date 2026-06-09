@@ -23,8 +23,9 @@ export function Header() {
           {pathname === '/' && <span className="arena-nav__brand-text">CLUTCH.GG</span>}
         </a>
 
-        {/* Desktop nav links — right-aligned, original site names */}
-        <ul className="arena-nav__links hidden md:flex">
+        {/* Desktop nav links — right-aligned, original site names.
+            Hidden below the mobile breakpoint via .arena-nav__links itself. */}
+        <ul className="arena-nav__links">
           <li><a href="/tournaments" className={linkClass('/tournaments')}>Tournaments</a></li>
           <li><a href="/matches" className={linkClass('/matches')}>Matches</a></li>
           <li><a href="/teams" className={linkClass('/teams')}>Teams</a></li>
@@ -32,26 +33,21 @@ export function Header() {
           <li><a href="/news" className={linkClass('/news')}>News</a></li>
         </ul>
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — shown only below the mobile breakpoint */}
         <button
-          className="md:hidden text-[#efeeed] hover:text-white"
+          className="arena-nav__burger"
           onClick={() => setMenuOpen(o => !o)}
           aria-label="Toggle menu"
+          aria-expanded={menuOpen}
         >
-          {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          {menuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
       </div>
 
-      {/* Mobile dropdown */}
+      {/* Mobile dropdown menu */}
       {menuOpen && (
-        <div
-          className="md:hidden"
-          style={{
-            position: 'absolute', top: '100%', left: 0, right: 0,
-            background: '#1a1d29', borderBottom: '1px solid #2a2d3a', zIndex: 50,
-          }}
-        >
-          <ul className="flex flex-col px-6 py-4 gap-4" style={{ listStyle: 'none', margin: 0, padding: '1rem 1.5rem' }}>
+        <div className="arena-nav__mobile">
+          <ul className="arena-nav__mobile-list">
             <li><a href="/tournaments" className={linkClass('/tournaments')} onClick={() => setMenuOpen(false)}>Tournaments</a></li>
             <li><a href="/matches" className={linkClass('/matches')} onClick={() => setMenuOpen(false)}>Matches</a></li>
             <li><a href="/teams" className={linkClass('/teams')} onClick={() => setMenuOpen(false)}>Teams</a></li>

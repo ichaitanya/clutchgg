@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { LoadingState } from './LoadingState';
 import { useNavigate } from 'react-router-dom';
 import type { AdminData } from './AdminPanel';
 import type { Tournament, BracketMatch, MatchMapResult } from './TournamentCreation';
@@ -114,7 +115,11 @@ function collectTournamentMatches(t: Tournament): ScheduleMatch[] {
     const format = (match.format ?? 'bo3') as 'bo1' | 'bo3' | 'bo5';
     const { w1, w2 } = tallyMaps(match.maps ?? []);
     const status = getEffectiveStatus(match);
-    const winnerSide = match.winner === match.team1Id ? 1 : match.winner === match.team2Id ? 2 : null;
+    const winnerSide: 1 | 2 | null = match.winner === match.team1Id ? 1
+      : match.winner === match.team2Id ? 2
+      : status === 'completed' && w1 > w2 ? 1
+      : status === 'completed' && w2 > w1 ? 2
+      : null;
     const ts = match.date ? new Date(`${match.date}T${match.time || '00:00'}`).getTime() : Number.POSITIVE_INFINITY;
     out.push({
       id: match.id,
@@ -130,7 +135,13 @@ function collectTournamentMatches(t: Tournament): ScheduleMatch[] {
       score2: w2,
       winnerSide,
       tournamentName: t.name,
-      tournamentType: t.event?.type?.toLowerCase().includes('lan') ? 'lan' : 'online',
+      // Event type is 'online' | 'offline' | 'hybrid' (offline = LAN). The LAN
+      // filter should match anything with a physical/LAN component, so treat
+      // offline and hybrid (and any legacy "lan" string) as 'lan'.
+      tournamentType: (() => {
+        const ty = t.event?.type?.toLowerCase() ?? '';
+        return (ty === 'offline' || ty === 'hybrid' || ty.includes('lan')) ? 'lan' : 'online';
+      })(),
       stage,
       sortTs: Number.isNaN(ts) ? Number.POSITIVE_INFINITY : ts,
     });
@@ -378,6 +389,18 @@ export function MatchesPage() {
   const pageItems = activeList.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const activeFilterCount = (filterType !== 'all' ? 1 : 0) + (filterTournament !== 'all' ? 1 : 0) + (selectedDate ? 1 : 0);
+
+  // First fetch still in flight — show a loader rather than the "no matches"
+  // empty state, which would otherwise read as "nothing is scheduled".
+  if (adminData === null) {
+    return (
+      <div className="min-h-screen bg-[#0e0e0e]">
+        <Header />
+        <LoadingState label="Loading matches…" />
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0e0e0e]">

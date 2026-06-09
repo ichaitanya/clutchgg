@@ -3,6 +3,7 @@ import { ChevronLeft, Users, User, ChevronRight, ChevronDown, ChevronUp, Trophy,
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { LoadingState } from './LoadingState';
 import type { Tournament, TeamInTournament, TournamentPlayer, BracketGenerated } from './TournamentCreation';
 import { getTournaments, loadWithRetry } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
@@ -115,13 +116,16 @@ export function TeamsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(routeTeamId ? 'players' : 'teams');
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(routeTeamId ?? null);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  // Distinguishes "first fetch still in flight" from "loaded, genuinely empty"
+  // so we can show a loader instead of the "No teams created yet" empty state.
+  const [loaded, setLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   // Expand toggles (default collapsed): the substitutes roster list and the
   // Player Performance Index each show the first 5 until expanded, independently.
   const [showAllRoster, setShowAllRoster] = useState(false);
   const [showAllAnalytics, setShowAllAnalytics] = useState(false);
 
-  useEffect(() => loadWithRetry(getTournaments, setTournaments), []);
+  useEffect(() => loadWithRetry(getTournaments, ts => { setTournaments(ts); setLoaded(true); }), []);
 
   useEffect(() => {
     if (routeTeamId) {
@@ -393,7 +397,9 @@ export function TeamsPage() {
       <Header />
 
       <main className="arena-page" style={{ paddingTop: '2.5rem', paddingBottom: '4rem' }}>
-        {allTeams.length === 0 ? (
+        {!loaded ? (
+          <LoadingState label="Loading teams…" inline />
+        ) : allTeams.length === 0 ? (
           <div className="text-center py-16">
             <Users className="w-12 h-12 mx-auto text-gray-600 mb-4" />
             <p className="text-gray-400 mb-2">No teams created yet</p>

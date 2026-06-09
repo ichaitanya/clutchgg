@@ -452,7 +452,7 @@ function MatchesList({ matches, onMatch }: {
   return (
     <div className="arena-tp-matches">
       {groups.map(g => {
-        const items = matches.filter(m => m.status === g.key);
+        const items = matches.filter(m => m.status === g.key).slice().reverse();
         if (items.length === 0) return null;
         return (
           <div key={g.key} className="arena-tp-matchgroup">

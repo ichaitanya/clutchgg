@@ -2613,10 +2613,7 @@ function CreateTournamentScreen({
     };
 
     if (found.key === 'generatedBracket') {
-      handleMatchEdit(updatedMatch); // runs winner propagation; clears editingMatch (no-op here)
-      // Persist immediately so the public match page (which reads localStorage)
-      // reflects the applied stats without waiting for a manual tournament save.
-      persistTournament(applyMatchToTournament(tournament, updatedMatch));
+      handleMatchEdit(updatedMatch); // runs winner propagation + persist
       return;
     }
 

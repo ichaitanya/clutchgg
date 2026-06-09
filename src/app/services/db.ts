@@ -113,15 +113,18 @@ export function clearDbCache() {
 export function loadWithRetry<T>(
   fetcher: () => Promise<T>,
   onSuccess: (value: T) => void,
-  onError?: () => void,
+  onError?: (attempt: number) => void,
 ): () => void {
   let stopped = false;
+  // Each fetch goes through cached(), which wraps the network call in a 9s
+  // timeout (FETCH_TIMEOUT_MS) — so a request that hangs still rejects and the
+  // backoff below re-attempts; the load never wedges forever.
   const attempt = (n: number) => {
     fetcher()
       .then(value => { if (!stopped) onSuccess(value); })
       .catch(() => {
         if (stopped) return;
-        onError?.();
+        onError?.(n);
         const delay = Math.min(500 * 2 ** (n - 1), 8000);
         setTimeout(() => { if (!stopped) attempt(n + 1); }, delay);
       });

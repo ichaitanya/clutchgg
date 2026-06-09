@@ -221,8 +221,19 @@ function MatchCard({
 
   const isSlot1 = isPlaceholder(match.team1Name);
   const isSlot2 = isPlaceholder(match.team2Name);
-  const winner1 = match.winner === match.team1Id;
-  const winner2 = match.winner === match.team2Id;
+  // Derive winner from explicit field or from map tally when maps are decisive
+  let winner1 = match.winner === match.team1Id;
+  let winner2 = match.winner === match.team2Id;
+  if (!winner1 && !winner2 && matchDecidedByMaps(match)) {
+    const maps = match.maps ?? [];
+    let w1 = 0, w2 = 0;
+    for (const mp of maps) {
+      if (mp.team1Score > mp.team2Score) w1++;
+      else if (mp.team2Score > mp.team1Score) w2++;
+    }
+    if (w1 > w2) winner1 = true;
+    else if (w2 > w1) winner2 = true;
+  }
 
   const accentBorder = accent === 'purple' ? 'border-purple-500' : 'border-[#ff4655]';
   const accentBg = accent === 'purple' ? 'bg-purple-500/20' : 'bg-[#ff4655]/20';

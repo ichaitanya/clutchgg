@@ -6,6 +6,7 @@ import { UpcomingMatch } from './components/UpcomingMatch';
 import { Standings } from './components/Standings';
 import { NewsCard } from './components/NewsCard';
 import { Footer } from './components/Footer';
+import { LoadingState } from './components/LoadingState';
 // Utilities used directly by the home page stay eager (they pull no heavy deps).
 import { getTopPlayersByAcs } from './components/StatsPage';
 import { computeRRStandings } from './components/BracketDisplay';
@@ -13,6 +14,7 @@ import { ArrowRight } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
 import { loadAdminData, loadWithRetryPolled } from './services/db';
+import { resolveSpotlightTournament } from './utils/tournamentStatus';
 
 // Route pages are code-split so a first-time visitor only downloads the home
 // page's JS. The heavy admin editor (TournamentCreation, Excel/Challonge import,
@@ -184,9 +186,12 @@ function Home() {
     return null;
   })();
 
-  // Spotlight tournament (for hero section + stands). Works for any format, not just RRB/group.
-  const spotlightTournament = adminData && adminData.spotlightTournamentId
-    ? adminData.tournaments.find(t => t.id === adminData.spotlightTournamentId) ?? null
+  // Spotlight tournament (for hero section + stands). Works for any format, not
+  // just RRB/group. When the admin hasn't pinned one, auto-pick the first
+  // in-progress tournament, then the first overall — matching the admin panel's
+  // "Auto (first in-progress, then first)" dropdown option.
+  const spotlightTournament = adminData
+    ? resolveSpotlightTournament(adminData.tournaments, adminData.spotlightTournamentId)
     : null;
 
   // Top players ranked by average ACS, computed from applied tournament match
@@ -283,7 +288,9 @@ function Home() {
               <Link to="/matches" className="arena-btn--ghost">Full Schedule</Link>
             </div>
             <div className="flex flex-col gap-4">
-              {upcomingMatches && upcomingMatches.length > 0 ? (
+              {!adminData ? (
+                <LoadingState label="Loading matches…" inline />
+              ) : upcomingMatches && upcomingMatches.length > 0 ? (
                 upcomingMatches.map(m => {
                   const isTournamentMatch = 'team1Name' in m;
                   const team1 = 'team1Name' in m ? m.team1Name : m.team1;
@@ -323,7 +330,9 @@ function Home() {
             <div className="arena-section-header">
               <h2 className="arena-heading">Standings</h2>
             </div>
-            {autoStandings ? (
+            {!adminData ? (
+              <LoadingState label="Loading standings…" inline />
+            ) : autoStandings ? (
               <div className="arena-standings flex flex-col gap-3">
                 <Link to={`/tournament/${autoStandings.tournamentId}`} className="arena-standings__title">
                   {autoStandings.tournamentName}
@@ -350,11 +359,35 @@ function Home() {
         </div>
       </section>
 
-      {/* Top Performance — ranked by average ACS from tournament stats */}
+      {/* Top Performance — ranked by total kills from tournament stats */}
       <section className="arena-perf-section">
         <div className="max-w-[1436px] mx-auto px-6 flex flex-col gap-12">
           <div className="flex flex-col items-center gap-2 text-center">
-            <p className="arena-label">Season Leaders</p>
+            {spotlightTournament ? (
+              <Link
+                to={`/tournament/${spotlightTournament.id}`}
+                className="arena-label"
+                style={{
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3em',
+                  borderBottom: '1px solid currentColor',
+                  paddingBottom: '1px',
+                  transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+              >
+                {spotlightTournament.name}
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M1 9L9 1M9 1H3M9 1V7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </Link>
+            ) : (
+              <p className="arena-label">Season Leaders</p>
+            )}
             <h2 className="arena-heading arena-heading--lg">Top Performance</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -366,8 +399,8 @@ function Home() {
                     <p className="arena-player-card__name">{player.playerName}</p>
                     <div className="arena-player-card__stats">
                       <div>
-                        <p className="arena-player-card__stat-label">ACS</p>
-                        <p className="arena-player-card__stat-value">{Math.round(player.acs)}</p>
+                        <p className="arena-player-card__stat-label">Kills</p>
+                        <p className="arena-player-card__stat-value">{player.kills}</p>
                       </div>
                       <div>
                         <p className="arena-player-card__stat-label">K/D/A</p>

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronDown, BarChart3, Users } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { LoadingState } from './LoadingState';
 import type { Tournament, BracketGenerated, MatchPlayerStat, TournamentPlayer } from './TournamentCreation';
 import { getTournaments, loadWithRetry } from '../services/db';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
@@ -166,7 +167,7 @@ function aggregatePlayers(
   });
 }
 
-// Top players by average ACS across every stage of the given tournaments.
+// Top players by total kills across every stage of the given tournaments.
 // Used by the homepage "Top Players" widget. Players are aggregated globally by
 // id; only those with at least one played map are returned.
 export function getTopPlayersByAcs(tournaments: Tournament[], limit = 5): PlayerRow[] {
@@ -178,7 +179,7 @@ export function getTopPlayersByAcs(tournaments: Tournament[], limit = 5): Player
   }
   const top = aggregatePlayers(brackets, teamNameById)
     .filter(p => p.mapsPlayed > 0)
-    .sort((a, b) => b.acs - a.acs)
+    .sort((a, b) => b.kills - a.kills)
     .slice(0, limit);
 
   // Resolve each aggregated row back to a roster player so the homepage can link
@@ -204,11 +205,13 @@ export function getTopPlayersByAcs(tournaments: Tournament[], limit = 5): Player
 export function StatsPage() {
   const navigate = useNavigate();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  // "First fetch in flight" vs "loaded but empty" — gates the loader below.
+  const [loaded, setLoaded] = useState(false);
   const [tournamentId, setTournamentId] = useState('');
   const [stageId, setStageId] = useState('');
-  const [metric, setMetric] = useState<MetricKey>('acs');
+  const [metric, setMetric] = useState<MetricKey>('kills');
 
-  useEffect(() => loadWithRetry(getTournaments, setTournaments), []);
+  useEffect(() => loadWithRetry(getTournaments, ts => { setTournaments(ts); setLoaded(true); }), []);
 
   // Auto-select the first in-progress tournament when tournaments load
   useEffect(() => {
@@ -351,7 +354,9 @@ export function StatsPage() {
         </div>
 
         {/* Leaderboard */}
-        {!tournament ? (
+        {!loaded ? (
+          <LoadingState label="Loading stats…" inline />
+        ) : !tournament ? (
           <div className="arena-stats-empty">
             <BarChart3 className="w-10 h-10 arena-stats-empty__icon" />
             <p className="arena-stats-empty__title">Select a tournament to view stats</p>
@@ -374,14 +379,17 @@ export function StatsPage() {
                   <tr>
                     <th className="arena-md-table__left arena-stats-table__rank">#</th>
                     <th className="arena-md-table__left">Player</th>
-                    <th className="arena-md-table__left">Team</th>
-                    <th>Maps</th>
+                    <th className="arena-md-table__left arena-stats-table__hide-mobile">Team</th>
+                    <th className="arena-stats-table__hide-mobile">Maps</th>
                     {METRICS.map(m => (
-                      <th key={m.key} className={m.key === metric ? 'arena-md-table__sorted' : ''}>
+                      <th
+                        key={m.key}
+                        className={`${m.key === metric ? 'arena-md-table__sorted' : 'arena-stats-table__hide-mobile'}`}
+                      >
                         {m.label}{m.key === metric && ' ↓'}
                       </th>
                     ))}
-                    <th>K / D / A</th>
+                    <th className="arena-stats-table__hide-mobile">K / D / A</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -400,20 +408,23 @@ export function StatsPage() {
                             <span className="arena-md-table__player arena-md-table__player--static">{row.playerName}</span>
                           )}
                         </td>
-                        <td className="arena-md-table__left">
+                        <td className="arena-md-table__left arena-stats-table__hide-mobile">
                           {teamHref ? (
                             <Link to={teamHref} className="arena-stats-table__team">{row.teamName}</Link>
                           ) : (
                             <span className="arena-stats-table__team arena-stats-table__team--static">{row.teamName}</span>
                           )}
                         </td>
-                        <td className="arena-md-table__dim">{row.mapsPlayed}</td>
+                        <td className="arena-md-table__dim arena-stats-table__hide-mobile">{row.mapsPlayed}</td>
                         {METRICS.map(m => (
-                          <td key={m.key} className={m.key === metric ? 'arena-md-table__acs-top' : ''}>
+                          <td
+                            key={m.key}
+                            className={`${m.key === metric ? 'arena-md-table__acs-top' : 'arena-stats-table__hide-mobile'}`}
+                          >
                             {m.format(row[m.key] as number)}
                           </td>
                         ))}
-                        <td className="arena-md-table__dim">
+                        <td className="arena-md-table__dim arena-stats-table__hide-mobile">
                           {row.kills} / {row.deaths} / {row.assists}
                         </td>
                       </tr>

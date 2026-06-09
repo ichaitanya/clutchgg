@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { LoadingState } from './LoadingState';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { AdminData } from './AdminPanel';
 import type { Tournament } from './TournamentCreation';
@@ -54,6 +55,18 @@ export function TournamentsPage() {
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming');
 
   useEffect(() => loadWithRetry(loadAdminData, setAdminData), []);
+
+  // While the first fetch is in flight `adminData` is null — show a loader so
+  // the page doesn't flash its empty-state copy ("No upcoming tournaments").
+  if (adminData === null) {
+    return (
+      <div className="min-h-screen bg-[#0e0e0e]">
+        <Header />
+        <LoadingState label="Loading tournaments…" />
+        <Footer />
+      </div>
+    );
+  }
 
   // Override each tournament's stored status with the live, data-derived status.
   const all = (adminData?.tournaments ?? []).map(t => ({
