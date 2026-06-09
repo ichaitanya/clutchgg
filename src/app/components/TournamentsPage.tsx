@@ -7,6 +7,7 @@ import { LoadingState } from './LoadingState';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { AdminData } from './AdminPanel';
 import type { Tournament } from './TournamentCreation';
+import { formatPrize } from './TournamentCreation';
 import { loadAdminData, loadWithRetry } from '../services/db';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
 
@@ -15,12 +16,12 @@ function teamCount(t: Tournament): number {
   return t.teams?.length ?? 0;
 }
 
-// Best-effort prize pool string for display.
+// Best-effort prize pool string for display, with the pool's currency symbol.
 function prizeText(t: Tournament): string {
   const pp = t.event?.prizePool;
   if (!pp) return '—';
-  if (pp.total) return pp.total;
-  if (pp.places?.length) return pp.places[0]?.prize || '—';
+  if (pp.total) return formatPrize(pp.total, pp.currency);
+  if (pp.places?.length) return formatPrize(pp.places[0]?.prize, pp.currency) || '—';
   return '—';
 }
 

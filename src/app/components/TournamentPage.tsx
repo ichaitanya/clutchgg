@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
-import type { Tournament, BracketGenerated, BracketMatch } from './TournamentCreation';
+import type { Tournament, BracketGenerated, BracketMatch, PrizePool } from './TournamentCreation';
+import { formatPrize } from './TournamentCreation';
 import type { NewsItem } from './AdminPanel';
 import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
 import { getStageOptions } from './StatsPage';
@@ -205,7 +206,7 @@ export function TournamentPage() {
                   <span className="arena-tp-hero__meta-type"><span className="arena-tp-hero__dot" />{ev.type}</span>
                 )}
                 {prizePool?.total && (
-                  <span className="arena-tp-hero__meta-prize"><DollarSign className="w-3.5 h-3.5" />{prizePool.total}</span>
+                  <span className="arena-tp-hero__meta-prize"><Trophy className="w-3.5 h-3.5" />{formatPrize(prizePool.total, prizePool.currency)}</span>
                 )}
                 <span className="arena-tp-hero__status">{statusLabel}</span>
               </div>
@@ -324,7 +325,7 @@ export function TournamentPage() {
 function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatches, upcomingMatches, onMatch }: {
   tournament: Tournament;
   hasPrizePool: boolean;
-  prizePool?: { total?: string };
+  prizePool?: PrizePool;
   prizePlaces: { position: number; prize: string }[];
   recentMatches: { match: BracketMatch; stage: string; status: string }[];
   upcomingMatches: { match: BracketMatch; stage: string; status: string }[];
@@ -370,13 +371,13 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
             {prizePool?.total && (
               <div className="arena-tp-prize__row">
                 <span className="arena-tp-prize__label">Total</span>
-                <span className="arena-tp-prize__total">{prizePool.total}</span>
+                <span className="arena-tp-prize__total">{formatPrize(prizePool.total, prizePool.currency)}</span>
               </div>
             )}
             {prizePlaces.map((p, i) => (
               <div key={p.position} className="arena-tp-prize__row">
                 <span className="arena-tp-prize__label">{ordinal(p.position)} Place</span>
-                <span className="arena-tp-prize__value" style={{ color: PLACE_COLORS[i] || '#e5e7eb' }}>{p.prize}</span>
+                <span className="arena-tp-prize__value" style={{ color: PLACE_COLORS[i] || '#e5e7eb' }}>{formatPrize(p.prize, prizePool?.currency)}</span>
               </div>
             ))}
           </div>

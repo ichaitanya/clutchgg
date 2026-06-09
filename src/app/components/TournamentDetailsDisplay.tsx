@@ -1,5 +1,6 @@
 import { Trophy, Users, DollarSign, Calendar, MapPin, X } from 'lucide-react';
 import type { Tournament, BracketGenerated } from './TournamentCreation';
+import { formatPrize } from './TournamentCreation';
 
 interface TournamentDetailsProps {
   tournament: Tournament;
@@ -170,7 +171,7 @@ export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDeta
                   {prizePool!.total && (
                     <div className="flex items-center justify-between py-2 border-b border-[#2a2d3a]">
                       <span className="text-gray-400 text-sm">Total Prize Pool</span>
-                      <span className="text-white font-bold text-lg">{prizePool!.total}</span>
+                      <span className="text-white font-bold text-lg">{formatPrize(prizePool!.total, prizePool!.currency)}</span>
                     </div>
                   )}
                   {prizePlaces.map((place, i) => (
@@ -185,7 +186,7 @@ export function TournamentDetailsDisplay({ tournament, onClose }: TournamentDeta
                         className="font-bold"
                         style={{ color: PLACE_COLORS[i] || '#e5e7eb' }}
                       >
-                        {place.prize}
+                        {formatPrize(place.prize, prizePool!.currency)}
                       </span>
                     </div>
                   ))}

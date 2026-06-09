@@ -46,12 +46,41 @@ export interface TeamInTournament {
 
 export interface PrizePoolEntry {
   position: number; // 1-based placement (1 = 1st place, etc.)
-  prize: string;    // Free-form prize text, e.g. "$25,000"
+  prize: string;    // Free-form prize text, e.g. "25,000" (currency symbol applied on display)
 }
 
+// Supported prize-pool currencies. INR (₹) is the default for this circuit.
+export type CurrencyCode = 'INR' | 'USD' | 'EUR' | 'GBP';
+
+export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
+  INR: '₹',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+};
+
+export const CURRENCY_OPTIONS: { code: CurrencyCode; label: string }[] = [
+  { code: 'INR', label: '₹ Rupees (INR)' },
+  { code: 'USD', label: '$ Dollars (USD)' },
+  { code: 'EUR', label: '€ Euros (EUR)' },
+  { code: 'GBP', label: '£ Pounds (GBP)' },
+];
+
 export interface PrizePool {
-  total?: string;            // Optional total prize pool, e.g. "$50,000"
+  total?: string;            // Optional total prize pool, e.g. "50,000"
   places: PrizePoolEntry[];  // One entry per winning placement, ordered by position
+  currency?: CurrencyCode;   // Defaults to INR when unset (legacy pools have no currency)
+}
+
+// Display a prize value with its currency symbol. If the stored string already
+// begins with a currency symbol (legacy pools typed "$50,000"), it's shown
+// as-is; otherwise the pool's currency symbol is prepended.
+export function formatPrize(value: string | undefined, currency?: CurrencyCode): string {
+  const v = (value ?? '').trim();
+  if (!v) return '';
+  if (/^[₹$€£]/.test(v)) return v;            // already has a symbol — leave it
+  const symbol = CURRENCY_SYMBOLS[currency ?? 'INR'];
+  return `${symbol}${v}`;
 }
 
 export interface TournamentEvent {
@@ -3414,6 +3443,10 @@ function TournamentForm({
   const [startDate, setStartDate] = useState(initialTournament?.event?.startDate || '');
   const [maxTeams, setMaxTeams] = useState(initialTournament?.event?.maxTeams?.toString() || '8');
   const [prizeTotal, setPrizeTotal] = useState(initialTournament?.event?.prizePool?.total || '');
+  // Prize-pool currency. Defaults to INR (rupees) — legacy pools have no value.
+  const [prizeCurrency, setPrizeCurrency] = useState<CurrencyCode>(
+    initialTournament?.event?.prizePool?.currency || 'INR'
+  );
   // One prize input per winning placement. Admin first picks how many teams win,
   // then fills the prize for each. Initialized from any existing prize pool.
   const [prizePlaces, setPrizePlaces] = useState<string[]>(
@@ -3620,18 +3653,40 @@ function TournamentForm({
           <div className="border-t border-[#2a2d3a] pt-5 mt-5">
             <h3 className="text-white font-semibold text-sm mb-4">Prize Pool</h3>
 
+            {/* Currency selector (defaults to ₹ Rupees) */}
+            <div className="mb-4">
+              <label className="block text-xs text-gray-400 mb-1.5 font-medium">Currency</label>
+              <select
+                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                value={prizeCurrency}
+                onChange={e => setPrizeCurrency(e.target.value as CurrencyCode)}
+              >
+                {CURRENCY_OPTIONS.map(c => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-600 mt-1">
+                Enter prize amounts without a symbol — {CURRENCY_SYMBOLS[prizeCurrency]} is added automatically.
+              </p>
+            </div>
+
             {/* Total Prize Pool (optional) */}
             <div className="mb-4">
               <label className="block text-xs text-gray-400 mb-1.5 font-medium">
                 Total Prize Pool <span className="text-gray-600">(Optional)</span>
               </label>
-              <input
-                type="text"
-                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                placeholder="e.g. $50,000"
-                value={prizeTotal}
-                onChange={e => setPrizeTotal(e.target.value)}
-              />
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400 text-sm font-semibold w-5 text-center flex-shrink-0">
+                  {CURRENCY_SYMBOLS[prizeCurrency]}
+                </span>
+                <input
+                  type="text"
+                  className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                  placeholder="e.g. 50,000"
+                  value={prizeTotal}
+                  onChange={e => setPrizeTotal(e.target.value)}
+                />
+              </div>
             </div>
 
             {/* Number of winning teams */}
@@ -3664,10 +3719,13 @@ function TournamentForm({
                     <span className="text-xs text-gray-400 font-semibold w-16 flex-shrink-0">
                       {ordinal(i + 1)} Place
                     </span>
+                    <span className="text-gray-400 text-sm font-semibold w-5 text-center flex-shrink-0">
+                      {CURRENCY_SYMBOLS[prizeCurrency]}
+                    </span>
                     <input
                       type="text"
                       className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                      placeholder={`e.g. $${(prizePlaces.length - i) * 10},000`}
+                      placeholder={`e.g. ${(prizePlaces.length - i) * 10},000`}
                       value={prize}
                       onChange={e => handlePrizeChange(i, e.target.value)}
                     />
@@ -3759,7 +3817,7 @@ function TournamentForm({
               startDate,
               maxTeams: parseInt(maxTeams, 10),
               prizePool: hasPrizePool
-                ? { total: prizeTotal.trim() || undefined, places }
+                ? { total: prizeTotal.trim() || undefined, places, currency: prizeCurrency }
                 : undefined,
             }, coverImage || undefined);
           }}
