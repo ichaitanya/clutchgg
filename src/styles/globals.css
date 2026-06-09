@@ -2438,26 +2438,43 @@ body {
 
 @media (max-width: 760px) {
   .arena-match-card {
+    position: relative;          /* anchor the status badge to the top-right */
     grid-template-columns: 1fr;
     gap: 0.65rem;
     padding: 0.75rem 0.9rem;
   }
+
+  /* Status badge floats to the card's top-right corner so it no longer eats a
+     full row in the meta block — keeps the tile compact. */
+  .arena-match-card__meta .arena-match-card__badge {
+    position: absolute;
+    top: 0.7rem;
+    right: 0.9rem;
+    margin: 0;
+  }
+
   .arena-match-card__meta {
     flex-direction: row;
-    align-items: center;
+    align-items: baseline;
     flex-wrap: wrap;
     text-align: left;
     padding-left: 0;
     border-left: none;
     border-top: 1px solid var(--arena-border);
-    padding-top: 0.65rem;
+    padding-top: 0.6rem;
     min-width: 0;
-    gap: 0.4rem 0.7rem;
+    gap: 0.15rem 0.6rem;
   }
-  .arena-match-card__meta .arena-match-card__badge { margin-left: auto; margin-top: 0; }
-  .arena-match-card__team-name { font-size: 1.05rem; }
-  .arena-match-card__teams { gap: 0.75rem; }
+
+  /* Reserve room on the eyebrow row so the date never runs under the badge. */
+  .arena-match-card__eyebrow { padding-right: 5.5rem; }
+
+  .arena-match-card__team-name { font-size: 1rem; }
+  /* More breathing room between each team's name and the centre score column. */
+  .arena-match-card__teams { gap: 0.9rem; }
   .arena-match-card__team { gap: 0.5rem; }
+  .arena-match-card__team--right { padding-right: 0.15rem; }
+  .arena-match-card__team--left { padding-left: 0.15rem; }
   .arena-match-card__logo { width: 2rem; height: 2rem; }
   .arena-match-card__logo-text { font-size: 0.7rem; }
   .arena-match-card__score { font-size: 1.2rem; }
@@ -4160,6 +4177,11 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 
 /* Match history table tweaks (reuses .arena-md-table) */
 .arena-pp-table { min-width: 720px; }
+/* Keep every cell on one line — without this the squeezed mobile table wraps
+   the "K / D / A" header and its values one character per line (unreadable).
+   The table scrolls horizontally inside its overflow-x wrapper instead. */
+.arena-pp-table th,
+.arena-pp-table td { white-space: nowrap; }
 .arena-pp-table__row { cursor: pointer; transition: background 0.15s ease; }
 .arena-pp-table__row:hover { background: #161616; }
 .arena-pp-table__stage {
@@ -4918,21 +4940,45 @@ html, body { overflow-x: clip; max-width: 100%; }
 @media (max-width: 900px) {
   :root { --arena-section-gap: 3.5rem; }
 
-  /* Hero scales down from its fixed 630px so it doesn't dominate small screens */
-  .arena-hero { height: 30rem; }
+  /* Hero scales down from its fixed 630px so it doesn't dominate small screens.
+     Use min-height (not height) so the bottom-anchored content can push the hero
+     taller when the headline wraps, instead of being clipped off the top. */
+  .arena-hero { height: auto; min-height: 30rem; }
 
   /* Footer: stack the two columns */
   .arena-footer__inner { grid-template-columns: 1fr; gap: 2rem; }
 
-  /* Player lineup band: 5 portraits is too many — go to 3 across */
-  .arena-md-lineup__grid { grid-template-columns: repeat(3, 1fr); }
+  /* Player lineup band: 5 portraits is too many for one row. Switch from a
+     fixed grid (which leaves a phantom empty cell on the last row) to a wrapping
+     flex row. Tiles grow to fill their row, so the last row's 2 tiles each take
+     half-width — no dead/empty tile. Each tile carries its own hairline border,
+     replacing the grid's gap-bleed (the grid background is now transparent). */
+  .arena-md-lineup__grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1px;
+    background: transparent;
+  }
+  .arena-md-lineup__grid .arena-md-player {
+    /* fixed 1/3 basis, no grow → every tile is the same width across both rows;
+       the last row's 2 tiles sit left-aligned and the leftover third is just
+       transparent card surface (no bordered phantom tile). */
+    flex: 0 0 calc(33.333% - 0.667px);
+    outline: 1px solid var(--arena-border);
+    aspect-ratio: auto;
+    min-height: 9.5rem;
+  }
 }
 
 @media (max-width: 600px) {
   :root { --arena-gutter: 16px; --arena-section-gap: 2.75rem; }
 
-  .arena-hero { height: 26rem; }
-  .arena-hero__content { padding-bottom: 2.5rem; }
+  /* min-height + top padding so the headline never clips off the top of the
+     hero on a narrow screen (it grows downward as the title wraps instead). */
+  .arena-hero { height: auto; min-height: 26rem; }
+  .arena-hero__content { padding-top: 1.5rem; padding-bottom: 2.5rem; }
+  /* Scale the display headline down a notch so 3–4 wrapped lines fit cleanly. */
+  .arena-display { font-size: clamp(2rem, 9vw, 2.75rem); }
 
   /* Right-edge tournament rail can overlap content on narrow screens —
      keep the bars but never let the expanded label cover the page. */
@@ -4946,23 +4992,48 @@ html, body { overflow-x: clip; max-width: 100%; }
   /* Match-detail stats table: reduce min-width so there's less sideways scroll
      inside the (already overflow-x:auto) table card. */
   .arena-md-table { min-width: 480px; }
+  /* …but the player match-history table has 7 columns; keep it wide enough that
+     cells don't wrap (it scrolls horizontally inside its wrapper instead). The
+     generic rule above would otherwise shrink it and re-introduce the wrapping. */
+  .arena-pp-table { min-width: 620px; }
 
-  /* Leaderboard: drop the secondary columns (Team, Maps, non-selected metrics,
-     K/D/A) so only Rank + Player + the selected sort metric remain. This fits a
+  /* Leaderboard: drop the secondary columns (Team, non-selected metrics, K/D/A)
+     so only Rank + Player + Maps + the selected sort metric remain. This fits a
      phone with no horizontal scroll instead of cutting columns off. */
   .arena-stats-table { min-width: 0; }
   .arena-stats-table__hide-mobile { display: none; }
 
-  /* Player lineup band: 2 portraits across reads better than 3 cramped ones */
-  .arena-md-lineup__grid { grid-template-columns: repeat(2, 1fr); }
+  /* Lineup stays 3-across on phones (inherited from the ≤900px rule): 5 players
+     wrap to 3 + 2, and the bottom row's two tiles grow to fill the width — no
+     lone over-wide tile and no empty cell. Just shrink the name text a touch. */
+  .arena-md-lineup__grid .arena-md-player { min-height: 8.5rem; }
 
   /* Section headers that sit as a row (title + action) should stack */
   .arena-section-header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
 }
 
-@media (max-width: 375px) {
-  .arena-hero { height: 22rem; }
-  .arena-md-lineup__name { font-size: 0.95rem; }
+/* Narrow phones — covers iPhone SE/12/13/14 (375–390px), Pixel (~412px is
+   handled by ≤600px), and the 360px band shared by most Samsung Galaxy and
+   older Android. Keep the headline and lineup names from feeling oversized. */
+@media (max-width: 390px) {
+  .arena-hero { height: auto; min-height: 22rem; }
+  .arena-md-lineup__name { font-size: 0.9rem; }
+  .arena-md-lineup__grid .arena-md-player { min-height: 7.75rem; }
+}
+
+/* Smallest mainstream widths — 360px (Galaxy S-series, many Android) down to
+   ~344px (Galaxy Z Fold folded). Everything already reflows here; this just
+   trims a few values so nothing feels cramped or overflows at the low end. */
+@media (max-width: 360px) {
+  :root { --arena-gutter: 12px; }
+  .arena-display { font-size: clamp(1.85rem, 10vw, 2.3rem); }
+  .arena-md-lineup__name { font-size: 0.85rem; }
+  .arena-md-lineup__grid .arena-md-player { min-height: 7rem; }
+  /* Status badge + eyebrow date can collide on the tiniest cards — give the
+     eyebrow a hair more room and shrink the floating badge slightly. */
+  .arena-match-card__eyebrow { padding-right: 5rem; font-size: 0.5625rem; }
+  .arena-match-card__badge { font-size: 0.5625rem; padding: 0.25rem 0.5rem; }
+  .arena-match-card__team-name { font-size: 0.9rem; }
 }
 
 /* Touch targets: on coarse (touch) pointers, ensure interactive controls are

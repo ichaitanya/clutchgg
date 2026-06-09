@@ -380,7 +380,7 @@ export function StatsPage() {
                     <th className="arena-md-table__left arena-stats-table__rank">#</th>
                     <th className="arena-md-table__left">Player</th>
                     <th className="arena-md-table__left arena-stats-table__hide-mobile">Team</th>
-                    <th className="arena-stats-table__hide-mobile">Maps</th>
+                    <th>Maps</th>
                     {METRICS.map(m => (
                       <th
                         key={m.key}
@@ -415,7 +415,7 @@ export function StatsPage() {
                             <span className="arena-stats-table__team arena-stats-table__team--static">{row.teamName}</span>
                           )}
                         </td>
-                        <td className="arena-md-table__dim arena-stats-table__hide-mobile">{row.mapsPlayed}</td>
+                        <td className="arena-md-table__dim">{row.mapsPlayed}</td>
                         {METRICS.map(m => (
                           <td
                             key={m.key}
