@@ -1,1 +1,14 @@
 node_modules/
+
+# Environment variables — never commit secrets (Supabase/Challonge/Henrik keys)
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+.vercel/
+
+# Logs & OS/editor cruft
+*.log
+.DS_Store

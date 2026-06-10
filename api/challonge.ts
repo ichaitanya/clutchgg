@@ -12,6 +12,15 @@ const headers = {
   'Authorization': API_KEY,
 };
 
+// Strip the Challonge api_key from any string before logging it, so the key
+// never lands in Vercel's retained function logs (v1 auth puts it in the query
+// string). Replaces `api_key=…` and any literal occurrence of the key itself.
+function redact(s: string): string {
+  let out = s.replace(/api_key=[^&\s]+/gi, 'api_key=***');
+  if (API_KEY) out = out.split(API_KEY).join('***');
+  return out;
+}
+
 // Health check endpoint to verify API key
 async function checkApiHealth() {
   try {
@@ -126,11 +135,11 @@ export default async function handler(req: any, res: any) {
 
   console.log(`Path parameter: "${path}"`);
   console.log(`Full path: "${fullPath}"`);
-  console.log(`Full URL: ${url}`);
+  console.log(`Full URL: ${redact(url)}`);
   console.log(`Headers being sent:`, {
     'Content-Type': headers['Content-Type'],
     'Accept': headers['Accept'],
-    'Authorization': headers['Authorization'].substring(0, 20) + '...',
+    'Authorization': API_KEY ? '***' : '(unset)',
   });
 
   if (parsedBody) {
@@ -148,7 +157,7 @@ export default async function handler(req: any, res: any) {
     }
 
     // Try with header-based authentication first
-    console.log(`Making fetch request to: ${url}`);
+    console.log(`Making fetch request to: ${redact(url)}`);
     let response = await fetch(url, fetchOptions);
     
     // If 401/403, try with query parameter authentication
@@ -161,7 +170,7 @@ export default async function handler(req: any, res: any) {
       delete (optionsWithoutAuth.headers as any)['Authorization'];
       delete (optionsWithoutAuth.headers as any)['Authorization-Type'];
       
-      console.log(`Retrying with URL: ${urlWithKey.substring(0, 100)}...`);
+      console.log(`Retrying with query-param auth: ${redact(urlWithKey)}`);
       response = await fetch(urlWithKey, optionsWithoutAuth);
     }
     

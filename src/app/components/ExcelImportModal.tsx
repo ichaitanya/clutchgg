@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Upload, X, Download, AlertCircle, CheckCircle2, AlertTriangle, Loader } from 'lucide-react';
 import {
   parseExcelFile,
@@ -22,6 +22,21 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<'upload' | 'preview'>('upload');
   const [duplicateTeams, setDuplicateTeams] = useState<string[]>([]);
+
+  // Teams that will actually be imported: drop names already in the tournament,
+  // then collapse within-sheet duplicate team names (keep first). Single source
+  // of truth so the preview count, the button, and handleImport all agree.
+  const importableTeams = useMemo(() => {
+    if (!importResult) return [];
+    const seen = new Set<string>();
+    return importResult.teams.filter(t => {
+      const key = t.teamName.trim().toLowerCase();
+      if (existingTeamNames.some(e => e.toLowerCase() === key)) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [importResult, existingTeamNames]);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -64,11 +79,7 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
   };
 
   const handleImport = () => {
-    if (!importResult || importResult.teams.length === 0) return;
-
-    let uniqueTeams = importResult.teams.filter(
-      t => !existingTeamNames.some(e => e.toLowerCase() === t.teamName.toLowerCase())
-    );
+    let uniqueTeams = importableTeams;
     if (uniqueTeams.length === 0) return;
     if (remainingSlots !== undefined && uniqueTeams.length > remainingSlots) {
       uniqueTeams = uniqueTeams.slice(0, remainingSlots);
@@ -255,7 +266,7 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
 
                   {/* Slot limit warning banner */}
                   {(() => {
-                    const uniqueCount = importResult.teams.length - duplicateTeams.length;
+                    const uniqueCount = importableTeams.length;
                     const overLimit = remainingSlots !== undefined && uniqueCount > remainingSlots;
                     if (!overLimit) return null;
                     const skipped = uniqueCount - remainingSlots!;
@@ -332,16 +343,16 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
                   </div>
 
                   {/* Success / partial-import message */}
-                  {importResult.teams.length > duplicateTeams.length ? (
+                  {importableTeams.length > 0 ? (
                     <div className="bg-green-500/10 border border-green-500/50 rounded-lg p-4">
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-5 h-5 text-green-500" />
                         <p className="text-green-400 text-sm font-semibold">
                           {(() => {
-                            const uniqueCount = importResult.teams.length - duplicateTeams.length;
+                            const uniqueCount = importableTeams.length;
                             const importCount = remainingSlots !== undefined ? Math.min(uniqueCount, remainingSlots) : uniqueCount;
                             const totalSkipped = importResult.teams.length - importCount;
-                            return `${importCount} team${importCount !== 1 ? 's' : ''} ready to import.${totalSkipped > 0 ? ` (${totalSkipped} skipped)` : ''}`;
+                            return `${importCount} team${importCount !== 1 ? 's' : ''} ready to import.${totalSkipped > 0 ? ` (${totalSkipped} skipped — duplicates or already added)` : ''}`;
                           })()}
                         </p>
                       </div>
@@ -351,7 +362,7 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
                       <div className="flex items-center gap-2">
                         <AlertCircle className="w-5 h-5 text-red-500" />
                         <p className="text-red-400 text-sm font-semibold">
-                          All teams in this file already exist in the tournament. Nothing to import.
+                          No new teams to import — every team in this file is a duplicate or already exists in the tournament.
                         </p>
                       </div>
                     </div>
@@ -388,12 +399,11 @@ export function ExcelImportModal({ onImport, onCancel, existingTeamNames = [], r
               </button>
               <button
                 onClick={handleImport}
-                disabled={!importResult || importResult.teams.length === 0 || importResult.teams.length === duplicateTeams.length || (remainingSlots !== undefined && remainingSlots <= 0)}
+                disabled={importableTeams.length === 0 || (remainingSlots !== undefined && remainingSlots <= 0)}
                 className="flex-1 py-2.5 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {(() => {
-                  if (!importResult) return 'Import Teams';
-                  const uniqueCount = importResult.teams.length - duplicateTeams.length;
+                  const uniqueCount = importableTeams.length;
                   const importCount = remainingSlots !== undefined ? Math.min(uniqueCount, remainingSlots) : uniqueCount;
                   return importCount > 0
                     ? `Import ${importCount} Team${importCount !== 1 ? 's' : ''}`

@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { TeamInTournament, TournamentPlayer, PlayerRole } from '../components/TournamentCreation';
+import { normalizeRiotId } from './riotId';
 
 // Clean a spreadsheet-entered Riot ID into canonical "name#tag" form: strip
 // stray spaces around the "#" ("AE Slash #ESNN" → "AE Slash#ESNN"), drop trailing
@@ -184,11 +185,65 @@ function extractTeamsFromData(jsonData: any[]): ExcelImportResult {
       return;
     }
 
+    // Duplicate players WITHIN this team — identity is the Riot ID, not the
+    // display name (two different people can share a display name; the same Riot
+    // ID listed twice is a genuine duplicate). Players without a Riot ID are
+    // skipped here since name alone isn't enough to call them duplicates.
+    const seenInTeam = new Map<string, { display: string; count: number }>();
+    for (const p of players) {
+      if (!p.riotId) continue;
+      const key = normalizeRiotId(p.riotId);
+      const cur = seenInTeam.get(key);
+      if (cur) cur.count++;
+      else seenInTeam.set(key, { display: p.riotId, count: 1 });
+    }
+    for (const { display, count } of seenInTeam.values()) {
+      if (count > 1) {
+        warnings.push(`Row ${lineNumber}: Team "${teamName}" lists Riot ID "${display}" ${count} times. Remove the duplicate player.`);
+      }
+    }
+
     teams.push({
       teamName,
       players,
     });
   });
+
+  // ── Cross-team duplicate checks (whole sheet) ──────────────────────────────
+
+  // Duplicate TEAM names within the sheet (case-insensitive). Two rows with the
+  // same team name are almost always a mistake — surface every repeat.
+  const teamCounts = new Map<string, { display: string; count: number }>();
+  for (const t of teams) {
+    const key = t.teamName.trim().toLowerCase();
+    const cur = teamCounts.get(key);
+    if (cur) cur.count++;
+    else teamCounts.set(key, { display: t.teamName, count: 1 });
+  }
+  for (const { display, count } of teamCounts.values()) {
+    if (count > 1) {
+      warnings.push(`Team "${display}" appears ${count} times in the sheet. Each team should be listed once.`);
+    }
+  }
+
+  // Same Riot ID on more than one team — a player shouldn't be rostered on two
+  // teams at once. Keyed on the (normalized) Riot ID so a shared display name
+  // across teams is NOT flagged, but the same actual account is.
+  const riotIdToTeams = new Map<string, { display: string; teams: Set<string> }>();
+  for (const t of teams) {
+    for (const p of t.players) {
+      if (!p.riotId) continue;
+      const key = normalizeRiotId(p.riotId);
+      const entry = riotIdToTeams.get(key) ?? { display: p.riotId, teams: new Set<string>() };
+      entry.teams.add(t.teamName);
+      riotIdToTeams.set(key, entry);
+    }
+  }
+  for (const { display, teams: onTeams } of riotIdToTeams.values()) {
+    if (onTeams.size > 1) {
+      warnings.push(`Riot ID "${display}" appears on multiple teams (${[...onTeams].join(', ')}). A player should be on one team.`);
+    }
+  }
 
   return { teams, errors, warnings };
 }
