@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { BracketGenerated, BracketMatch, TeamInTournament, RRTeamEntry } from './TournamentCreation';
 
@@ -388,8 +388,22 @@ function BracketTree({
   const maxHeight = (allCenters.length ? Math.max(...allCenters) : FIRST_CENTER)
     + CARD_HEIGHT / 2 + HEADER_OFFSET + CARD_HEIGHT;
 
+  // When this tree is fully decided, open it scrolled to the final round —
+  // a finished bracket is mostly opened to see the result, which sits at the
+  // right edge and is otherwise hidden behind a manual scroll.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const lastRound = rounds[rounds.length - 1];
+    if (lastRound?.length && lastRound.every(m => !!m.winner)) {
+      el.scrollLeft = el.scrollWidth;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="overflow-x-auto overflow-y-hidden pb-4">
+    <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden pb-4">
       <div
         className="flex gap-0 relative"
         style={{ minWidth: `${rounds.length * 220}px`, height: `${maxHeight}px` }}

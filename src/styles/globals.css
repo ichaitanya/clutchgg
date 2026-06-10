@@ -2162,7 +2162,7 @@ body {
   gap: 1.1rem;
   width: 100%;
   text-align: left;
-  padding: 0.7rem 1.1rem;
+  padding: 0.55rem 1.1rem;
   background: var(--arena-surface-elevated);
   border: 1px solid var(--arena-border);
   border-left: 2px solid var(--arena-border);
@@ -2212,7 +2212,7 @@ body {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--arena-text-dim);
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.35rem;
 }
 
 .arena-match-card__teams {
@@ -2347,11 +2347,17 @@ body {
   flex-direction: column;
   align-items: flex-end;
   text-align: right;
-  gap: 0.3rem;
+  gap: 0.35rem;
   flex-shrink: 0;
   padding-left: 1.25rem;
   border-left: 1px solid var(--arena-border);
   min-width: 10.5rem;
+}
+/* Status badge + expand chevron share one line to keep the card short */
+.arena-match-card__badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .arena-match-card__tournament {
   font-family: 'Playfair Display', Georgia, serif;
@@ -4034,50 +4040,94 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
    PLAYER PROFILE — editorial theme
    ════════════════════════════════════════════════════════════════ */
 
-/* Hero */
+/* Hero — accent keyline on top, soft red glow behind the identity block */
 .arena-pp-hero {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
-  gap: 1.75rem;
-  background: var(--arena-surface-elevated);
+  gap: 2rem;
+  background:
+    radial-gradient(ellipse 42rem 16rem at 88% -20%, rgba(255, 70, 85, 0.09), transparent 65%),
+    var(--arena-surface-elevated);
   border: 1px solid var(--arena-border);
-  padding: 1.75rem;
+  border-top: 2px solid var(--arena-accent);
+  padding: 2rem;
   margin-bottom: 1.25rem;
 }
+/* Faint oversized jersey-style watermark behind the hero content */
+.arena-pp-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 55%, rgba(255, 255, 255, 0.015) 55.5%, rgba(255, 255, 255, 0.015) 70%, transparent 70.5%);
+}
 .arena-pp-hero__photo {
+  position: relative;
   width: 8.5rem;
   height: 8.5rem;
   flex-shrink: 0;
   border-radius: 0.4rem;
   overflow: hidden;
   border: 1px solid var(--arena-border);
-  background: #0e0e0e;
+  background: linear-gradient(180deg, #161616, #0e0e0e);
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
-.arena-pp-hero__photo img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+/* Accent underline pinned to the photo's bottom edge */
+.arena-pp-hero__photo::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--arena-accent), rgba(255, 70, 85, 0.15));
+}
+.arena-pp-hero__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  /* Soften upscaling artifacts from low-res source photos: a hair of blur +
+     imperceptible zoom hides blocky pixel edges without visibly smudging. */
+  image-rendering: auto;
+  filter: blur(0.3px);
+  transform: scale(1.015);
+}
 .arena-pp-hero__initials {
   font-family: 'Chivo', 'Inter', system-ui, sans-serif;
   font-weight: 700;
-  font-size: 2.5rem;
+  font-size: 2.75rem;
+  letter-spacing: 0.04em;
   color: #2f2f2f;
 }
-.arena-pp-hero__id { min-width: 0; flex: 1; }
+.arena-pp-hero__id { position: relative; min-width: 0; flex: 1; }
 .arena-pp-hero__name {
   font-family: 'Playfair Display', Georgia, serif;
   font-weight: 700;
-  font-size: 2.5rem;
+  font-size: 2.85rem;
   line-height: 1.05;
+  letter-spacing: -0.01em;
   color: #fff;
   margin: 0;
 }
 .arena-pp-hero__riot {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.1rem;
   font-family: 'Chivo', 'Courier New', monospace;
   font-size: 0.8125rem;
-  color: var(--arena-text-dim);
-  margin: 0.35rem 0 0;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--arena-border);
+  border-radius: 0.3rem;
+  padding: 0.25rem 0.65rem;
+  margin: 0.6rem 0 0;
 }
+.arena-pp-hero__riot-name { color: var(--arena-text-secondary); font-weight: 600; }
+.arena-pp-hero__riot-tag { color: var(--arena-accent); font-weight: 600; }
 .arena-pp-hero__chips {
   display: flex;
   flex-wrap: wrap;
@@ -4143,19 +4193,35 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   font-size: 0.5rem; color: var(--arena-text-dim);
 }
 
-/* Summary stat cards */
+/* Summary stat strip — one card, cells split by hairline dividers */
 .arena-pp-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 0.85rem;
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
   margin-bottom: 1rem;
 }
 .arena-pp-stat {
-  background: var(--arena-surface-elevated);
-  border: 1px solid var(--arena-border);
-  padding: 1.25rem 1rem;
+  position: relative;
+  padding: 1.4rem 1rem 1.25rem;
   text-align: center;
+  transition: background 0.15s ease;
 }
+.arena-pp-stat + .arena-pp-stat { border-left: 1px solid var(--arena-border-subtle); }
+.arena-pp-stat:hover { background: rgba(255, 255, 255, 0.015); }
+/* Short accent tick above each value, lights up on hover */
+.arena-pp-stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2rem;
+  height: 2px;
+  background: var(--arena-border);
+  transition: background 0.15s ease, width 0.2s ease;
+}
+.arena-pp-stat:hover::before { background: var(--arena-accent); width: 3rem; }
 .arena-pp-stat__label {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.625rem;
@@ -4163,17 +4229,196 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--arena-text-dim);
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.55rem;
 }
 .arena-pp-stat__value {
   font-family: 'Chivo', 'Inter', system-ui, sans-serif;
   font-weight: 700;
-  font-size: 1.85rem;
+  font-size: 2.1rem;
   line-height: 1;
   color: #fff;
   margin: 0;
 }
 .arena-pp-stat__value--accent { color: var(--arena-accent); }
+.arena-pp-stat__sub {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  color: var(--arena-text-dim);
+  margin: 0.45rem 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Career-best highlight strip — map splash backdrop set inline */
+.arena-pp-peak {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  background-color: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  border-left: 3px solid var(--arena-accent);
+  padding: 0.7rem 1.25rem;
+  margin-bottom: 0.85rem;
+}
+.arena-pp-peak__label {
+  flex-shrink: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+.arena-pp-peak__kills {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
+}
+.arena-pp-peak__kills small {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+}
+.arena-pp-peak__div {
+  flex-shrink: 0;
+  width: 1px;
+  height: 1.5rem;
+  background: rgba(255, 255, 255, 0.14);
+}
+.arena-pp-peak__text {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: #c9c7c6;
+  min-width: 0;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+.arena-pp-peak__text strong { color: #fff; font-weight: 700; }
+.arena-pp-peak__dot { color: var(--arena-text-dim); margin: 0 0.45rem; }
+
+/* Agent / map breakdown cards (reuse .arena-tp-card chrome, compacted) */
+.arena-pp-break {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+  margin-bottom: 0.85rem;
+}
+/* Tighter chrome than the tournament-page cards these borrow from */
+.arena-pp-break .arena-tp-card,
+.arena-pp-career { padding: 0.85rem 1.1rem 0.45rem; }
+.arena-pp-break .arena-tp-card__title,
+.arena-pp-career .arena-tp-card__title {
+  font-size: 0.95rem;
+  margin: 0 0 0.25rem;
+  padding-bottom: 0.55rem;
+}
+.arena-pp-break__list { display: flex; flex-direction: column; }
+.arena-pp-break__row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.1rem;
+  border-bottom: 1px solid var(--arena-border-subtle);
+  text-decoration: none;
+}
+.arena-pp-break__row:last-child { border-bottom: none; }
+.arena-pp-break__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 1;
+  min-width: 0;
+}
+.arena-pp-break__icon {
+  width: 1.6rem; height: 1.6rem;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  object-fit: cover;
+  border: 1px solid var(--arena-border);
+  background: #0e0e0e;
+}
+.arena-pp-break__icon--empty { display: inline-block; }
+.arena-pp-break__name {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+}
+.arena-pp-break__cell {
+  flex-shrink: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--arena-text-dim);
+  white-space: nowrap;
+}
+.arena-pp-break__cell--num {
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: #fff;
+  min-width: 4rem;
+  text-align: right;
+}
+.arena-pp-break__cell--num small {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--arena-text-dim);
+}
+.arena-pp-break__w { color: #4ade80; font-weight: 700; }
+.arena-pp-break__l { color: var(--arena-accent); font-weight: 700; }
+.arena-pp-break__sep { color: #3a3a3a; }
+
+/* Tournaments (career) card */
+.arena-pp-career { margin-bottom: 0; }
+/* Match history sits right after the career card — kill the default 3rem gap */
+.arena-pp-form { margin-top: 1.5rem; }
+/* Map cell chip with the official splash art behind a wash (set inline) */
+.arena-pp-map-chip {
+  display: inline-block;
+  min-width: 4.75rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
+  background-color: #131313;
+  border: 1px solid var(--arena-border-subtle);
+  border-radius: 0.25rem;
+  padding: 0.28rem 0.7rem;
+}
+.arena-pp-career__row { transition: background 0.15s ease; cursor: pointer; }
+.arena-pp-career__row:hover { background: rgba(255, 255, 255, 0.02); }
+.arena-pp-career__row:hover .arena-pp-break__name { color: var(--arena-accent); }
+.arena-pp-career__place {
+  flex-shrink: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.25);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+}
 
 /* Match history table tweaks (reuses .arena-md-table) */
 .arena-pp-table { min-width: 720px; }
@@ -4182,16 +4427,50 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
    The table scrolls horizontally inside its overflow-x wrapper instead. */
 .arena-pp-table th,
 .arena-pp-table td { white-space: nowrap; }
-.arena-pp-table__row { cursor: pointer; transition: background 0.15s ease; }
-.arena-pp-table__row:hover { background: #161616; }
-.arena-pp-table__stage {
+.arena-pp-table__row { cursor: pointer; transition: background 0.15s ease, box-shadow 0.15s ease; }
+.arena-pp-table__row:hover {
+  background: #161616;
+  /* Accent keyline on the row's left edge — signals the row is clickable */
+  box-shadow: inset 2px 0 0 var(--arena-accent);
+}
+/* Map result tint: green/red keyline on the row's left edge */
+.arena-pp-table__row--w { box-shadow: inset 2px 0 0 rgba(74, 222, 128, 0.55); }
+.arena-pp-table__row--l { box-shadow: inset 2px 0 0 rgba(255, 70, 85, 0.45); }
+.arena-pp-table__row--w:hover { box-shadow: inset 2px 0 0 #4ade80; }
+.arena-pp-table__row--l:hover { box-shadow: inset 2px 0 0 var(--arena-accent); }
+/* Totals footer row */
+.arena-pp-table__totals td {
+  border-top: 1px solid var(--arena-border);
+  background: #0e0e0e;
   font-family: 'Inter', system-ui, sans-serif;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #c084fc;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
 }
-.arena-pp-table__opp { color: #fff; }
+.arena-pp-table__stage {
+  display: inline-block;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.08);
+  border: 1px solid rgba(192, 132, 252, 0.22);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+}
+.arena-pp-table__opp { color: #fff; font-weight: 600; }
+/* K/D/A — kills carry the weight, deaths/assists recede */
+.arena-pp-kda { display: inline-flex; align-items: baseline; gap: 0.3rem; font-variant-numeric: tabular-nums; }
+.arena-pp-kda__k { color: #fff; font-weight: 700; }
+.arena-pp-kda__sep { color: #3a3a3a; }
+.arena-pp-kda__d { color: var(--arena-text-dim); }
+.arena-pp-kda__a { color: var(--arena-text-dim); }
+/* Standout map (ACS ≥ 240) gets the accent */
+.arena-pp-table__acs-hot { color: var(--arena-accent) !important; }
 
 /* ── Name-history indicator ─────────────────────────────────── */
 /* Wraps the player name + the alias caret so they sit on the same baseline. */
@@ -4272,11 +4551,21 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 }
 
 @media (max-width: 640px) {
-  .arena-pp-hero { flex-direction: column; text-align: center; gap: 1.1rem; }
+  .arena-pp-hero { flex-direction: column; text-align: center; gap: 1.25rem; padding: 1.5rem 1.25rem; }
   .arena-pp-hero__chips, .arena-pp-hero__agents { justify-content: center; }
-  .arena-pp-hero__name { font-size: 2rem; }
+  .arena-pp-hero__name { font-size: 2.1rem; }
   .arena-pp-name-row { justify-content: center; }
+  /* Breakdown cards stack on phones */
+  .arena-pp-break { grid-template-columns: 1fr; }
+  .arena-pp-break__cell--num { min-width: 3.2rem; }
+  .arena-pp-peak { flex-wrap: wrap; gap: 0.35rem 0.85rem; padding: 0.65rem 0.9rem; }
+  /* 2×2 strip: hairline between columns AND between the two rows */
   .arena-pp-stats { grid-template-columns: repeat(2, 1fr); }
+  .arena-pp-stat + .arena-pp-stat { border-left: none; }
+  .arena-pp-stat:nth-child(even) { border-left: 1px solid var(--arena-border-subtle); }
+  .arena-pp-stat:nth-child(n + 3) { border-top: 1px solid var(--arena-border-subtle); }
+  .arena-pp-stat { padding: 1.2rem 0.75rem 1.05rem; }
+  .arena-pp-stat__value { font-size: 1.8rem; }
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -4285,11 +4574,40 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 
 /* Hero (optional cover + event header) */
 .arena-tp-hero {
-  background: var(--arena-surface-elevated);
+  position: relative;
+  background:
+    radial-gradient(ellipse 42rem 16rem at 90% -20%, rgba(255, 70, 85, 0.08), transparent 65%),
+    var(--arena-surface-elevated);
   border: 1px solid var(--arena-border);
+  border-top: 2px solid var(--arena-accent);
   overflow: hidden;
   margin-bottom: 1.25rem;
 }
+/* Copy-link button pinned to the hero's top-right corner */
+.arena-tp-share {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #e5e2e1;
+  background: rgba(14, 14, 14, 0.72);
+  border: 1px solid var(--arena-border);
+  border-radius: 999px;
+  padding: 0.38rem 0.8rem;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.arena-tp-share:hover { color: #fff; border-color: rgba(255, 70, 85, 0.45); }
+.arena-tp-share--copied { color: #4ade80; border-color: rgba(74, 222, 128, 0.4); }
 .arena-tp-hero__cover { position: relative; height: 12rem; }
 .arena-tp-hero__cover img { width: 100%; height: 100%; object-fit: cover; }
 .arena-tp-hero__cover-wash {
@@ -4373,13 +4691,33 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 .arena-tp-hero__dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #4ade80; }
 .arena-tp-hero__meta-prize { color: #4ade80; font-weight: 700; }
 .arena-tp-hero__meta-prize svg { color: #4ade80; }
-.arena-tp-hero__status {
-  text-transform: capitalize;
+/* Status pill — colored dot + tinted capsule per tournament state */
+.arena-tp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--arena-accent);
-  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+}
+.arena-tp-status__dot {
+  width: 0.45rem; height: 0.45rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+.arena-tp-status--live { color: var(--arena-accent); border-color: rgba(255, 70, 85, 0.4); background: rgba(255, 70, 85, 0.08); }
+.arena-tp-status--live .arena-tp-status__dot { animation: arena-tp-status-pulse 1.4s ease-in-out infinite; }
+.arena-tp-status--open { color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); }
+.arena-tp-status--planning { color: #e5e2e1; border-color: var(--arena-border); background: rgba(255, 255, 255, 0.04); }
+.arena-tp-status--done { color: #4ade80; border-color: rgba(74, 222, 128, 0.35); background: rgba(74, 222, 128, 0.07); }
+@keyframes arena-tp-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 /* Tabs */
@@ -4396,15 +4734,16 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   align-items: center;
   gap: 0.45rem;
   font-family: 'Inter', system-ui, sans-serif;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
   color: var(--arena-text-dim);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  padding: 0.7rem 1rem;
+  padding: 0.75rem 1rem;
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
 }
@@ -4438,6 +4777,8 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   font-size: 1.05rem;
   color: #fff;
   margin: 0 0 1.1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--arena-border-subtle);
 }
 .arena-tp-card__title svg { color: var(--arena-accent); }
 .arena-tp-card__empty {
@@ -4445,6 +4786,108 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   font-size: 0.8125rem;
   color: var(--arena-text-dim);
   margin: 0;
+}
+
+/* Champion banner — gold-trimmed strip shown once the tournament is decided */
+.arena-tp-champ {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  background:
+    radial-gradient(ellipse 36rem 12rem at 12% -30%, rgba(250, 204, 21, 0.08), transparent 65%),
+    var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  border-left: 3px solid #facc15;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+.arena-tp-champ__glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 60%, rgba(250, 204, 21, 0.02) 60.5%, rgba(250, 204, 21, 0.02) 78%, transparent 78.5%);
+}
+.arena-tp-champ__trophy {
+  width: 2.5rem; height: 2.5rem;
+  flex-shrink: 0;
+  color: #facc15;
+  filter: drop-shadow(0 0 12px rgba(250, 204, 21, 0.35));
+}
+.arena-tp-champ__info { position: relative; min-width: 0; }
+.arena-tp-champ__eyebrow {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #facc15;
+  margin: 0 0 0.3rem;
+}
+.arena-tp-champ__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 1.6rem;
+  line-height: 1.1;
+  color: #fff;
+  margin: 0;
+  text-decoration: none;
+}
+.arena-tp-champ__name--link { transition: color 0.15s ease; }
+.arena-tp-champ__name--link:hover { color: #facc15; }
+.arena-tp-champ__logo {
+  width: 2rem; height: 2rem;
+  border-radius: 0.25rem;
+  object-fit: cover;
+  border: 1px solid var(--arena-border);
+  background: #0e0e0e;
+}
+.arena-tp-champ__runner {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--arena-text-dim);
+  margin: 0.35rem 0 0;
+}
+.arena-tp-champ__runner-link { color: #e5e2e1; text-decoration: none; transition: color 0.15s ease; }
+.arena-tp-champ__runner-link:hover { color: var(--arena-accent); }
+/* MVP block — right edge of the banner, divided by a hairline */
+.arena-tp-champ__mvp {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--arena-border-subtle);
+  text-decoration: none;
+}
+.arena-tp-champ__mvp-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  margin: 0 0 0.3rem;
+}
+.arena-tp-champ__mvp-name {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 1.15rem;
+  line-height: 1.1;
+  color: #fff;
+  margin: 0;
+  transition: color 0.15s ease;
+}
+.arena-tp-champ__mvp:hover .arena-tp-champ__mvp-name { color: var(--arena-accent); }
+.arena-tp-champ__mvp-sub {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  color: var(--arena-text-dim);
+  margin: 0.3rem 0 0;
 }
 
 /* Overview layout */
@@ -4455,9 +4898,12 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   align-items: start;
 }
 .arena-tp-overview__main { display: flex; flex-direction: column; gap: 1.25rem; }
+.arena-tp-overview__side { display: flex; flex-direction: column; gap: 1.25rem; align-self: start; }
 .arena-tp-overview__minis { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
 
-.arena-tp-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; text-align: center; }
+.arena-tp-slots { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
+.arena-tp-slots__cell { padding: 0.25rem 0.5rem; }
+.arena-tp-slots__cell + .arena-tp-slots__cell { border-left: 1px solid var(--arena-border-subtle); }
 .arena-tp-slots__label {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.625rem;
@@ -4465,20 +4911,95 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--arena-text-dim);
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.45rem;
 }
 .arena-tp-slots__value {
   font-family: 'Chivo', 'Inter', system-ui, sans-serif;
   font-weight: 700;
-  font-size: 1.6rem;
+  font-size: 1.75rem;
+  line-height: 1;
   color: #fff;
   margin: 0;
 }
 .arena-tp-slots__value--accent { color: var(--arena-accent); }
 .arena-tp-slots__value--blue { color: #60a5fa; }
+/* Registration fill bar under the three counters */
+.arena-tp-slots__bar {
+  height: 4px;
+  margin-top: 1.1rem;
+  background: #0e0e0e;
+  border: 1px solid var(--arena-border-subtle);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.arena-tp-slots__bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--arena-accent), #ff7884);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+/* Stage progress stepper — winners-path rounds with done/pending nodes */
+.arena-tp-progress {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0;
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  padding: 0.9rem 1.25rem;
+}
+.arena-tp-progress__step {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  /* Never shrink below the label — steps wrap to the next line instead of
+     overlapping each other when the strip runs out of width. */
+  flex: 1 0 auto;
+  min-width: max-content;
+}
+.arena-tp-progress__step:last-child { flex: 0 0 auto; }
+.arena-tp-progress__node {
+  width: 1.15rem; height: 1.15rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--arena-border);
+  background: #0e0e0e;
+  color: #0e0e0e;
+}
+.arena-tp-progress__step--done .arena-tp-progress__node {
+  border-color: rgba(255, 70, 85, 0.5);
+  background: rgba(255, 70, 85, 0.12);
+  color: var(--arena-accent);
+}
+.arena-tp-progress__label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  white-space: nowrap;
+}
+.arena-tp-progress__step--done .arena-tp-progress__label { color: #e5e2e1; }
+.arena-tp-progress__rule {
+  flex: 1;
+  height: 1px;
+  min-width: 2rem;
+  margin: 0 1rem;
+  background: var(--arena-border);
+}
+.arena-tp-progress__step--done .arena-tp-progress__rule { background: rgba(255, 70, 85, 0.35); }
 
 /* Mini match lists */
 .arena-tp-mini__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.625rem;
   font-weight: 700;
@@ -4486,6 +5007,18 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   text-transform: uppercase;
   color: var(--arena-text-dim);
   margin: 0 0 0.85rem;
+}
+/* Live countdown chip beside the "Upcoming" label */
+.arena-tp-mini__countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  letter-spacing: 0.04em;
+  color: var(--arena-accent);
+  background: rgba(255, 70, 85, 0.08);
+  border: 1px solid rgba(255, 70, 85, 0.25);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
 }
 .arena-tp-mini__list { display: flex; flex-direction: column; gap: 0.4rem; }
 .arena-tp-mini__row {
@@ -4495,11 +5028,12 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   width: 100%;
   background: #0e0e0e;
   border: 1px solid var(--arena-border);
-  padding: 0.5rem 0.7rem;
+  border-left: 2px solid var(--arena-border);
+  padding: 0.55rem 0.75rem;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.arena-tp-mini__row:hover { border-color: rgba(255,70,85,0.4); background: #161616; }
+.arena-tp-mini__row:hover { border-color: rgba(255,70,85,0.4); border-left-color: var(--arena-accent); background: #161616; }
 .arena-tp-mini__team {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.75rem;
@@ -4530,30 +5064,143 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 
 /* Prize pool */
 .arena-tp-prize { display: flex; flex-direction: column; }
+/* Featured total — the headline number of the card */
+.arena-tp-prize__featured {
+  text-align: center;
+  background: linear-gradient(180deg, rgba(255, 70, 85, 0.06), transparent);
+  border: 1px solid var(--arena-border-subtle);
+  border-radius: 0.3rem;
+  padding: 1rem 0.75rem 0.9rem;
+  margin-bottom: 0.85rem;
+}
+.arena-tp-prize__featured-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  margin: 0 0 0.45rem;
+}
+.arena-tp-prize__featured-value {
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.9rem;
+  line-height: 1;
+  color: #fff;
+  margin: 0;
+}
 .arena-tp-prize__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.6rem 0;
-  border-bottom: 1px solid var(--arena-border);
+  padding: 0.65rem 0.15rem;
+  border-bottom: 1px solid var(--arena-border-subtle);
 }
 .arena-tp-prize__row:last-child { border-bottom: none; }
+.arena-tp-prize__place { display: inline-flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.arena-tp-prize__place-text { display: inline-flex; flex-direction: column; min-width: 0; }
+/* Winning team's name under the place label once the podium is decided */
+.arena-tp-prize__team {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e5e2e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 0.1rem;
+}
+/* Small podium-position roundel tinted gold / silver / bronze */
+.arena-tp-prize__medal {
+  width: 1.45rem; height: 1.45rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid;
+  border-radius: 999px;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
 .arena-tp-prize__label {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.8125rem;
   color: var(--arena-text-dim);
-}
-.arena-tp-prize__total {
-  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
-  font-weight: 700;
-  font-size: 1.15rem;
-  color: #fff;
 }
 .arena-tp-prize__value {
   font-family: 'Chivo', 'Inter', system-ui, sans-serif;
   font-weight: 700;
   font-size: 0.95rem;
 }
+
+/* Event leaders card */
+.arena-tp-leaders { display: flex; flex-direction: column; }
+.arena-tp-leaders__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.15rem;
+  border-bottom: 1px solid var(--arena-border-subtle);
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.arena-tp-leaders__row:hover { background: rgba(255, 255, 255, 0.02); }
+.arena-tp-leaders__cat {
+  flex-shrink: 0;
+  width: 3.1rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+}
+.arena-tp-leaders__who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.arena-tp-leaders__name {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.15s ease;
+}
+.arena-tp-leaders__row:hover .arena-tp-leaders__name { color: var(--arena-accent); }
+.arena-tp-leaders__team {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  color: var(--arena-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-tp-leaders__value {
+  flex-shrink: 0;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #fff;
+}
+.arena-tp-leaders__all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  text-decoration: none;
+  margin-top: 0.85rem;
+  transition: color 0.15s ease;
+}
+.arena-tp-leaders__all:hover { color: var(--arena-accent); }
+.arena-tp-leaders__all svg { transition: transform 0.15s ease; }
+.arena-tp-leaders__all:hover svg { transform: translateX(3px); }
 
 /* Matches tab */
 .arena-tp-matches { display: flex; flex-direction: column; gap: 2rem; }
@@ -4615,16 +5262,91 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 .arena-tp-matchrow__score-win { color: #fff; }
 .arena-tp-matchrow__meta { display: flex; align-items: center; gap: 0.85rem; flex-shrink: 0; }
 .arena-tp-matchrow__stage {
+  display: inline-block;
   font-family: 'Inter', system-ui, sans-serif;
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: #c084fc;
+  background: rgba(192, 132, 252, 0.08);
+  border: 1px solid rgba(192, 132, 252, 0.22);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
 }
 .arena-tp-matchrow__date {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.6875rem;
   color: var(--arena-text-dim);
+}
+/* Per-map score expansion */
+.arena-tp-matchwrap { display: flex; flex-direction: column; }
+.arena-tp-matchrow__expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem; height: 1.6rem;
+  border-radius: 999px;
+  color: var(--arena-text-dim);
+  transition: color 0.15s ease, background 0.15s ease, transform 0.2s ease;
+}
+.arena-tp-matchrow__expand:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
+.arena-tp-matchrow__expand--open { transform: rotate(180deg); color: var(--arena-accent); }
+.arena-tp-mapscores {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #0e0e0e;
+  border: 1px solid var(--arena-border);
+  border-top: none;
+  padding: 0.45rem;
+}
+/* Each row carries the official map splash (set inline) behind a dark wash */
+.arena-tp-mapscores__row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--arena-border-subtle);
+  border-radius: 0.3rem;
+  background-color: #131313;
+  transition: filter 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+/* Hover: the splash art lights up and the tile lifts toward the cursor */
+.arena-tp-mapscores__row:hover {
+  filter: brightness(1.35) saturate(1.15);
+  border-color: rgba(255, 70, 85, 0.45);
+  transform: translateX(3px);
+}
+.arena-tp-mapscores__map {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+}
+.arena-tp-mapscores__score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--arena-text-dim);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+.arena-tp-mapscores__sep { color: #3a3a3a; }
+.arena-tp-mapscores__win { color: #fff; }
+.arena-tp-mapscores__taker {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  color: var(--arena-text-dim);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Teams tab */
@@ -4673,19 +5395,70 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   transition: color 0.15s ease;
 }
 .arena-tp-team__head:hover .arena-tp-team__name { color: var(--arena-accent); }
+/* Last-3 form chips (W/L) in the team card header */
+.arena-tp-team__form {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.arena-tp-team__form + .arena-tp-team__count { margin-left: 0.5rem; }
+.arena-tp-team__form-dot {
+  width: 1.1rem; height: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  border-radius: 0.2rem;
+  color: var(--arena-accent);
+  background: rgba(255, 70, 85, 0.1);
+}
+.arena-tp-team__form-dot--w { color: #4ade80; background: rgba(74, 222, 128, 0.1); }
+
+/* Roster size chip pinned to the card header's right edge */
+.arena-tp-team__count {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--arena-text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+}
 .arena-tp-team__players { display: flex; flex-direction: column; padding: 0.4rem 0; }
 .arena-tp-team__player {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.8125rem;
   color: var(--arena-text-dim);
   text-decoration: none;
   padding: 0.3rem 1rem;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.arena-tp-team__player:hover { color: var(--arena-accent); background: rgba(255, 255, 255, 0.02); }
+.arena-tp-team__player-name {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color 0.15s ease;
 }
-.arena-tp-team__player:hover { color: var(--arena-accent); }
+.arena-tp-team__igl {
+  flex-shrink: 0;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.1);
+  border-radius: 0.2rem;
+  padding: 0.1rem 0.35rem;
+}
 .arena-tp-team__empty {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.75rem;
@@ -4706,7 +5479,8 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   text-decoration: none;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.arena-tp-news__row:hover { border-color: rgba(255,70,85,0.5); background: #161616; }
+.arena-tp-news__row { border-left: 2px solid var(--arena-border); }
+.arena-tp-news__row:hover { border-color: rgba(255,70,85,0.5); border-left-color: var(--arena-accent); background: #161616; }
 .arena-tp-news__thumb {
   width: 5rem; height: 3.25rem;
   flex-shrink: 0;
@@ -4744,6 +5518,55 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   margin-top: 0.3rem;
 }
 
+/* Standings tab */
+.arena-tp-standings th,
+.arena-tp-standings td { white-space: nowrap; }
+.arena-tp-standings__row { cursor: pointer; transition: background 0.15s ease, box-shadow 0.15s ease; }
+.arena-tp-standings__row:hover {
+  background: #161616;
+  box-shadow: inset 2px 0 0 var(--arena-accent);
+}
+.arena-tp-standings__rank-h { width: 3rem; }
+.arena-tp-standings__rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem; height: 1.5rem;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--arena-text-dim);
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+.arena-tp-standings__rank--podium { border-color: currentColor; }
+.arena-tp-standings__team { display: inline-flex; align-items: center; gap: 0.6rem; }
+.arena-tp-standings__crest {
+  width: 1.6rem; height: 1.6rem;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  border: 1px solid var(--arena-border);
+  background: #0e0e0e;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: 'Chivo', system-ui, sans-serif;
+  font-size: 0.5625rem; font-weight: 700;
+  color: var(--arena-accent);
+}
+.arena-tp-standings__crest img { width: 100%; height: 100%; object-fit: cover; }
+.arena-tp-standings__name { color: #fff; font-weight: 600; }
+.arena-tp-standings__wl {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.arena-tp-standings__w { color: #4ade80; font-weight: 700; }
+.arena-tp-standings__wl-sep { color: #3a3a3a; }
+.arena-tp-standings__l { color: var(--arena-text-dim); }
+.arena-tp-standings__diff-pos { color: #4ade80; font-weight: 600; }
+.arena-tp-standings__diff-neg { color: var(--arena-accent); font-weight: 600; }
+
 /* Bracket tab */
 .arena-tp-bracket__head {
   display: flex;
@@ -4772,6 +5595,29 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   .arena-tp-matchrow__teams { gap: 0.6rem; }
   .arena-tp-matchrow__team { font-size: 0.95rem; }
   .arena-tp-matchrow__meta { justify-content: space-between; }
+  .arena-tp-slots__value { font-size: 1.45rem; }
+  .arena-tp-prize__featured-value { font-size: 1.6rem; }
+  .arena-tp-tab { padding: 0.7rem 0.7rem; font-size: 0.6875rem; }
+  /* Progress stepper: 2-col grid so 5+ rounds don't squeeze into one line */
+  .arena-tp-progress { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1rem; padding: 0.9rem 1rem; }
+  .arena-tp-progress__rule { display: none; }
+  .arena-tp-share { top: 0.6rem; right: 0.6rem; padding: 0.32rem 0.65rem; }
+  .arena-tp-mapscores { padding: 0.4rem; }
+  .arena-tp-mapscores__taker { display: none; }
+  .arena-tp-mapscores__row { grid-template-columns: 1fr auto; padding: 0.45rem 0.75rem; }
+  .arena-tp-champ { gap: 0.9rem; padding: 1.1rem 1rem; flex-wrap: wrap; }
+  .arena-tp-champ__trophy { width: 2rem; height: 2rem; }
+  .arena-tp-champ__name { font-size: 1.3rem; }
+  /* MVP drops below champion on phones: full-width row with a top divider */
+  .arena-tp-champ__mvp {
+    margin-left: 0;
+    flex-basis: 100%;
+    text-align: left;
+    padding-left: 0;
+    padding-top: 0.8rem;
+    border-left: none;
+    border-top: 1px solid var(--arena-border-subtle);
+  }
 }
 
 /* ── Contact / Register Tournament Page ─────────────────────── */
@@ -4928,6 +5774,22 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
    `overflow-x: clip` (not `hidden`) avoids creating a scroll container, so
    `position: sticky` elements like the matches sidebar keep working. */
 html, body { overflow-x: clip; max-width: 100%; }
+
+/* ── Themed scrollbars ──────────────────────────────────────────
+   Windows' default white scrollbars clash with the dark theme on every
+   horizontally scrolling container (brackets, stats tables). Modern
+   Chrome/Firefox use the standard properties; the ::-webkit rules cover
+   older Chromium/Safari. */
+* { scrollbar-width: thin; scrollbar-color: #2f2f2f #141414; }
+::-webkit-scrollbar { width: 10px; height: 9px; }
+::-webkit-scrollbar-track { background: #141414; }
+::-webkit-scrollbar-thumb {
+  background: #2f2f2f;
+  border-radius: 999px;
+  border: 2px solid #141414;
+}
+::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+::-webkit-scrollbar-corner { background: #141414; }
 
 /* Nav: swap desktop link row for the hamburger menu below 768px. This rule
    beats the base `.arena-nav__links { display: flex }` on specificity+order,

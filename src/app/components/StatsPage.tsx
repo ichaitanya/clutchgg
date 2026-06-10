@@ -220,7 +220,11 @@ export function StatsPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   // "First fetch in flight" vs "loaded but empty" — gates the loader below.
   const [loaded, setLoaded] = useState(false);
-  const [tournamentId, setTournamentId] = useState('');
+  // Deep-link support: /stats?tournament=<id> pre-selects that tournament
+  // (used by the tournament page's "Full stats" link).
+  const [tournamentId, setTournamentId] = useState(
+    () => new URLSearchParams(window.location.search).get('tournament') ?? '',
+  );
   const [stageId, setStageId] = useState('');
   const [metric, setMetric] = useState<MetricKey>('kills');
 

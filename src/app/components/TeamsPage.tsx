@@ -61,7 +61,8 @@ function findTeamInTournament(t: Tournament, teamName: string): TeamInTournament
 
 // Determine the team's final placement in a completed tournament. Returns null
 // when the format doesn't yield a determinable standing.
-function computePlacement(t: Tournament, teamId: string): string | null {
+// Exported: the tournament page's Standings tab ranks teams with the same logic.
+export function computePlacement(t: Tournament, teamId: string): string | null {
   // Two-stage / single elimination: placement comes from how far the team got.
   // The team that wins the last match of the final stage is 1st.
   const finalStageBracket = t.stage2Bracket || t.generatedBracket;

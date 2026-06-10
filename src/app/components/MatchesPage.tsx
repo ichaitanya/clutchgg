@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Filter } from 'lucide-react';
+import { mapImageUrl } from '../utils/valorantAssets';
+import { bracketRoundLabel } from '../utils/bracketRounds';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import { LoadingState } from './LoadingState';
@@ -27,6 +29,7 @@ interface ScheduleMatch {
   tournamentType?: string; // 'online' | 'lan'
   stage: string;
   sortTs: number;
+  maps: MatchMapResult[]; // per-map scores for the inline expansion
 }
 
 function teamInitials(name: string): string {
@@ -144,10 +147,17 @@ function collectTournamentMatches(t: Tournament): ScheduleMatch[] {
       })(),
       stage,
       sortTs: Number.isNaN(ts) ? Number.POSITIVE_INFINITY : ts,
+      maps: match.maps ?? [],
     });
   };
 
-  if (t.generatedBracket) t.generatedBracket.rounds.flat().forEach(m => push(m, 'Main Bracket'));
+  // Stage label = the match's actual round in the bracket ("WB Round 1",
+  // "LB Quarter Finals", "Grand Final"); fall back to the generic stage name
+  // when the bracket shape doesn't yield one (round robin / groups).
+  if (t.generatedBracket) {
+    t.generatedBracket.rounds.flat().forEach(m =>
+      push(m, bracketRoundLabel(t.generatedBracket, m) ?? 'Main Bracket'));
+  }
   if (t.stage1Config?.format === 'groupstage' && t.stage1Bracket) {
     const groups = t.stage1Config.groups ?? [];
     t.stage1Bracket.rounds.flat().forEach(m => {
@@ -155,9 +165,13 @@ function collectTournamentMatches(t: Tournament): ScheduleMatch[] {
       push(m, group?.name ?? 'Group Stage');
     });
   } else if (t.stage1Bracket) {
-    t.stage1Bracket.rounds.flat().forEach(m => push(m, 'Stage 1'));
+    t.stage1Bracket.rounds.flat().forEach(m =>
+      push(m, bracketRoundLabel(t.stage1Bracket, m) ?? 'Stage 1'));
   }
-  if (t.stage2Bracket) t.stage2Bracket.rounds.flat().forEach(m => push(m, 'Stage 2'));
+  if (t.stage2Bracket) {
+    t.stage2Bracket.rounds.flat().forEach(m =>
+      push(m, bracketRoundLabel(t.stage2Bracket, m) ?? 'Stage 2'));
+  }
   return out;
 }
 
@@ -302,6 +316,8 @@ export function MatchesPage() {
   const [filterTournament, setFilterTournament] = useState('all');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // One completed match at a time can be expanded to show per-map scores.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Initial retrying load + background polling so live/upcoming match states
   // refresh on an open tab without a manual reload.
@@ -368,7 +384,7 @@ export function MatchesPage() {
 
   const pickTab = (tab: MatchStatus) => { setUserPickedTab(true); setActiveTab(tab); };
 
-  useEffect(() => { setPage(1); }, [activeTab, filterType, filterTournament, selectedDate]);
+  useEffect(() => { setPage(1); setExpandedId(null); }, [activeTab, filterType, filterTournament, selectedDate]);
 
   // The `live` tab is the only one conditionally hidden (rendered only while
   // live matches exist). If it disappears out from under the user — the last
@@ -499,10 +515,15 @@ export function MatchesPage() {
                           ? `${new Date(`${match.date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${match.time ? ` · ${match.time}` : ''}`
                           : null;
                         const countdown = match.status === 'upcoming' ? countdownLabel(match.date, match.time) : null;
+                        const playedMaps = match.status === 'completed'
+                          ? match.maps.filter(m => m.team1Score > 0 || m.team2Score > 0)
+                          : [];
+                        const expandable = playedMaps.length > 0;
+                        const expanded = expandedId === match.id;
 
                         return (
+                          <div key={match.id} className="arena-tp-matchwrap">
                           <button
-                            key={match.id}
                             type="button"
                             onClick={() => navigate(`/tournament-match/${match.id}`)}
                             className={`arena-match-card${decided && match.winnerSide === 1 ? ' arena-match-card--win-left' : decided && match.winnerSide === 2 ? ' arena-match-card--win-right' : ''}`}
@@ -549,13 +570,64 @@ export function MatchesPage() {
                             </div>
                             <div className="arena-match-card__meta">
                               <p className="arena-match-card__tournament">{match.tournamentName}</p>
-                              <p className="arena-match-card__stage">{match.stage}</p>
-                              <span className={`arena-match-card__badge arena-match-card__badge--${match.status}`}>
-                                {match.status === 'live' && <span className={`arena-match-card__badge-dot${match.date ? ' arena-match-card__badge-dot--pulse' : ''}`} />}
-                                {match.status === 'upcoming' && countdown ? countdown : STATUS_LABEL[match.status]}
+                              {/* Stage lives in the left eyebrow — repeating it here only added height. */}
+                              <span className="arena-match-card__badge-row">
+                                <span className={`arena-match-card__badge arena-match-card__badge--${match.status}`}>
+                                  {match.status === 'live' && <span className={`arena-match-card__badge-dot${match.date ? ' arena-match-card__badge-dot--pulse' : ''}`} />}
+                                  {match.status === 'upcoming' && countdown ? countdown : STATUS_LABEL[match.status]}
+                                </span>
+                                {expandable && (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    className={`arena-tp-matchrow__expand${expanded ? ' arena-tp-matchrow__expand--open' : ''}`}
+                                    title={expanded ? 'Hide map scores' : 'Show map scores'}
+                                    onClick={e => { e.stopPropagation(); setExpandedId(expanded ? null : match.id); }}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setExpandedId(expanded ? null : match.id);
+                                      }
+                                    }}
+                                  >
+                                    <ChevronDown className="w-4 h-4" />
+                                  </span>
+                                )}
                               </span>
                             </div>
                           </button>
+                          {expandable && expanded && (
+                            <div className="arena-tp-mapscores">
+                              {playedMaps.map((map, mi) => {
+                                const m1 = map.team1Score > map.team2Score;
+                                const m2 = map.team2Score > map.team1Score;
+                                const splash = mapImageUrl(map.mapName);
+                                return (
+                                  <div
+                                    key={mi}
+                                    className="arena-tp-mapscores__row"
+                                    style={splash ? {
+                                      backgroundImage: `linear-gradient(90deg, rgba(10,10,10,0.94) 0%, rgba(10,10,10,0.72) 45%, rgba(10,10,10,0.9) 100%), url(${splash})`,
+                                      backgroundSize: 'cover',
+                                      backgroundPosition: 'center 35%',
+                                    } : undefined}
+                                  >
+                                    <span className="arena-tp-mapscores__map">{map.mapName || `Map ${mi + 1}`}</span>
+                                    <span className="arena-tp-mapscores__score">
+                                      <span className={m1 ? 'arena-tp-mapscores__win' : ''}>{map.team1Score}</span>
+                                      <span className="arena-tp-mapscores__sep">–</span>
+                                      <span className={m2 ? 'arena-tp-mapscores__win' : ''}>{map.team2Score}</span>
+                                    </span>
+                                    <span className="arena-tp-mapscores__taker">
+                                      {m1 ? match.team1Name : m2 ? match.team2Name : 'Tied'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          </div>
                         );
                       })}
                     </div>
