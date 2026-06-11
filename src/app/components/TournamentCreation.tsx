@@ -4032,8 +4032,16 @@ function TournamentForm({
           </div>
         </div>
 
-        {/* Tournament Format */}
-        {!isEditing && (
+        {/* Tournament Format — shown when creating, and when editing a tournament
+            that hasn't been configured into a format yet (e.g. a freshly-approved
+            tournament from the request workflow). Hidden once a bracket/format
+            exists so an in-progress tournament's format can't be switched. */}
+        {(!isEditing || (
+          !initialTournament?.stage1Config &&
+          !initialTournament?.groupStage &&
+          !initialTournament?.generatedBracket &&
+          !initialTournament?.bracket
+        )) && (
           <div>
             <label className="block text-xs text-gray-400 mb-3 font-medium">
               Tournament Format *
