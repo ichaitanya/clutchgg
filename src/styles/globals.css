@@ -1698,6 +1698,9 @@ body {
   padding: 0.875rem;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
 }
+/* Popup placement variants (default opens above, left-aligned) */
+.arena-share-pop--down { bottom: auto; top: calc(100% + 0.625rem); }
+.arena-share-pop--right { left: auto; right: 0; }
 .arena-share-pop__title {
   color: var(--arena-text-primary);
   font-weight: 700;
@@ -2836,6 +2839,15 @@ body {
   padding: 2rem var(--arena-gutter) 4rem;
 }
 
+/* Top bar: back link on the left, prev/next + share on the right */
+.arena-md__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
 /* Back link */
 .arena-md__back {
   display: inline-flex;
@@ -2851,10 +2863,29 @@ body {
   border: none;
   cursor: pointer;
   padding: 0;
-  margin-bottom: 1.75rem;
   transition: color 0.15s ease;
 }
 .arena-md__back:hover { color: var(--arena-accent); }
+
+/* Share button */
+.arena-md__share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-primary);
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.arena-md__share:hover { border-color: var(--arena-accent); color: var(--arena-accent); }
 
 /* Section heading (eyebrow + serif title) shared across the page */
 .arena-md-section { margin-top: 3rem; }
@@ -2980,6 +3011,20 @@ body {
 }
 .arena-md-hero__team--winner .arena-md-hero__team-name { color: var(--arena-accent); }
 .arena-md-hero__team:hover .arena-md-hero__team-name { color: var(--arena-accent); }
+/* "Winner" chip under the winning team's name (completed matches) */
+.arena-md-hero__win-tag {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  background: rgba(255, 70, 85, 0.08);
+  border: 1px solid rgba(255, 70, 85, 0.3);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+  margin-top: -0.25rem;
+}
 
 /* Center: score / vs + status + datetime */
 .arena-md-hero__center {
@@ -3070,22 +3115,88 @@ body {
 /* ── Map result tiles (compact horizontal rows) ───────────────── */
 .arena-md-maps {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
-  gap: 0.5rem;
+  /* Wider minimum so the agent-comp row (5 icons + "vs" + 5 icons) has room to
+     breathe instead of cramping the icons together. */
+  grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
+  gap: 0.6rem;
 }
+/* Card carries the official map splash as a left-to-right washed backdrop
+   (backgroundImage set inline); hover uses box-shadow since the inline
+   background image would mask a background-color change. */
 .arena-md-map {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background-color: var(--arena-surface-elevated);
+  background-size: cover;
+  background-position: center 30%;
+  border: 1px solid var(--arena-border);
+  border-left: 2px solid var(--arena-border);
+  padding: 0.65rem 0.9rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.arena-md-map__top {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  background: var(--arena-surface-elevated);
-  border: 1px solid var(--arena-border);
-  border-left: 2px solid var(--arena-border);
-  padding: 0.55rem 0.9rem 0.55rem 0.55rem;
-  transition: border-color 0.15s ease, background 0.15s ease;
 }
 .arena-md-map--clickable { cursor: pointer; }
-.arena-md-map--clickable:hover { border-color: rgba(255, 70, 85, 0.5); background: #161616; }
+.arena-md-map--clickable:hover {
+  border-color: rgba(255, 70, 85, 0.5);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
 .arena-md-map--selected { border-color: var(--arena-accent); border-left-color: var(--arena-accent); }
+
+/* Agent comps row — five agent icons per side, "vs" between them */
+.arena-md-map__comps {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.arena-md-map__comp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+  opacity: 0.78;
+}
+.arena-md-map__comp--won { opacity: 1; }
+.arena-md-map__comp--right { justify-content: flex-end; }
+.arena-md-map__comp-icon {
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 0.25rem;
+  object-fit: cover;
+  background: #0e0e0e;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.arena-md-map__comp-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 0.25rem;
+  background: #0e0e0e;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: var(--arena-text-dim);
+}
+.arena-md-map__comp-vs {
+  flex-shrink: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
+}
 
 .arena-md-map__thumb {
   width: 3.25rem;
@@ -3115,12 +3226,14 @@ body {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
 }
 .arena-md-map__winner {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.6875rem;
   font-weight: 700;
   color: var(--arena-accent);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
 }
 .arena-md-map__hint {
   font-family: 'Inter', system-ui, sans-serif;
@@ -3128,6 +3241,7 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--arena-text-dim);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
 }
 .arena-md-map__score {
   display: inline-flex;
@@ -3138,9 +3252,200 @@ body {
   font-size: 1.5rem;
   color: var(--arena-text-dim);
   flex-shrink: 0;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
 }
 .arena-md-map__score-sep { color: var(--arena-border); font-size: 1rem; }
 .arena-md-map__score-win { color: #fff; }
+
+/* ── Series MVP card ──────────────────────────────────────────── */
+.arena-md-mvp {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  overflow: hidden;
+  background-color: var(--arena-surface-elevated);
+  /* radial accent wash set inline via --mvp-accent */
+  border: 1px solid var(--arena-border);
+  border-left: 3px solid var(--mvp-accent, var(--arena-accent));
+  padding: 1.1rem 1.5rem;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.arena-md-mvp--link { cursor: pointer; }
+.arena-md-mvp--link:hover {
+  border-color: var(--mvp-accent, var(--arena-accent));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--mvp-accent, var(--arena-accent));
+  transform: translateY(-1px);
+}
+/* Oversized faint trophy bleeding off the right edge */
+.arena-md-mvp__watermark {
+  position: absolute;
+  right: -1.5rem;
+  top: 50%;
+  transform: translateY(-50%) rotate(-12deg);
+  width: 9rem;
+  height: 9rem;
+  color: var(--mvp-accent, var(--arena-accent));
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+.arena-md-mvp__photo {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--mvp-accent, var(--arena-accent)) 14%, #131313);
+  border: 1px solid var(--mvp-accent, var(--arena-border));
+  box-shadow: 0 0 18px -4px var(--mvp-accent, transparent);
+}
+.arena-md-mvp__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0.45rem;
+}
+.arena-md-mvp__initials {
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--mvp-accent, #fff);
+}
+/* Agent crest cluster tucked at the photo's bottom-right corner. One agent
+   shows as a single badge; multiple (player swapped agents across maps) stack
+   with a slight overlap. */
+.arena-md-mvp__agents {
+  position: absolute;
+  right: -0.4rem;
+  bottom: -0.4rem;
+  display: inline-flex;
+  flex-direction: row-reverse;
+}
+.arena-md-mvp__agent-icon {
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 0.3rem;
+  object-fit: cover;
+  background: #0e0e0e;
+  border: 1px solid var(--arena-border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+/* Overlap each subsequent crest (row-reverse, so margin-right pulls them in) */
+.arena-md-mvp__agents .arena-md-mvp__agent-icon + .arena-md-mvp__agent-icon {
+  margin-right: -0.65rem;
+}
+.arena-md-mvp__agent-icon--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: var(--arena-text-dim);
+}
+
+.arena-md-mvp__id {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+.arena-md-mvp__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  align-self: flex-start;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+}
+.arena-md-mvp__name {
+  font-family: "Kanit", sans-serif;
+  font-weight: 500;
+  font-style: italic;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-md-mvp--link:hover .arena-md-mvp__name { color: var(--mvp-accent, var(--arena-accent)); }
+.arena-md-mvp__team {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--arena-text-dim);
+  min-width: 0;
+}
+.arena-md-mvp__team-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-md-mvp__crest {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 0.2rem;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.arena-md-mvp__agent { text-transform: capitalize; flex-shrink: 0; }
+.arena-md-mvp__stats {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+.arena-md-mvp__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0 1.15rem;
+}
+.arena-md-mvp__stat + .arena-md-mvp__stat {
+  border-left: 1px solid var(--arena-border-subtle);
+}
+.arena-md-mvp__stat-val {
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #fff;
+}
+.arena-md-mvp__stat--hero .arena-md-mvp__stat-val {
+  font-size: 1.75rem;
+  color: var(--mvp-accent, #fff);
+}
+.arena-md-mvp__stat-lbl {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+}
 
 /* ── Broadcast / Highlights — compact two-column tiles ────────── */
 .arena-md-media {
@@ -3148,6 +3453,8 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
 }
+/* Only one of streams/highlights present — span the full width */
+.arena-md-media--single { grid-template-columns: 1fr; }
 .arena-md-media__col {
   background: var(--arena-surface-elevated);
   border: 1px solid var(--arena-border);
@@ -3169,6 +3476,62 @@ body {
   color: var(--arena-text-dim);
   margin: 0;
 }
+/* VOD thumbnail — clickable YouTube poster with a play overlay */
+.arena-md-vod {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 0.3rem;
+  border: 1px solid var(--arena-border);
+  background: #0e0e0e;
+  padding: 0;
+  cursor: pointer;
+}
+.arena-md-vod__thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.25s ease;
+}
+.arena-md-vod:hover .arena-md-vod__thumb { transform: scale(1.04); }
+.arena-md-vod__overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,0.05) 30%, rgba(0,0,0,0.85) 100%);
+}
+.arena-md-vod__play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 70, 85, 0.92);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.arena-md-vod:hover .arena-md-vod__play { transform: translate(-50%, -50%) scale(1.08); background: var(--arena-accent); }
+.arena-md-vod__label {
+  position: absolute;
+  left: 0.85rem;
+  bottom: 0.7rem;
+  right: 0.85rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
 .arena-md-tile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -3232,6 +3595,39 @@ body {
   background: var(--arena-accent);
   border-color: var(--arena-accent);
 }
+
+/* All / Attack / Defense segmented toggle for the scoreboard */
+.arena-md-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  border-radius: 0.5rem;
+  padding: 0.2rem;
+  margin-bottom: 1rem;
+}
+.arena-md-side__btn {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  background: none;
+  border: none;
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.95rem;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.arena-md-side__btn:hover { color: #fff; }
+.arena-md-side__btn--active { color: #fff; }
+/* Each mode gets its own accent when active: All = red, Attack = amber,
+   Defense = teal — mirrors common scoreboard conventions. */
+.arena-md-side__btn--all { background: var(--arena-accent); }
+.arena-md-side__btn--atk { background: #d97706; }
+.arena-md-side__btn--def { background: #0d9488; }
 
 /* Selected-map splash banner */
 .arena-md-splash {
@@ -3304,7 +3700,8 @@ body {
 .arena-md-table-wrap { overflow-x: auto; }
 .arena-md-table {
   width: 100%;
-  min-width: 600px;
+  /* Room for the FK/FD column; the wrapper scrolls horizontally on narrow screens. */
+  min-width: 640px;
   border-collapse: collapse;
 }
 .arena-md-table thead tr {
@@ -3360,6 +3757,191 @@ body {
 .arena-md-table__kd-good { color: #4ade80; font-weight: 700; }
 .arena-md-table__kd-ok { color: #d1d5db; font-weight: 700; }
 .arena-md-table__kd-low { color: var(--arena-text-dim); font-weight: 700; }
+/* Column leader across both teams — bold + a faint underline keyline */
+.arena-md-table__lead {
+  font-weight: 800;
+  box-shadow: inset 0 -2px 0 currentColor;
+  padding-bottom: 1px;
+}
+/* First kill / first death cell */
+.arena-md-table__fk { color: #4ade80; font-weight: 700; }
+.arena-md-table__fd { color: var(--arena-accent); font-weight: 700; }
+.arena-md-table__fkfd-sep { color: var(--arena-border); margin: 0 0.2rem; }
+/* Winning team's card head gets an accent bar + chip */
+.arena-md-table-card__head--win { border-bottom-color: var(--arena-accent-dim, rgba(255,70,85,0.4)); }
+.arena-md-table-card__head--win .arena-md-table-card__bar { height: 1.2rem; box-shadow: 0 0 8px var(--arena-accent); }
+.arena-md-table-card__win {
+  margin-left: auto;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  background: rgba(255, 70, 85, 0.1);
+  border: 1px solid rgba(255, 70, 85, 0.3);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+}
+
+/* ── Round-flow grid (one row per team, team-colored tiles) ───── */
+.arena-md-rf {
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  padding: 0.95rem 1.1rem;
+  margin-bottom: 1rem;
+}
+.arena-md-rf__scroll { overflow-x: auto; padding-bottom: 0.15rem; }
+.arena-md-rf__row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: max-content;
+}
+.arena-md-rf__row + .arena-md-rf__row { margin-top: 0.35rem; }
+.arena-md-rf__row--axis { margin-top: 0.2rem; }
+/* Team label: crest + name, fixed width so both rows + axis align */
+.arena-md-rf__team {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 9.5rem;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.arena-md-rf__crest {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 0.25rem;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.arena-md-rf__crest--empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #0e0e0e;
+  border: 1px solid var(--arena-border);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.5rem;
+  font-weight: 700;
+  color: var(--arena-text-dim);
+}
+/* Team name carries the team color */
+.arena-md-rf__team-name {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-md-rf__row--t1 .arena-md-rf__team-name { color: var(--arena-accent); }
+.arena-md-rf__row--t2 .arena-md-rf__team-name { color: #a78bfa; }
+
+.arena-md-rf__cells {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+/* One cell per round, from this row's team perspective: a won round is a solid
+   tile in the team color with the end-type icon; a lost round is a faint hollow
+   tile. */
+.arena-md-rf__cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+}
+.arena-md-rf__cell--won.arena-md-rf__cell--t1 {
+  background: var(--arena-accent);
+  border: 1px solid var(--arena-accent);
+  color: #fff;
+}
+.arena-md-rf__cell--won.arena-md-rf__cell--t2 {
+  background: #8b5cf6;
+  border: 1px solid #8b5cf6;
+  color: #fff;
+}
+.arena-md-rf__cell--lost {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+/* Halftime divider: extra gap + hairline before the first second-half cell */
+.arena-md-rf__cell--half { margin-left: 1rem; }
+.arena-md-rf__cell--half::before {
+  content: '';
+  position: absolute;
+  left: -0.62rem;
+  top: -0.3rem;
+  bottom: -0.3rem;
+  width: 1px;
+  background: var(--arena-border);
+}
+.arena-md-rf__icon { width: 0.9rem; height: 0.9rem; }
+/* Round-number axis row under the grid */
+.arena-md-rf__axis {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  flex-shrink: 0;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: var(--arena-text-dim);
+}
+.arena-md-rf__axis.arena-md-rf__cell--half::before { display: none; }
+/* Per-row running score at the right edge, in the team color */
+.arena-md-rf__score {
+  width: 1.6rem;
+  flex-shrink: 0;
+  text-align: center;
+  font-family: 'Chivo', 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.arena-md-rf__row--t1 .arena-md-rf__score { color: var(--arena-accent); }
+.arena-md-rf__row--t2 .arena-md-rf__score { color: #a78bfa; }
+
+/* Legend explaining the end-type icons */
+.arena-md-rf__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--arena-border-subtle);
+}
+.arena-md-rf__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--arena-text-dim);
+}
+.arena-md-rf__legend-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--arena-border);
+  color: #c9c7c6;
+}
+.arena-md-rf__legend-icon .arena-md-rf__icon { width: 0.8rem; height: 0.8rem; }
 
 /* ── Lineups — player face tiles ──────────────────────────────── */
 .arena-md-lineups {
@@ -3733,6 +4315,18 @@ body {
   .arena-md-hero__score { font-size: 2.5rem; gap: 0.5rem; }
   .arena-md-hero__vs { font-size: 2rem; }
   .arena-md-section__title { font-size: 1.35rem; }
+  /* Top bar: keep back link; share collapses to icon only */
+  .arena-md__topbar { gap: 0.6rem; }
+  .arena-md__share { padding: 0.4rem 0.55rem; }
+  .arena-md__share span { display: none; }
+  /* MVP: face + name on top, stats wrap to a full-width row below */
+  .arena-md-mvp { flex-wrap: wrap; gap: 0.75rem 1rem; padding: 1rem; }
+  .arena-md-mvp__watermark { width: 7rem; height: 7rem; right: -1.25rem; }
+  .arena-md-mvp__id { flex: 1 1 55%; min-width: 0; }
+  .arena-md-mvp__name { font-size: 1.25rem; }
+  .arena-md-mvp__stats { width: 100%; justify-content: space-between; border-top: 1px solid var(--arena-border-subtle); padding-top: 0.75rem; }
+  .arena-md-mvp__stat { flex: 1; padding: 0 0.5rem; }
+  .arena-md-mvp__stat--hero .arena-md-mvp__stat-val { font-size: 1.5rem; }
   .arena-md-media { grid-template-columns: 1fr; }
   .arena-md-past { grid-template-columns: 1fr; gap: 1.25rem; }
   .arena-md-lineups { grid-template-columns: 1fr; }
@@ -4256,10 +4850,17 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   align-items: center;
   gap: 1.1rem;
   background-color: var(--arena-surface-elevated);
+  background-size: cover;
+  background-position: center 30%;
   border: 1px solid var(--arena-border);
   border-left: 3px solid var(--arena-accent);
   padding: 0.7rem 1.25rem;
   margin-bottom: 0.85rem;
+  transition: background-position 6s ease, box-shadow 0.2s ease, border-left-color 0.2s ease;
+}
+.arena-pp-peak:hover {
+  background-position: center 50%;
+  box-shadow: 0 0 0 1px var(--arena-accent), 0 8px 28px rgba(0, 0, 0, 0.5);
 }
 .arena-pp-peak__label {
   flex-shrink: 0;
@@ -4389,19 +4990,25 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 .arena-pp-career { margin-bottom: 0; }
 /* Match history sits right after the career card — kill the default 3rem gap */
 .arena-pp-form { margin-top: 1.5rem; }
-/* Map cell chip with the official splash art behind a wash (set inline) */
+/* Map cell chip with the official splash art as a broadcast-style overlay (set inline) */
 .arena-pp-map-chip {
-  display: inline-block;
-  min-width: 4.75rem;
+  display: inline-flex;
+  align-items: center;
+  min-width: 6.5rem;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: #fff;
   text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
   background-color: #131313;
+  background-size: cover;
+  background-position: center 30%;
   border: 1px solid var(--arena-border-subtle);
+  border-left: 2px solid var(--arena-accent);
   border-radius: 0.25rem;
-  padding: 0.28rem 0.7rem;
+  padding: 0.32rem 0.75rem;
+  transition: border-left-color 0.15s ease, box-shadow 0.15s ease;
 }
 .arena-pp-career__row { transition: background 0.15s ease; cursor: pointer; }
 .arena-pp-career__row:hover { background: rgba(255, 255, 255, 0.02); }
@@ -4432,6 +5039,10 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   background: #161616;
   /* Accent keyline on the row's left edge — signals the row is clickable */
   box-shadow: inset 2px 0 0 var(--arena-accent);
+}
+.arena-pp-table__row:hover .arena-pp-map-chip {
+  border-left-color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 /* Map result tint: green/red keyline on the row's left edge */
 .arena-pp-table__row--w { box-shadow: inset 2px 0 0 rgba(74, 222, 128, 0.55); }

@@ -49,6 +49,31 @@ export interface MatchDetails {
     red: { has_won: boolean; rounds_won: number };
   };
   players: PlayerMatchStats[];
+  rounds: RoundResult[];
+}
+
+// One round's outcome, oriented from the API's Blue/Red sides. `endType` is the
+// raw HenrikDev end_type string (e.g. "Elimination", "Bomb detonated",
+// "Bomb defused", "Round timer expired"); we normalize it for icon selection.
+export interface RoundResult {
+  winningTeam: 'Blue' | 'Red';
+  endType: string;
+  bombPlanted: boolean;
+  bombDefused: boolean;
+}
+
+// Raw per-side accumulation (attack rounds or defense rounds) used while
+// folding the rounds array. Carries enough to derive split ACS/ADR/KAST later.
+export interface SideSplitRaw {
+  rounds: number;
+  score: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  damage: number;
+  kast: number;
+  fk: number;
+  fd: number;
 }
 
 export interface PlayerMatchStats {
@@ -65,6 +90,13 @@ export interface PlayerMatchStats {
     bodyshots: number;
     legshots: number;
   };
+  // Advanced, derived from per-round data when available (else 0).
+  damageMade: number;       // total damage dealt across the match → ADR base
+  kastRounds: number;       // rounds with a kill, assist, survival, or trade
+  firstKills: number;       // rounds where this player got the first kill
+  firstDeaths: number;      // rounds where this player was the first to die
+  atk: SideSplitRaw;        // accumulation over rounds played on attack
+  def: SideSplitRaw;        // accumulation over rounds played on defense
 }
 
 // Get player's match history (most recent first), filtered by game mode.
@@ -129,20 +161,134 @@ export async function getMatchDetails(matchId: string): Promise<MatchDetails> {
 
     const data = await response.json();
     const d = data.data;
-    return {
-      metadata: {
-        map: d.metadata?.map ?? '',
-        game_start_patched: d.metadata?.game_start_patched ?? '',
-        rounds_played: d.metadata?.rounds_played ?? 0,
-      },
-      teams: {
-        blue: { has_won: !!d.teams?.blue?.has_won, rounds_won: d.teams?.blue?.rounds_won ?? 0 },
-        red: { has_won: !!d.teams?.red?.has_won, rounds_won: d.teams?.red?.rounds_won ?? 0 },
-      },
-      players: (d.players?.all_players ?? []).map((p: {
-        name?: string; tag?: string; team?: string; character?: string;
-        stats?: { score?: number; kills?: number; deaths?: number; assists?: number; headshots?: number; bodyshots?: number; legshots?: number };
-      }) => ({
+
+    // ── Advanced per-player aggregates derived from the rounds array ──────────
+    // The v2 endpoint carries a `rounds[]` array; each round has a
+    // `player_stats[]` list (damage, kills, kill events with timestamps). We fold
+    // these into per-player totals keyed by Riot ID so the scoreboard can show
+    // ADR / KAST / FK / FD without a second request. When `rounds` is absent
+    // (older/limited responses) every aggregate stays 0 and the UI hides them.
+    type RoundPlayer = {
+      player_puuid?: string; player_display_name?: string;
+      player_team?: string;
+      damage?: number; damage_events?: { damage?: number }[];
+      kills?: number; score?: number;
+      assists?: number;
+      kill_events?: { kill_time_in_round?: number; killer_puuid?: string; victim_puuid?: string }[];
+      stayed?: boolean; was_afk?: boolean;
+    };
+    type RawRound = {
+      winning_team?: string; end_type?: string;
+      bomb_planted?: boolean; bomb_defused?: boolean;
+      player_stats?: RoundPlayer[];
+    };
+    const rawRounds: RawRound[] = Array.isArray(d.rounds) ? d.rounds : [];
+
+    // A per-side accumulator (attack rounds vs defense rounds).
+    const emptySide = (): SideSplitRaw => ({
+      rounds: 0, score: 0, kills: 0, deaths: 0, assists: 0, damage: 0, kast: 0, fk: 0, fd: 0,
+    });
+    // puuid → running aggregate, with attack/defense breakdowns.
+    type Agg = { damage: number; kast: number; fk: number; fd: number; atk: SideSplitRaw; def: SideSplitRaw };
+    const agg: Record<string, Agg> = {};
+    const bump = (puuid?: string) => {
+      if (!puuid) return null;
+      return (agg[puuid] ??= { damage: 0, kast: 0, fk: 0, fd: 0, atk: emptySide(), def: emptySide() });
+    };
+
+    // Side rule (per the Valorant match architecture): Red attacks the first half
+    // (rounds 1–12) while Blue defends; sides swap each half. So in half-block H
+    // (0-based, 12 rounds each), Red attacks when H is even. Overtime continues
+    // the alternation. Returns the attacking side for a 0-based round index.
+    const attackingSide = (roundIndex: number): 'Red' | 'Blue' => {
+      const halfBlock = Math.floor(roundIndex / 12);
+      return halfBlock % 2 === 0 ? 'Red' : 'Blue';
+    };
+
+    rawRounds.forEach((r, roundIdx) => {
+      const atkSide = attackingSide(roundIdx);
+      // Identify the round's first kill (earliest kill_time_in_round across all
+      // players' kill_events). The killer gets a first-kill, victim a first-death.
+      let earliest = Number.POSITIVE_INFINITY;
+      let fkKiller: string | undefined;
+      let fkVictim: string | undefined;
+      // Who got a kill or assist this round (for KAST). Survival tracked for the
+      // "stayed" part of KAST.
+      const gotKillOrAssist = new Set<string>();
+      const survived = new Set<string>();
+
+      for (const ps of r.player_stats ?? []) {
+        const puuid = ps.player_puuid;
+        const a = bump(puuid);
+        if (!a || !puuid) continue;
+
+        // Damage: prefer the summed `damage` field, else sum damage_events.
+        const dmg = typeof ps.damage === 'number'
+          ? ps.damage
+          : (ps.damage_events ?? []).reduce((s, e) => s + (e.damage ?? 0), 0);
+        a.damage += dmg;
+
+        const roundKills = ps.kills ?? 0;
+        if (roundKills > 0) gotKillOrAssist.add(puuid);
+        if (ps.stayed) survived.add(puuid);
+
+        // Per-side accumulation. The player's side this round = attacker if their
+        // team is the attacking side, else defender.
+        const onAttack = (ps.player_team === 'Red' ? 'Red' : ps.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
+        const bucket = onAttack ? a.atk : a.def;
+        bucket.rounds += 1;
+        bucket.kills += roundKills;
+        bucket.assists += ps.assists ?? 0;
+        bucket.deaths += ps.stayed === false ? 1 : 0; // died this round if not stayed
+        bucket.score += ps.score ?? 0;
+        bucket.damage += dmg;
+
+        for (const ke of ps.kill_events ?? []) {
+          const t = ke.kill_time_in_round ?? Number.POSITIVE_INFINITY;
+          if (t < earliest) {
+            earliest = t;
+            fkKiller = ke.killer_puuid ?? puuid;
+            fkVictim = ke.victim_puuid;
+          }
+        }
+      }
+
+      // KAST credit: a kill, assist, or survival counts. (Trade detection needs
+      // cross-player death timing we don't reliably have, so survival is the
+      // conservative proxy — standard for community implementations.)
+      const credited = new Set<string>([...gotKillOrAssist, ...survived]);
+      for (const puuid of credited) {
+        const a = agg[puuid];
+        if (!a) continue;
+        a.kast += 1;
+        // Attribute the KAST round to the side the player was on this round.
+        const ps = (r.player_stats ?? []).find(x => x.player_puuid === puuid);
+        const onAttack = (ps?.player_team === 'Red' ? 'Red' : ps?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
+        (onAttack ? a.atk : a.def).kast += 1;
+      }
+      const fkA = bump(fkKiller);
+      if (fkA) {
+        fkA.fk += 1;
+        const ps = (r.player_stats ?? []).find(x => x.player_puuid === fkKiller);
+        const onAttack = (ps?.player_team === 'Red' ? 'Red' : ps?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
+        (onAttack ? fkA.atk : fkA.def).fk += 1;
+      }
+      const fdA = bump(fkVictim);
+      if (fdA) {
+        fdA.fd += 1;
+        const ps = (r.player_stats ?? []).find(x => x.player_puuid === fkVictim);
+        const onAttack = (ps?.player_team === 'Red' ? 'Red' : ps?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
+        (onAttack ? fdA.atk : fdA.def).fd += 1;
+      }
+    });
+
+    const players: PlayerMatchStats[] = (d.players?.all_players ?? []).map((p: {
+      puuid?: string; name?: string; tag?: string; team?: string; character?: string;
+      damage_made?: number;
+      stats?: { score?: number; kills?: number; deaths?: number; assists?: number; headshots?: number; bodyshots?: number; legshots?: number };
+    }) => {
+      const a = p.puuid ? agg[p.puuid] : undefined;
+      return {
         name: p.name ?? '',
         tag: p.tag ?? '',
         team: (p.team === 'Red' ? 'Red' : 'Blue') as 'Blue' | 'Red',
@@ -156,7 +302,35 @@ export async function getMatchDetails(matchId: string): Promise<MatchDetails> {
           bodyshots: p.stats?.bodyshots ?? 0,
           legshots: p.stats?.legshots ?? 0,
         },
-      })),
+        // Prefer round-summed damage; fall back to the player-level damage_made.
+        damageMade: a?.damage ?? p.damage_made ?? 0,
+        kastRounds: a?.kast ?? 0,
+        firstKills: a?.fk ?? 0,
+        firstDeaths: a?.fd ?? 0,
+        atk: a?.atk ?? emptySide(),
+        def: a?.def ?? emptySide(),
+      };
+    });
+
+    const rounds: RoundResult[] = rawRounds.map(r => ({
+      winningTeam: (r.winning_team === 'Red' ? 'Red' : 'Blue') as 'Blue' | 'Red',
+      endType: r.end_type ?? '',
+      bombPlanted: !!r.bomb_planted,
+      bombDefused: !!r.bomb_defused,
+    }));
+
+    return {
+      metadata: {
+        map: d.metadata?.map ?? '',
+        game_start_patched: d.metadata?.game_start_patched ?? '',
+        rounds_played: d.metadata?.rounds_played ?? 0,
+      },
+      teams: {
+        blue: { has_won: !!d.teams?.blue?.has_won, rounds_won: d.teams?.blue?.rounds_won ?? 0 },
+        red: { has_won: !!d.teams?.red?.has_won, rounds_won: d.teams?.red?.rounds_won ?? 0 },
+      },
+      players,
+      rounds,
     };
   } catch (error) {
     console.error('Failed to fetch match details:', error);
@@ -317,8 +491,76 @@ export function buildPlayerStatsFromAPI(
       kd: player.stats.deaths > 0 ? parseFloat((player.stats.kills / player.stats.deaths).toFixed(2)) : player.stats.kills,
       acs: roundsPlayed > 0 ? Math.floor(player.stats.score / roundsPlayed) : 0,
       hsPercent: Math.round(hsPercent),
+      // Advanced stats (0 when the API didn't carry round data).
+      adr: roundsPlayed > 0 ? Math.round(player.damageMade / roundsPlayed) : 0,
+      kast: roundsPlayed > 0 ? Math.round((player.kastRounds / roundsPlayed) * 100) : 0,
+      fk: player.firstKills,
+      fd: player.firstDeaths,
+      // Per-side splits (omitted when no round data was captured).
+      atk: sideSplitToStat(player.atk),
+      def: sideSplitToStat(player.def),
     };
   });
+}
+
+// Compute a side's display stats from its raw accumulation. Returns undefined
+// when the side has no rounds (so the UI can fall back / hide the toggle).
+function sideSplitToStat(raw: SideSplitRaw): SideStat | undefined {
+  if (!raw || raw.rounds === 0) return undefined;
+  return {
+    rounds: raw.rounds,
+    kills: raw.kills,
+    deaths: raw.deaths,
+    assists: raw.assists,
+    kd: raw.deaths > 0 ? parseFloat((raw.kills / raw.deaths).toFixed(2)) : raw.kills,
+    acs: Math.floor(raw.score / raw.rounds),
+    adr: Math.round(raw.damage / raw.rounds),
+    kast: Math.round((raw.kast / raw.rounds) * 100),
+    fk: raw.fk,
+    fd: raw.fd,
+  };
+}
+
+// One side's display-ready split (attack or defense) stored on a MatchPlayerStat.
+export interface SideStat {
+  rounds: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd: number;
+  acs: number;
+  adr: number;
+  kast: number;
+  fk: number;
+  fd: number;
+}
+
+// Orient the API's Blue/Red round list to team1/team2 perspective, so the
+// scoreboard can render a round-flow strip with each team's win/loss per round.
+export function buildRoundFlow(
+  rounds: RoundResult[],
+  team1Name: string, // 'Blue' or 'Red'
+): MapRoundFlow[] {
+  return rounds.map(r => ({
+    winner: r.winningTeam === team1Name ? 1 : 2,
+    endType: normalizeEndType(r.endType, r.bombDefused),
+  }));
+}
+
+// Compact, UI-facing record of one round on a stored map result.
+export interface MapRoundFlow {
+  winner: 1 | 2;             // which tournament team won the round
+  endType: RoundEndType;     // how it ended, for icon selection
+}
+export type RoundEndType = 'elim' | 'detonate' | 'defuse' | 'time';
+
+// Collapse HenrikDev's verbose end_type strings into our four icon buckets.
+function normalizeEndType(raw: string, bombDefused: boolean): RoundEndType {
+  const s = raw.toLowerCase();
+  if (s.includes('defus') || bombDefused) return 'defuse';
+  if (s.includes('detonat') || s.includes('bomb')) return 'detonate';
+  if (s.includes('time') || s.includes('expir')) return 'time';
+  return 'elim';
 }
 
 // ── Manual match-finding flow ──────────────────────────────────────────────
@@ -455,6 +697,7 @@ export async function buildMatchResultFromId(
   team1Score: number;
   team2Score: number;
   playerStats: ReturnType<typeof buildPlayerStatsFromAPI>;
+  roundFlow: MapRoundFlow[];
 }> {
   const details = await getMatchDetails(matchId);
   const mapping = mapPlayersToTeams(details.players, team1Roster, team2Roster);
@@ -474,6 +717,7 @@ export async function buildMatchResultFromId(
     team1Score: team1Rounds,
     team2Score: team2Rounds,
     playerStats,
+    roundFlow: buildRoundFlow(details.rounds, mapping.team1Name),
   };
 }
 

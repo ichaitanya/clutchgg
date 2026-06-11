@@ -1,10 +1,11 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { ArrowLeft, Trophy, Clock, Calendar, Play, ExternalLink, X, Map as MapIcon } from 'lucide-react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { ArrowLeft, Trophy, Clock, Calendar, Play, ExternalLink, X, Map as MapIcon, Bomb, Crosshair, Scissors } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { SharePopover } from './SharePopover';
 import type { AdminData } from './AdminPanel';
-import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult, BracketGenerated } from './TournamentCreation';
+import type { Tournament, BracketMatch, TeamInTournament, TournamentPlayer, MatchPlayerStat, MatchMapResult, MapRoundFlow, SideStat, BracketGenerated } from './TournamentCreation';
 import { getTournaments, loadWithRetryPolled } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { mapImageUrl, agentIconUrl } from '../utils/valorantAssets';
@@ -146,6 +147,28 @@ function findMatchInTournaments(matchId: string, tournaments: Tournament[]): Mat
 function isPlayedMap(m: MatchMapResult): boolean {
   return !!m.matchId || (!!m.playerStats && m.playerStats.length > 0)
     || !!m.mapName || m.team1Score > 0 || m.team2Score > 0;
+}
+
+// Agent comp for one side of a map: the agents played by that team's rows,
+// flattened (a row may list multiple agents) and de-duplicated. When both
+// bracket slots are the SAME team, teamId can't separate sides, so split the
+// rows in half (API stats come ordered Blue then Red) and pick by `side`.
+function mapAgents(stats: MatchPlayerStat[] | undefined, team1Id: string, team2Id: string, side: 1 | 2): string[] {
+  if (!stats || stats.length === 0) return [];
+  let rows: MatchPlayerStat[];
+  if (team1Id === team2Id) {
+    const mid = Math.ceil(stats.length / 2);
+    rows = side === 1 ? stats.slice(0, mid) : stats.slice(mid);
+  } else {
+    rows = stats.filter(s => s.teamId === (side === 1 ? team1Id : team2Id));
+  }
+  const agents: string[] = [];
+  for (const r of rows) {
+    for (const a of (r.agent ?? '').split(',').map(x => x.trim()).filter(Boolean)) {
+      if (!agents.includes(a)) agents.push(a);
+    }
+  }
+  return agents;
 }
 
 // ── Score from maps ──────────────────────────────────────────────────────────
@@ -303,22 +326,185 @@ function HeroCrest({ name, gradient, logo }: { name: string; gradient: string; l
   );
 }
 
+// A clear glyph for how a round ended. Larger and high-contrast so it reads at
+// a glance. `tone` selects the stroke color to match the winning team.
+const ROUND_END_LABEL: Record<MapRoundFlow['endType'], string> = {
+  elim: 'Eliminated',
+  detonate: 'Spike detonated',
+  defuse: 'Spike defused',
+  time: 'Time expired',
+};
+function RoundEndIcon({ endType }: { endType: MapRoundFlow['endType'] }) {
+  switch (endType) {
+    case 'detonate': return <Bomb className="arena-md-rf__icon" strokeWidth={2.25} />;
+    case 'defuse': return <Scissors className="arena-md-rf__icon" strokeWidth={2.25} />;
+    case 'time': return <Clock className="arena-md-rf__icon" strokeWidth={2.25} />;
+    default: return <Crosshair className="arena-md-rf__icon" strokeWidth={2.25} />;
+  }
+}
+
+// Round-flow grid: one row per team, one column per round. A team's won rounds
+// are tinted in its own color (red for team 1, violet for team 2) with the
+// end-type icon; lost rounds are faint hollow tiles. Team names + scores carry
+// the team color, and a compact legend explains the icons.
+function RoundFlow({ flow, team1Name, team2Name, team1Logo, team2Logo }: {
+  flow: MapRoundFlow[];
+  team1Name: string;
+  team2Name: string;
+  team1Logo?: string;
+  team2Logo?: string;
+}) {
+  if (flow.length === 0) return null;
+  // First half = first 12 rounds in standard play; clamp for short maps.
+  const half = Math.min(12, flow.length);
+  const wonBy = (side: 1 | 2) => flow.filter(r => r.winner === side).length;
+
+  // Distinct end-types actually present, for a compact legend.
+  const legend = (['elim', 'detonate', 'defuse', 'time'] as const).filter(t => flow.some(r => r.endType === t));
+
+  const sides = [
+    { side: 1 as const, name: team1Name, logo: team1Logo },
+    { side: 2 as const, name: team2Name, logo: team2Logo },
+  ];
+
+  return (
+    <div className="arena-md-rf">
+      <div className="arena-md-rf__scroll">
+        {sides.map(({ side, name, logo }) => (
+          <div key={side} className={`arena-md-rf__row arena-md-rf__row--t${side}`}>
+            <span className="arena-md-rf__team" title={name}>
+              {logo
+                ? <img src={logo} alt="" className="arena-md-rf__crest" />
+                : <span className="arena-md-rf__crest arena-md-rf__crest--empty">{teamInitials(name)}</span>}
+              <span className="arena-md-rf__team-name">{name}</span>
+            </span>
+            <div className="arena-md-rf__cells">
+              {flow.map((r, i) => {
+                const won = r.winner === side;
+                return (
+                  <span
+                    key={i}
+                    className={`arena-md-rf__cell ${won ? `arena-md-rf__cell--won arena-md-rf__cell--t${side}` : 'arena-md-rf__cell--lost'}${i === half ? ' arena-md-rf__cell--half' : ''}`}
+                    title={`Round ${i + 1}: ${r.winner === 1 ? team1Name : team2Name} — ${ROUND_END_LABEL[r.endType]}`}
+                  >
+                    {won && <RoundEndIcon endType={r.endType} />}
+                  </span>
+                );
+              })}
+            </div>
+            <span className="arena-md-rf__score">{wonBy(side)}</span>
+          </div>
+        ))}
+
+        {/* Round-number axis under the grid, aligned with the cells */}
+        <div className="arena-md-rf__row arena-md-rf__row--axis">
+          <span className="arena-md-rf__team" />
+          <div className="arena-md-rf__cells">
+            {flow.map((_, i) => (
+              <span key={i} className={`arena-md-rf__axis${i === half ? ' arena-md-rf__cell--half' : ''}`}>
+                {(i + 1) % 3 === 0 || i === 0 ? i + 1 : ''}
+              </span>
+            ))}
+          </div>
+          <span className="arena-md-rf__score" />
+        </div>
+      </div>
+
+      {legend.length > 0 && (
+        <div className="arena-md-rf__legend">
+          {legend.map(t => (
+            <span key={t} className="arena-md-rf__legend-item">
+              <span className="arena-md-rf__legend-icon"><RoundEndIcon endType={t} /></span>
+              {ROUND_END_LABEL[t]}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Project a stat row onto the selected side (attack/defense). When a row lacks
+// the requested split (older data), it falls through to the full-match numbers.
+// HS% isn't side-split, so it carries the full-match value in all modes.
+function applySideFilter(s: MatchPlayerStat, side: 'all' | 'atk' | 'def'): MatchPlayerStat {
+  if (side === 'all') return s;
+  const split = side === 'atk' ? s.atk : s.def;
+  if (!split) return s;
+  return {
+    ...s,
+    kills: split.kills,
+    deaths: split.deaths,
+    assists: split.assists,
+    kd: split.kd,
+    acs: split.acs,
+    fk: split.fk,
+    fd: split.fd,
+  };
+}
+
+// True when at least one row carries both attack and defense splits, so the
+// Attack/Defend toggle is meaningful for this scoreboard.
+function hasSideSplits(rows: MatchPlayerStat[]): boolean {
+  return rows.some(s => s.atk && s.def);
+}
+
 type SortKey = 'kills' | 'kd' | 'acs' | 'hsPercent';
 
-function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers }: {
+// Per-column max across BOTH teams, so the best value in the whole scoreboard is
+// highlighted (quick-win #5). Computed once and passed into each StatsTable.
+interface ColumnLeaders {
+  kills: number; kd: number; acs: number; hsPercent: number;
+}
+function computeColumnLeaders(rows: MatchPlayerStat[]): ColumnLeaders {
+  const max = (f: (s: MatchPlayerStat) => number) => rows.reduce((m, s) => Math.max(m, f(s)), 0);
+  const kdOf = (s: MatchPlayerStat) => (s.kd > 0 ? s.kd : s.deaths > 0 ? s.kills / s.deaths : s.kills);
+  return {
+    kills: max(s => s.kills),
+    kd: max(kdOf),
+    acs: max(s => s.acs),
+    hsPercent: max(s => s.hsPercent),
+  };
+}
+
+// Heat tint for a 0–1 normalized value: red (cold) → neutral → green (hot).
+// Returns an inline color string; callers gate on whether the stat exists.
+function heatColor(norm: number): string {
+  const t = Math.max(0, Math.min(1, norm));
+  // 0 → muted red, 0.5 → neutral grey, 1 → green
+  if (t < 0.5) {
+    const k = t / 0.5;
+    return `rgb(${Math.round(229 - k * (229 - 200))}, ${Math.round(115 + k * (200 - 115))}, ${Math.round(115 + k * (200 - 115))})`;
+  }
+  const k = (t - 0.5) / 0.5;
+  return `rgb(${Math.round(200 - k * (200 - 74))}, ${Math.round(200 + k * (222 - 200))}, ${Math.round(200 - k * (200 - 128))})`;
+}
+
+function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers, leaders, won }: {
   teamName: string;
   teamStats: MatchPlayerStat[];
   tournamentId: string;
   rosterPlayers: TournamentPlayer[];
+  leaders: ColumnLeaders;
+  won: boolean;
 }) {
   const navigate = useNavigate();
   const [sortKey, setSortKey] = useState<SortKey>('acs');
   if (teamStats.length === 0) return null;
-  const maxAcs = Math.max(...teamStats.map(s => s.acs));
+
+  // Only show the FK/FD column when this scoreboard actually carries it, so
+  // older matches / manual entries keep the lean K-D-A-ACS-HS layout.
+  const hasFkFd = teamStats.some(s => (s.fk ?? 0) > 0 || (s.fd ?? 0) > 0);
 
   const sortValue = (s: MatchPlayerStat, key: SortKey) =>
     key === 'kd' ? (s.kd > 0 ? s.kd : s.deaths > 0 ? s.kills / s.deaths : s.kills) : s[key];
   const sortedStats = [...teamStats].sort((a, b) => sortValue(b, sortKey) - sortValue(a, sortKey));
+
+  // Per-row heat tint, normalized against the cross-team column leader so the
+  // best value in the whole scoreboard reads hottest (and is bold via --lead).
+  const tint = (val: number, leader: number): CSSProperties =>
+    leader > 0 ? { color: heatColor(val / leader) } : {};
+  const isLead = (val: number, leader: number) => val > 0 && val === leader;
 
   const SortHeader = ({ label, sortKey: key }: { label: string; sortKey: SortKey }) => (
     <th
@@ -331,9 +517,10 @@ function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers }: {
 
   return (
     <div className="arena-md-table-card">
-      <div className="arena-md-table-card__head">
+      <div className={`arena-md-table-card__head${won ? ' arena-md-table-card__head--win' : ''}`}>
         <span className="arena-md-table-card__bar" />
         <span className="arena-md-table-card__team">{teamName}</span>
+        {won && <span className="arena-md-table-card__win">Winner</span>}
       </div>
       <div className="arena-md-table-wrap">
         <table className="arena-md-table">
@@ -341,21 +528,21 @@ function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers }: {
             <tr>
               <th className="arena-md-table__left">Player</th>
               <th className="arena-md-table__left">Agent</th>
+              <SortHeader label="ACS" sortKey="acs" />
               <SortHeader label="K" sortKey="kills" />
               <th>D</th>
               <th>A</th>
               <SortHeader label="K/D" sortKey="kd" />
-              <SortHeader label="ACS" sortKey="acs" />
+              {hasFkFd && <th title="First kills / first deaths">FK/FD</th>}
               <SortHeader label="HS%" sortKey="hsPercent" />
             </tr>
           </thead>
           <tbody>
             {sortedStats.map((s, i) => {
-              const isTopAcs = s.acs === maxAcs && s.acs > 0;
               // Resolve this stat row to a roster player so the name links to
               // their profile (stats are keyed by Riot ID, not roster slot id).
               const rosterPlayer = rosterPlayers.find(p => statMatchesPlayer(s, p));
-              const kdClass = s.kd >= 1.5 ? 'arena-md-table__kd-good' : s.kd >= 1 ? 'arena-md-table__kd-ok' : 'arena-md-table__kd-low';
+              const kdVal = s.kd > 0 ? s.kd : s.deaths > 0 ? s.kills / s.deaths : s.kills;
               return (
                 <tr key={s.playerId} className={i % 2 === 0 ? 'arena-md-table__alt' : ''}>
                   <td className="arena-md-table__left">
@@ -382,19 +569,34 @@ function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers }: {
                       </span>
                     ) : <span className="arena-md-table__dim">—</span>}
                   </td>
-                  <td>{s.kills}</td>
-                  <td>{s.deaths}</td>
-                  <td>{s.assists}</td>
                   <td>
-                    <span className={kdClass}>
-                      {s.kd > 0 ? s.kd.toFixed(2) : (s.deaths > 0 ? (s.kills / s.deaths).toFixed(2) : '—')}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={isTopAcs ? 'arena-md-table__acs-top' : ''}>
+                    <span
+                      className={isLead(s.acs, leaders.acs) ? 'arena-md-table__lead' : ''}
+                      style={tint(s.acs, leaders.acs)}
+                    >
                       {s.acs > 0 ? s.acs : '—'}
                     </span>
                   </td>
+                  <td>
+                    <span className={isLead(s.kills, leaders.kills) ? 'arena-md-table__lead' : ''}>{s.kills}</span>
+                  </td>
+                  <td>{s.deaths}</td>
+                  <td>{s.assists}</td>
+                  <td>
+                    <span
+                      className={isLead(kdVal, leaders.kd) ? 'arena-md-table__lead' : ''}
+                      style={tint(kdVal, leaders.kd)}
+                    >
+                      {kdVal > 0 ? kdVal.toFixed(2) : '—'}
+                    </span>
+                  </td>
+                  {hasFkFd && (
+                    <td>
+                      <span className="arena-md-table__fk">{s.fk ?? 0}</span>
+                      <span className="arena-md-table__fkfd-sep">/</span>
+                      <span className="arena-md-table__fd">{s.fd ?? 0}</span>
+                    </td>
+                  )}
                   <td className="arena-md-table__dim">
                     {s.hsPercent > 0 ? `${s.hsPercent}%` : '—'}
                   </td>
@@ -405,6 +607,21 @@ function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers }: {
         </table>
       </div>
     </div>
+  );
+}
+
+// A team's agent comp on a map card — up to 5 agent icons in a row, the winning
+// side's icons slightly brighter. Falls back to a 2-letter chip if no icon.
+function CompRow({ agents, won, align }: { agents: string[]; won?: boolean; align?: 'right' }) {
+  return (
+    <span className={`arena-md-map__comp${won ? ' arena-md-map__comp--won' : ''}${align === 'right' ? ' arena-md-map__comp--right' : ''}`}>
+      {agents.slice(0, 5).map((a, idx) => {
+        const url = agentIconUrl(a);
+        return url
+          ? <img key={idx} src={url} alt={a} title={a} className="arena-md-map__comp-icon" />
+          : <span key={idx} title={a} className="arena-md-map__comp-fallback">{a.slice(0, 2).toUpperCase()}</span>;
+      })}
+    </span>
   );
 }
 
@@ -439,6 +656,8 @@ export function TournamentMatchPage() {
   const [selectedMapIndex, setSelectedMapIndex] = useState(0);
   // When set, a YouTube embed URL to show in the video popup modal (stream/clip).
   const [streamPopup, setStreamPopup] = useState<string | null>(null);
+  // Scoreboard side filter: all rounds, attack only, or defense only.
+  const [sideFilter, setSideFilter] = useState<'all' | 'atk' | 'def'>('all');
 
   useEffect(() => {
     if (!matchId) { setNotFound(true); return; }
@@ -532,20 +751,59 @@ export function TournamentMatchPage() {
   // recomputed from summed kills/deaths.
   const buildTotalStats = (): MatchPlayerStat[] => {
     // Aggregate keyed by playerId via a plain object (kept simple/portable).
-    type Agg = { row: MatchPlayerStat; agents: Set<string>; mapsPlayed: number; acsSum: number; hsSum: number };
+    // ACS/HS%/ADR/KAST are averaged over maps played; FK/FD are summed.
+    // A raw per-side accumulator, summed in round-space so ACS/ADR/KAST can be
+    // recomputed correctly across maps (weighted by rounds, not maps).
+    type SideAcc = { rounds: number; kills: number; deaths: number; assists: number; scoreSum: number; admSum: number; kastRounds: number; fk: number; fd: number };
+    const emptySideAcc = (): SideAcc => ({ rounds: 0, kills: 0, deaths: 0, assists: 0, scoreSum: 0, admSum: 0, kastRounds: 0, fk: 0, fd: 0 });
+    const addSide = (acc: SideAcc, split?: SideStat) => {
+      if (!split) return;
+      acc.rounds += split.rounds;
+      acc.kills += split.kills;
+      acc.deaths += split.deaths;
+      acc.assists += split.assists;
+      acc.scoreSum += split.acs * split.rounds;   // back out total combat score
+      acc.admSum += split.adr * split.rounds;      // back out total damage
+      acc.kastRounds += Math.round((split.kast / 100) * split.rounds);
+      acc.fk += split.fk;
+      acc.fd += split.fd;
+    };
+    const finishSide = (acc: SideAcc): SideStat | undefined => {
+      if (acc.rounds === 0) return undefined;
+      return {
+        rounds: acc.rounds,
+        kills: acc.kills, deaths: acc.deaths, assists: acc.assists,
+        kd: acc.deaths > 0 ? parseFloat((acc.kills / acc.deaths).toFixed(2)) : acc.kills,
+        acs: Math.round(acc.scoreSum / acc.rounds),
+        adr: Math.round(acc.admSum / acc.rounds),
+        kast: Math.round((acc.kastRounds / acc.rounds) * 100),
+        fk: acc.fk, fd: acc.fd,
+      };
+    };
+
+    type Agg = {
+      row: MatchPlayerStat; agents: Set<string>; mapsPlayed: number;
+      acsSum: number; hsSum: number; adrSum: number; kastSum: number; fkSum: number; fdSum: number;
+      atk: SideAcc; def: SideAcc;
+    };
     const acc: Record<string, Agg> = {};
     const order: string[] = [];
     for (const m of match.maps ?? []) {
       for (const s of m.playerStats ?? []) {
-        const cur = acc[s.playerId];
+        let cur = acc[s.playerId];
         if (!cur) {
           order.push(s.playerId);
-          acc[s.playerId] = {
+          cur = acc[s.playerId] = {
             row: { ...s },
             agents: new Set(s.agent ? [s.agent] : []),
             mapsPlayed: 1,
             acsSum: s.acs,
             hsSum: s.hsPercent,
+            adrSum: s.adr ?? 0,
+            kastSum: s.kast ?? 0,
+            fkSum: s.fk ?? 0,
+            fdSum: s.fd ?? 0,
+            atk: emptySideAcc(), def: emptySideAcc(),
           };
         } else {
           cur.row.kills += s.kills;
@@ -555,17 +813,29 @@ export function TournamentMatchPage() {
           cur.mapsPlayed += 1;
           cur.acsSum += s.acs;
           cur.hsSum += s.hsPercent;
+          cur.adrSum += s.adr ?? 0;
+          cur.kastSum += s.kast ?? 0;
+          cur.fkSum += s.fk ?? 0;
+          cur.fdSum += s.fd ?? 0;
         }
+        addSide(cur.atk, s.atk);
+        addSide(cur.def, s.def);
       }
     }
     return order.map(id => {
-      const { row, agents, mapsPlayed, acsSum, hsSum } = acc[id];
+      const { row, agents, mapsPlayed, acsSum, hsSum, adrSum, kastSum, fkSum, fdSum, atk, def } = acc[id];
       return {
         ...row,
         agent: Array.from(agents).join(', '),
         kd: row.deaths > 0 ? parseFloat((row.kills / row.deaths).toFixed(2)) : row.kills,
         acs: mapsPlayed > 0 ? Math.round(acsSum / mapsPlayed) : 0,
         hsPercent: mapsPlayed > 0 ? Math.round(hsSum / mapsPlayed) : 0,
+        adr: mapsPlayed > 0 ? Math.round(adrSum / mapsPlayed) : 0,
+        kast: mapsPlayed > 0 ? Math.round(kastSum / mapsPlayed) : 0,
+        fk: fkSum,
+        fd: fdSum,
+        atk: finishSide(atk),
+        def: finishSide(def),
       };
     });
   };
@@ -600,6 +870,41 @@ export function TournamentMatchPage() {
     team2Stats = effectiveStats.filter(s => s.teamId === match.team2Id);
   }
 
+  // Series MVP — always the best TOTAL performance across the whole series,
+  // independent of the map tab currently selected below. Ranked by total ACS,
+  // tie-broken on K/D then kills. The all-zero roster fallback is excluded.
+  const mvp = (() => {
+    // Aggregate across all maps; fall back to the match-level stats for
+    // single-map matches that don't carry per-map stats.
+    const totalPool = mapsWithStats
+      ? buildTotalStats()
+      : (match.playerStats ?? []);
+    const ranked = totalPool
+      .filter(s => s.acs > 0)
+      .sort((a, b) =>
+        b.acs - a.acs ||
+        (b.kd || (b.deaths ? b.kills / b.deaths : b.kills)) - (a.kd || (a.deaths ? a.kills / a.deaths : a.kills)) ||
+        b.kills - a.kills,
+      );
+    const top = ranked[0];
+    if (!top) return null;
+    // Determine which side the MVP played on. Filter by teamId normally; for the
+    // mirror-match case (same team both slots) fall back to roster membership.
+    const onTeam1 = match.team1Id === match.team2Id
+      ? !!(team1?.players ?? []).find(p => statMatchesPlayer(top, p))
+      : top.teamId === match.team1Id;
+    const side = onTeam1 ? team1 : team2;
+    const rosterPlayer = (side?.players ?? []).find(p => statMatchesPlayer(top, p));
+    return {
+      stat: top,
+      teamName: onTeam1 ? team1Name : team2Name,
+      teamLogo: side?.logo,
+      photo: rosterPlayer?.photo,
+      playerLinkId: rosterPlayer?.id,
+      accent: onTeam1 ? '#ff4655' : '#a78bfa',
+    };
+  })();
+
   const statusLabel = status === 'live' ? 'Live' : status === 'upcoming' ? 'Upcoming' : 'Completed';
 
   // Highlight clips: only those that resolve to a YouTube embed open in the
@@ -624,11 +929,21 @@ export function TournamentMatchPage() {
       <Header />
 
       <main className="arena-md">
-        {/* Back */}
-        <button onClick={() => navigate('/matches')} className="arena-md__back">
-          <ArrowLeft className="w-4 h-4" />
-          Back to Schedule
-        </button>
+        {/* Top bar: back link · share */}
+        <div className="arena-md__topbar">
+          <button onClick={() => navigate('/matches')} className="arena-md__back">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Schedule
+          </button>
+          <SharePopover
+            key={match.id}
+            shareText={`${team1Name} vs ${team2Name} — ${tournament.name}`}
+            buttonClassName="arena-md__share"
+            label="Share"
+            direction="down"
+            align="right"
+          />
+        </div>
 
         {/* ── Match Hero ─────────────────────────────────────────────────── */}
         <div className={`arena-md-hero${isCompleted && team1Won ? ' arena-md-hero--win-left' : ''}${isCompleted && team2Won ? ' arena-md-hero--win-right' : ''}`}>
@@ -644,6 +959,7 @@ export function TournamentMatchPage() {
             >
               <HeroCrest name={team1Name} logo={team1?.logo} gradient={team1Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#3b82f6,#1d4ed8)'} />
               <p className="arena-md-hero__team-name">{team1Name}</p>
+              {isCompleted && team1Won && <span className="arena-md-hero__win-tag">Winner</span>}
             </button>
 
             {/* Center */}
@@ -688,6 +1004,7 @@ export function TournamentMatchPage() {
             >
               <HeroCrest name={team2Name} logo={team2?.logo} gradient={team2Won ? 'linear-gradient(135deg,#ff4655,#c0392b)' : 'linear-gradient(135deg,#8b5cf6,#6d28d9)'} />
               <p className="arena-md-hero__team-name">{team2Name}</p>
+              {isCompleted && team2Won && <span className="arena-md-hero__win-tag">Winner</span>}
             </button>
           </div>
 
@@ -715,33 +1032,51 @@ export function TournamentMatchPage() {
                 const clickable = mapsWithStats && !!m.playerStats && m.playerStats.length > 0;
                 const isSelected = clickable && i === safeMapIndex;
                 const splash = mapImageUrl(m.mapName);
+                // Agent comp per side for this map (data on the map's own stats).
+                const comp1 = mapAgents(m.playerStats, match.team1Id, match.team2Id, 1);
+                const comp2 = mapAgents(m.playerStats, match.team1Id, match.team2Id, 2);
+                const hasComp = comp1.length > 0 || comp2.length > 0;
                 return (
                   <div
                     key={i}
                     onClick={() => clickable && setSelectedMapIndex(i)}
                     className={`arena-md-map${clickable ? ' arena-md-map--clickable' : ''}${isSelected ? ' arena-md-map--selected' : ''}`}
+                    style={splash ? {
+                      backgroundImage: `linear-gradient(90deg, #131313 0%, rgba(19,19,19,0.9) 40%, rgba(19,19,19,0.5) 100%), url(${splash})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center 30%',
+                    } : undefined}
                   >
-                    <span className="arena-md-map__thumb">
-                      {splash
-                        ? <img src={splash} alt={m.mapName} />
-                        : <MapIcon className="w-4 h-4" />}
-                    </span>
-                    <span className="arena-md-map__info">
-                      <span className="arena-md-map__name">{m.mapName || `Map ${i + 1}`}</span>
-                      {(t1wins || t2wins) && (
-                        <span className="arena-md-map__winner">{t1wins ? team1Name : team2Name} wins</span>
-                      )}
-                      {clickable && (
-                        <span className="arena-md-map__hint">
-                          {isSelected ? 'Viewing scoreboard' : 'Click for scoreboard'}
+                    <div className="arena-md-map__top">
+                      {!splash && (
+                        <span className="arena-md-map__thumb">
+                          <MapIcon className="w-4 h-4" />
                         </span>
                       )}
-                    </span>
-                    <span className="arena-md-map__score">
-                      <span className={t1wins ? 'arena-md-map__score-win' : ''}>{m.team1Score}</span>
-                      <span className="arena-md-map__score-sep">:</span>
-                      <span className={t2wins ? 'arena-md-map__score-win' : ''}>{m.team2Score}</span>
-                    </span>
+                      <span className="arena-md-map__info">
+                        <span className="arena-md-map__name">{m.mapName || `Map ${i + 1}`}</span>
+                        {(t1wins || t2wins) && (
+                          <span className="arena-md-map__winner">{t1wins ? team1Name : team2Name} wins</span>
+                        )}
+                        {clickable && (
+                          <span className="arena-md-map__hint">
+                            {isSelected ? 'Viewing scoreboard' : 'Click for scoreboard'}
+                          </span>
+                        )}
+                      </span>
+                      <span className="arena-md-map__score">
+                        <span className={t1wins ? 'arena-md-map__score-win' : ''}>{m.team1Score}</span>
+                        <span className="arena-md-map__score-sep">:</span>
+                        <span className={t2wins ? 'arena-md-map__score-win' : ''}>{m.team2Score}</span>
+                      </span>
+                    </div>
+                    {hasComp && (
+                      <div className="arena-md-map__comps">
+                        <CompRow agents={comp1} won={t1wins} />
+                        <span className="arena-md-map__comp-vs">vs</span>
+                        <CompRow agents={comp2} won={t2wins} align="right" />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -749,16 +1084,110 @@ export function TournamentMatchPage() {
           </section>
         )}
 
+        {/* ── Series MVP ─────────────────────────────────────────────────── */}
+        {mvp && (() => {
+          // A series MVP may have played several agents across maps; the Total
+          // view joins them comma-separated. Show every one as a stacked crest.
+          const mvpAgents = (mvp.stat.agent ?? '').split(',').map(a => a.trim()).filter(Boolean);
+          const kdText = mvp.stat.kd > 0
+            ? mvp.stat.kd.toFixed(2)
+            : (mvp.stat.deaths > 0 ? (mvp.stat.kills / mvp.stat.deaths).toFixed(2) : mvp.stat.kills.toFixed(2));
+          return (
+          <section className="arena-md-section">
+            <p className="arena-md-section__eyebrow">Standout</p>
+            <h2 className="arena-md-section__title">Series MVP</h2>
+            <div
+              className={`arena-md-mvp${mvp.playerLinkId ? ' arena-md-mvp--link' : ''}`}
+              onClick={() => mvp.playerLinkId && navigate(`/player/${tournament.id}/${mvp.playerLinkId}`)}
+              style={{
+                ['--mvp-accent' as string]: mvp.accent,
+                backgroundImage: `radial-gradient(120% 140% at 0% 0%, ${mvp.accent}26 0%, rgba(19,19,19,0) 55%)`,
+              }}
+            >
+              {/* Oversized watermark trophy in the corner */}
+              <Trophy className="arena-md-mvp__watermark" />
+
+              <span className="arena-md-mvp__photo">
+                {mvp.photo
+                  ? <img src={mvp.photo} alt={mvp.stat.playerName} />
+                  : <span className="arena-md-mvp__initials">{teamInitials(mvp.stat.playerName)}</span>}
+                {mvpAgents.length > 0 && (
+                  <span className="arena-md-mvp__agents">
+                    {mvpAgents.map((a, idx) => {
+                      const icon = agentIconUrl(a);
+                      return icon
+                        ? <img key={idx} src={icon} alt={a} title={a} className="arena-md-mvp__agent-icon" />
+                        : <span key={idx} title={a} className="arena-md-mvp__agent-icon arena-md-mvp__agent-icon--fallback">{a.slice(0, 2).toUpperCase()}</span>;
+                    })}
+                  </span>
+                )}
+              </span>
+
+              <span className="arena-md-mvp__id">
+                <span className="arena-md-mvp__badge">
+                  <Trophy className="w-3 h-3" /> MVP
+                </span>
+                <span className="arena-md-mvp__name">{mvp.stat.playerName}</span>
+                <span className="arena-md-mvp__team">
+                  {mvp.teamLogo && <img src={mvp.teamLogo} alt="" className="arena-md-mvp__crest" />}
+                  <span className="arena-md-mvp__team-name">{mvp.teamName}</span>
+                  {mvp.stat.agent && <span className="arena-md-mvp__agent">· {mvp.stat.agent}</span>}
+                </span>
+              </span>
+
+              <span className="arena-md-mvp__stats">
+                <span className="arena-md-mvp__stat arena-md-mvp__stat--hero">
+                  <span className="arena-md-mvp__stat-val">{mvp.stat.acs}</span>
+                  <span className="arena-md-mvp__stat-lbl">ACS</span>
+                </span>
+                <span className="arena-md-mvp__stat">
+                  <span className="arena-md-mvp__stat-val">{mvp.stat.kills}/{mvp.stat.deaths}/{mvp.stat.assists}</span>
+                  <span className="arena-md-mvp__stat-lbl">K / D / A</span>
+                </span>
+                <span className="arena-md-mvp__stat">
+                  <span className="arena-md-mvp__stat-val">{kdText}</span>
+                  <span className="arena-md-mvp__stat-lbl">K/D</span>
+                </span>
+                {mvp.stat.hsPercent > 0 && (
+                  <span className="arena-md-mvp__stat">
+                    <span className="arena-md-mvp__stat-val">{mvp.stat.hsPercent}%</span>
+                    <span className="arena-md-mvp__stat-lbl">HS</span>
+                  </span>
+                )}
+              </span>
+            </div>
+          </section>
+          );
+        })()}
+
         {/* ── Broadcast & Highlights (compact two-column tiles) ──────────── */}
         {hasBroadcast && (
           <section className="arena-md-section">
-            <div className="arena-md-media">
+            <div className={`arena-md-media${!match.streamUrl || clips.length === 0 ? ' arena-md-media--single' : ''}`}>
               {/* Streams */}
-              <div className="arena-md-media__col">
-                <p className="arena-md-media__label">Streams</p>
-                {match.streamUrl ? (
-                  (() => {
+              {match.streamUrl && (
+                <div className="arena-md-media__col">
+                  <p className="arena-md-media__label">Streams</p>
+                  {(() => {
                     const embed = youtubeEmbedUrl(match.streamUrl!);
+                    const thumb = youtubeThumb(match.streamUrl!);
+                    // Prefer a clickable thumbnail (opens the in-page player) when
+                    // the URL is a recognizable YouTube link; otherwise fall back
+                    // to a plain external-link tile.
+                    if (embed && thumb) {
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setStreamPopup(embed)}
+                          className="arena-md-vod"
+                        >
+                          <img src={thumb} alt="" className="arena-md-vod__thumb" />
+                          <span className="arena-md-vod__overlay" />
+                          <span className="arena-md-vod__play"><Play className="w-5 h-5" /></span>
+                          <span className="arena-md-vod__label">Watch Match Stream</span>
+                        </button>
+                      );
+                    }
                     return embed ? (
                       <button
                         type="button"
@@ -779,16 +1208,14 @@ export function TournamentMatchPage() {
                         <span className="arena-md-tile__text">Match Stream</span>
                       </a>
                     );
-                  })()
-                ) : (
-                  <p className="arena-md-media__empty">Not available</p>
-                )}
-              </div>
+                  })()}
+                </div>
+              )}
 
-              {/* Highlights / clips */}
-              <div className="arena-md-media__col">
-                <p className="arena-md-media__label">Highlights</p>
-                {clips.length > 0 ? (
+              {/* Highlights / clips — only rendered once clips exist */}
+              {clips.length > 0 && (
+                <div className="arena-md-media__col">
+                  <p className="arena-md-media__label">Highlights</p>
                   <div className="arena-md-tile-grid">
                     {clips.map(clip => {
                       const embed = youtubeEmbedUrl(clip.url);
@@ -817,16 +1244,17 @@ export function TournamentMatchPage() {
                       );
                     })}
                   </div>
-                ) : (
-                  <p className="arena-md-media__empty">Not yet available</p>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </section>
         )}
 
         {/* ── Player Stats ───────────────────────────────────────────────── */}
-        {hasAnyTeamPlayers && (
+        {/* Hidden pre-match unless stats already exist: an all-zero roster table
+            adds nothing before the match, and hiding it lets Lineups and
+            Head-to-Head lead the page for upcoming matches. */}
+        {hasAnyTeamPlayers && (status !== 'upcoming' || mapsWithStats || (match.playerStats?.length ?? 0) > 0) && (
           <section className="arena-md-section">
             <p className="arena-md-section__eyebrow">Performance</p>
             <h2 className="arena-md-section__title">
@@ -887,10 +1315,59 @@ export function TournamentMatchPage() {
               );
             })()}
 
-            <div className="arena-md-stats">
-              <StatsTable teamName={team1Name} teamStats={team1Stats} tournamentId={tournament.id} rosterPlayers={team1?.players ?? []} />
-              <StatsTable teamName={team2Name} teamStats={team2Stats} tournamentId={tournament.id} rosterPlayers={team2?.players ?? []} />
-            </div>
+            {/* Round-flow strip — per-map only (rounds are a single map's data) */}
+            {!isTotalView && (() => {
+              const flow = match.maps?.[safeMapIndex]?.roundFlow;
+              if (!flow || flow.length === 0) return null;
+              return (
+                <RoundFlow
+                  flow={flow}
+                  team1Name={team1Name}
+                  team2Name={team2Name}
+                  team1Logo={team1?.logo}
+                  team2Logo={team2?.logo}
+                />
+              );
+            })()}
+
+            {(() => {
+              // Attack/Defend toggle is offered only when splits exist on screen.
+              const sideAvailable = hasSideSplits([...team1Stats, ...team2Stats]);
+              const activeSide = sideAvailable ? sideFilter : 'all';
+              const t1Display = team1Stats.map(s => applySideFilter(s, activeSide));
+              const t2Display = team2Stats.map(s => applySideFilter(s, activeSide));
+              // Column leaders computed across BOTH teams (on the displayed side)
+              // so the scoreboard's best value in each stat reads hottest (#5).
+              const leaders = computeColumnLeaders([...t1Display, ...t2Display]);
+              const map = isTotalView ? null : match.maps?.[safeMapIndex];
+              const t1Won = !!map && map.team1Score > map.team2Score;
+              const t2Won = !!map && map.team2Score > map.team1Score;
+              return (
+                <>
+                  {sideAvailable && (
+                    <div className="arena-md-side">
+                      {([
+                        { key: 'all', label: 'All' },
+                        { key: 'atk', label: 'Attack' },
+                        { key: 'def', label: 'Defense' },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.key}
+                          onClick={() => setSideFilter(opt.key)}
+                          className={`arena-md-side__btn${sideFilter === opt.key ? ` arena-md-side__btn--active arena-md-side__btn--${opt.key}` : ''}`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="arena-md-stats">
+                    <StatsTable teamName={team1Name} teamStats={t1Display} tournamentId={tournament.id} rosterPlayers={team1?.players ?? []} leaders={leaders} won={t1Won} />
+                    <StatsTable teamName={team2Name} teamStats={t2Display} tournamentId={tournament.id} rosterPlayers={team2?.players ?? []} leaders={leaders} won={t2Won} />
+                  </div>
+                </>
+              );
+            })()}
           </section>
         )}
 

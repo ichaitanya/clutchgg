@@ -611,9 +611,9 @@ export function PlayerPage() {
                               <span
                                 className="arena-pp-map-chip"
                                 style={splash ? {
-                                  backgroundImage: `linear-gradient(90deg, rgba(10,10,10,0.85), rgba(10,10,10,0.55)), url(${splash})`,
+                                  backgroundImage: `linear-gradient(90deg, #131313 0%, rgba(19,19,19,0.85) 35%, rgba(19,19,19,0.45) 100%), url(${splash})`,
                                   backgroundSize: 'cover',
-                                  backgroundPosition: 'center 35%',
+                                  backgroundPosition: 'center 30%',
                                 } : undefined}
                               >
                                 {s.mapName}

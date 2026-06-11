@@ -100,6 +100,15 @@ export interface MatchMapResult {
   team2Score: number;
   playerStats?: MatchPlayerStat[];
   matchId?: string; // Valorant match ID this map was populated from (Segment 2)
+  // Per-round outcome strip (winner + how the round ended), oriented to
+  // team1/team2. Present only for maps imported after round-flow capture landed.
+  roundFlow?: MapRoundFlow[];
+}
+
+// One round on a stored map: which tournament team won and how it ended.
+export interface MapRoundFlow {
+  winner: 1 | 2;
+  endType: 'elim' | 'detonate' | 'defuse' | 'time';
 }
 
 export interface MatchPlayerStat {
@@ -113,6 +122,30 @@ export interface MatchPlayerStat {
   kd: number;
   acs: number;
   hsPercent: number;
+  // Advanced stats — optional so older stored matches (and manual entries)
+  // remain valid; the scoreboard shows them only when present/non-zero.
+  adr?: number;   // average damage per round
+  kast?: number;  // % of rounds with a kill, assist, survive, or trade
+  fk?: number;    // first kills in the match
+  fd?: number;    // first deaths in the match
+  // Per-side splits (attack / defense). Present only for maps imported after
+  // side-split capture landed; the scoreboard's Attack/Defend toggle uses them.
+  atk?: SideStat;
+  def?: SideStat;
+}
+
+// One side's stats (attack rounds or defense rounds) for the scoreboard toggle.
+export interface SideStat {
+  rounds: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  kd: number;
+  acs: number;
+  adr: number;
+  kast: number;
+  fk: number;
+  fd: number;
 }
 
 export interface BracketMatch {
@@ -1883,6 +1916,7 @@ function MatchEditModal({
           team2Score: result.team2Score,
           playerStats: result.playerStats,
           matchId: entry.id,
+          roundFlow: result.roundFlow,
         };
       }
 
@@ -1929,6 +1963,7 @@ function MatchEditModal({
       team2Score: result.team2Score,
       playerStats: result.playerStats,
       matchId: apiMatchId,
+      roundFlow: result.roundFlow,
     };
     setForm(f => {
       const existing = f.maps ?? [];
@@ -2632,6 +2667,7 @@ function CreateTournamentScreen({
       team2Score: result.team2Score,
       playerStats: result.playerStats,
       matchId: apiMatchId,
+      roundFlow: result.roundFlow,
     };
 
     // Merge the new map into the chosen slot, preserving other slots.
