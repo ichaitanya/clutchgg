@@ -6,11 +6,11 @@ import {
 } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
-import type { Tournament, BracketGenerated, BracketMatch, PrizePool } from './TournamentCreation';
+import type { Tournament, BracketGenerated, BracketMatch, PrizePool, MatchPlayerStat } from './TournamentCreation';
 import { formatPrize } from './TournamentCreation';
 import type { NewsItem } from './AdminPanel';
 import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
-import { getStageOptions } from './StatsPage';
+import { getStageOptions, statMatchesPlayer } from './StatsPage';
 import { BracketDisplay } from './BracketDisplay';
 import { computePlacement } from './TeamsPage';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
@@ -118,7 +118,10 @@ function deriveChampion(t: Tournament): {
 // Per-player stat totals across every recorded map of the tournament.
 // Deduped by match+map+player so duplicated match copies don't double-count.
 interface PlayerTotals {
-  playerId: string;
+  playerId: string;   // raw stat id (Riot ID) — kept for keying
+  // The roster slot id this stat resolves to, used for /player links. Falls back
+  // to the raw playerId only if no roster match is found.
+  rosterId: string;
   name: string;
   teamName: string;
   kills: number;
@@ -132,7 +135,7 @@ function aggregatePlayerTotals(t: Tournament): PlayerTotals[] {
   t.teams.forEach(tm => { teamNameById[tm.id] = tm.name; });
 
   const totals = new Map<string, {
-    playerId: string; name: string; teamId: string;
+    playerId: string; name: string; teamId: string; sample: MatchPlayerStat;
     kills: number; maps: number; acsSum: number; hsSum: number;
   }>();
   const seen = new Set<string>();
@@ -145,7 +148,7 @@ function aggregatePlayerTotals(t: Tournament): PlayerTotals[] {
             if (seen.has(key)) continue;
             seen.add(key);
             const cur = totals.get(ps.playerId) ?? {
-              playerId: ps.playerId, name: ps.playerName, teamId: ps.teamId,
+              playerId: ps.playerId, name: ps.playerName, teamId: ps.teamId, sample: ps,
               kills: 0, maps: 0, acsSum: 0, hsSum: 0,
             };
             cur.kills += ps.kills;
@@ -159,8 +162,18 @@ function aggregatePlayerTotals(t: Tournament): PlayerTotals[] {
     }
   }
 
+  // Resolve each stat row to a roster slot id so /player links work (the stat's
+  // own playerId is a Riot ID, which the player page can't look up directly).
+  const resolveRosterId = (sample: MatchPlayerStat, teamId: string): string => {
+    const team = t.teams.find(tm => tm.id === teamId);
+    const hit = team?.players.find(p => statMatchesPlayer(sample, p))
+      ?? t.teams.flatMap(tm => tm.players).find(p => statMatchesPlayer(sample, p));
+    return hit?.id ?? sample.playerId;
+  };
+
   return [...totals.values()].map(p => ({
     playerId: p.playerId,
+    rosterId: resolveRosterId(p.sample, p.teamId),
     name: p.name,
     teamName: teamNameById[p.teamId] ?? '',
     kills: p.kills,
@@ -603,7 +616,7 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
           )}
         </div>
         {mvp && (
-          <Link to={`/player/${tournament.id}/${mvp.playerId}`} className="arena-tp-champ__mvp">
+          <Link to={`/player/${tournament.id}/${mvp.rosterId}`} className="arena-tp-champ__mvp">
             <p className="arena-tp-champ__mvp-label">Tournament MVP</p>
             <p className="arena-tp-champ__mvp-name">{mvp.name}</p>
             <p className="arena-tp-champ__mvp-sub">
@@ -708,7 +721,7 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
             {leaders.map(l => (
               <Link
                 key={l.label}
-                to={`/player/${tournament.id}/${l.player.playerId}`}
+                to={`/player/${tournament.id}/${l.player.rosterId}`}
                 className="arena-tp-leaders__row"
               >
                 <span className="arena-tp-leaders__cat">{l.label}</span>

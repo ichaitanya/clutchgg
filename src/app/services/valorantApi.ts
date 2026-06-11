@@ -174,7 +174,12 @@ export async function getMatchDetails(matchId: string): Promise<MatchDetails> {
       damage?: number; damage_events?: { damage?: number }[];
       kills?: number; score?: number;
       assists?: number;
-      kill_events?: { kill_time_in_round?: number; killer_puuid?: string; victim_puuid?: string }[];
+      kill_events?: {
+        kill_time_in_round?: number; killer_puuid?: string; victim_puuid?: string;
+        // HenrikDev returns assistants as objects ({ assistant_puuid }); some
+        // payloads use bare puuid strings. Handle both below.
+        assistants?: ({ assistant_puuid?: string } | string)[];
+      }[];
       stayed?: boolean; was_afk?: boolean;
     };
     type RawRound = {
@@ -207,78 +212,87 @@ export async function getMatchDetails(matchId: string): Promise<MatchDetails> {
 
     rawRounds.forEach((r, roundIdx) => {
       const atkSide = attackingSide(roundIdx);
-      // Identify the round's first kill (earliest kill_time_in_round across all
-      // players' kill_events). The killer gets a first-kill, victim a first-death.
+      const ps = r.player_stats ?? [];
+
+      // Per-round side lookup for every player present. The per-round `stayed`
+      // and `assists` fields are unreliable in this payload, so deaths and KAST
+      // are derived from kill_events instead (every kill names killer + victim).
+      const sideOf = (puuid?: string): 'atk' | 'def' => {
+        const e = ps.find(x => x.player_puuid === puuid);
+        const onAttack = (e?.player_team === 'Red' ? 'Red' : e?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
+        return onAttack ? 'atk' : 'def';
+      };
+
+      // Collect this round's kill events to derive first-kill/first-death,
+      // per-player kills, deaths (victims), and assists.
       let earliest = Number.POSITIVE_INFINITY;
       let fkKiller: string | undefined;
       let fkVictim: string | undefined;
-      // Who got a kill or assist this round (for KAST). Survival tracked for the
-      // "stayed" part of KAST.
-      const gotKillOrAssist = new Set<string>();
-      const survived = new Set<string>();
+      const killsThisRound: Record<string, number> = {};
+      const diedThisRound = new Set<string>();   // victims → a death
+      const assistedThisRound = new Set<string>();
 
-      for (const ps of r.player_stats ?? []) {
-        const puuid = ps.player_puuid;
-        const a = bump(puuid);
-        if (!a || !puuid) continue;
-
-        // Damage: prefer the summed `damage` field, else sum damage_events.
-        const dmg = typeof ps.damage === 'number'
-          ? ps.damage
-          : (ps.damage_events ?? []).reduce((s, e) => s + (e.damage ?? 0), 0);
-        a.damage += dmg;
-
-        const roundKills = ps.kills ?? 0;
-        if (roundKills > 0) gotKillOrAssist.add(puuid);
-        if (ps.stayed) survived.add(puuid);
-
-        // Per-side accumulation. The player's side this round = attacker if their
-        // team is the attacking side, else defender.
-        const onAttack = (ps.player_team === 'Red' ? 'Red' : ps.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
-        const bucket = onAttack ? a.atk : a.def;
-        bucket.rounds += 1;
-        bucket.kills += roundKills;
-        bucket.assists += ps.assists ?? 0;
-        bucket.deaths += ps.stayed === false ? 1 : 0; // died this round if not stayed
-        bucket.score += ps.score ?? 0;
-        bucket.damage += dmg;
-
-        for (const ke of ps.kill_events ?? []) {
+      for (const p of ps) {
+        for (const ke of (p.kill_events ?? [])) {
+          const killer = ke.killer_puuid ?? p.player_puuid;
+          if (killer) killsThisRound[killer] = (killsThisRound[killer] ?? 0) + 1;
+          if (ke.victim_puuid) diedThisRound.add(ke.victim_puuid);
+          for (const as of (ke.assistants ?? [])) {
+            const aPuuid = typeof as === 'string' ? as : as?.assistant_puuid;
+            if (aPuuid) assistedThisRound.add(aPuuid);
+          }
           const t = ke.kill_time_in_round ?? Number.POSITIVE_INFINITY;
           if (t < earliest) {
             earliest = t;
-            fkKiller = ke.killer_puuid ?? puuid;
+            fkKiller = killer;
             fkVictim = ke.victim_puuid;
           }
         }
       }
 
-      // KAST credit: a kill, assist, or survival counts. (Trade detection needs
-      // cross-player death timing we don't reliably have, so survival is the
-      // conservative proxy — standard for community implementations.)
-      const credited = new Set<string>([...gotKillOrAssist, ...survived]);
-      for (const puuid of credited) {
-        const a = agg[puuid];
+      // Per-player round accumulation: rounds-played, kills, deaths, assists,
+      // score, damage — each attributed to the player's side this round.
+      for (const p of ps) {
+        const puuid = p.player_puuid;
+        const a = bump(puuid);
+        if (!a || !puuid) continue;
+
+        const dmg = typeof p.damage === 'number'
+          ? p.damage
+          : (p.damage_events ?? []).reduce((s, e) => s + (e.damage ?? 0), 0);
+        a.damage += dmg;
+
+        const bucket = sideOf(puuid) === 'atk' ? a.atk : a.def;
+        bucket.rounds += 1;
+        // Prefer the kill_events count; fall back to the round `kills` field.
+        bucket.kills += killsThisRound[puuid] ?? p.kills ?? 0;
+        bucket.deaths += diedThisRound.has(puuid) ? 1 : 0;
+        bucket.assists += assistedThisRound.has(puuid) ? 1 : 0;
+        bucket.score += p.score ?? 0;
+        bucket.damage += dmg;
+      }
+
+      // KAST credit: kill, assist, or survived (didn't die) this round.
+      for (const p of ps) {
+        const puuid = p.player_puuid;
+        if (!puuid) continue;
+        const credited = (killsThisRound[puuid] ?? 0) > 0 || assistedThisRound.has(puuid) || !diedThisRound.has(puuid);
+        if (!credited) continue;
+        const a = bump(puuid);
         if (!a) continue;
         a.kast += 1;
-        // Attribute the KAST round to the side the player was on this round.
-        const ps = (r.player_stats ?? []).find(x => x.player_puuid === puuid);
-        const onAttack = (ps?.player_team === 'Red' ? 'Red' : ps?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
-        (onAttack ? a.atk : a.def).kast += 1;
+        (sideOf(puuid) === 'atk' ? a.atk : a.def).kast += 1;
       }
+
       const fkA = bump(fkKiller);
       if (fkA) {
         fkA.fk += 1;
-        const ps = (r.player_stats ?? []).find(x => x.player_puuid === fkKiller);
-        const onAttack = (ps?.player_team === 'Red' ? 'Red' : ps?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
-        (onAttack ? fkA.atk : fkA.def).fk += 1;
+        (sideOf(fkKiller) === 'atk' ? fkA.atk : fkA.def).fk += 1;
       }
       const fdA = bump(fkVictim);
       if (fdA) {
         fdA.fd += 1;
-        const ps = (r.player_stats ?? []).find(x => x.player_puuid === fkVictim);
-        const onAttack = (ps?.player_team === 'Red' ? 'Red' : ps?.player_team === 'Blue' ? 'Blue' : undefined) === atkSide;
-        (onAttack ? fdA.atk : fdA.def).fd += 1;
+        (sideOf(fkVictim) === 'atk' ? fdA.atk : fdA.def).fd += 1;
       }
     });
 

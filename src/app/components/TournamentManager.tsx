@@ -10,9 +10,11 @@ import {
   MapPin,
   ChevronRight,
   Swords,
+  RefreshCw,
+  Wrench,
 } from 'lucide-react';
 import type { Tournament, TournamentEvent, TeamInTournament, Stage1Config, BracketGenerated } from './TournamentCreation';
-import { CreateTournamentScreen, tournamentHasBegun } from './TournamentCreation';
+import { CreateTournamentScreen, tournamentHasBegun, collectRefreshUnits, refreshAllMatchStats, recomputeAllWinners } from './TournamentCreation';
 import { BracketDisplay } from './BracketDisplay';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 
@@ -317,6 +319,47 @@ export function TournamentManager({
   const [editingEventDetails, setEditingEventDetails] = useState<string | null>(null);
   const [showStage2BracketModal, setShowStage2BracketModal] = useState(false);
   const [pendingQualifiedTeams, setPendingQualifiedTeams] = useState<TeamInTournament[]>([]);
+  // Bulk stats refresh: re-pulls every imported map across the tournament, 5s
+  // apart, to recompute scoreboards (e.g. after a stats-format change).
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number; label: string } | null>(null);
+  const [refreshResult, setRefreshResult] = useState<{ refreshed: number; failed: number } | null>(null);
+
+  const handleRefreshAllStats = async (t: Tournament) => {
+    const total = collectRefreshUnits(t).length;
+    if (total === 0) { setRefreshResult({ refreshed: 0, failed: 0 }); return; }
+    if (!window.confirm(`Refresh stats for ${total} imported map(s)? This re-pulls each from the Valorant API 5 seconds apart, so it takes about ${Math.ceil((total - 1) * 5 / 60)} min ${((total - 1) * 5) % 60}s. Keep this page open.`)) return;
+    setRefreshing(true);
+    setRefreshResult(null);
+    setRefreshProgress({ done: 0, total, label: 'Starting…' });
+    try {
+      const { tournament: updated, refreshed, failed } = await refreshAllMatchStats(t, {
+        delayMs: 5000,
+        onProgress: (done, total, label) => setRefreshProgress({ done, total, label }),
+      });
+      updateTournament(updated);
+      setRefreshResult({ refreshed, failed: failed.length });
+    } catch {
+      setRefreshResult({ refreshed: 0, failed: total });
+    } finally {
+      setRefreshing(false);
+      setRefreshProgress(null);
+    }
+  };
+
+  // Maintenance: re-derive every match's winner from its stored map scores.
+  // Recovers a tournament whose results/completed status were corrupted.
+  const handleRecomputeWinners = (t: Tournament) => {
+    const { tournament: fixed, changed } = recomputeAllWinners(t);
+    if (changed === 0) {
+      setRefreshResult({ refreshed: 0, failed: 0 });
+      window.alert('All match winners already match their map scores — nothing to fix.');
+      return;
+    }
+    if (!window.confirm(`Recompute results from map scores? This will update ${changed} match winner(s) to match their stored scores.`)) return;
+    updateTournament(fixed);
+    window.alert(`Recomputed ${changed} match result(s) from map scores.`);
+  };
 
   const selectedTournament = tournaments.find((t) => t.id === selectedTournamentId);
   const editingTournament = tournaments.find((t) => t.id === editingTournamentId);
@@ -383,6 +426,28 @@ export function TournamentManager({
             <h2 className="text-white font-bold text-lg">{t.name}</h2>
             <p className="text-gray-500 text-sm">{t.overview}</p>
           </div>
+          {/* Maintenance: recompute winners from stored map scores (recovery) */}
+          <button
+            onClick={() => handleRecomputeWinners(t)}
+            disabled={refreshing}
+            title="Recompute every match's winner from its stored map scores (recovers a corrupted result/completed status)"
+            className="px-3 py-2 rounded-lg bg-[#1e2130] hover:bg-[#2a2d3a] transition-colors text-gray-300 hover:text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <Wrench className="w-4 h-4" />
+            Recompute results
+          </button>
+          {/* Bulk refresh every imported map's scoreboard (5s apart) */}
+          {collectRefreshUnits(t).length > 0 && (
+            <button
+              onClick={() => handleRefreshAllStats(t)}
+              disabled={refreshing}
+              title="Re-pull every imported map's stats from the Valorant API (5s apart)"
+              className="px-3 py-2 rounded-lg bg-[#1e2130] hover:bg-[#2a2d3a] transition-colors text-gray-300 hover:text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-4 h-4${refreshing ? ' animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh stats'}
+            </button>
+          )}
           <button
             onClick={() => setEditingTournamentId(t.id)}
             className="p-2 hover:bg-[#1e2130] rounded-lg transition-colors text-gray-500 hover:text-white"
@@ -390,6 +455,32 @@ export function TournamentManager({
             <Edit3 className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Bulk-refresh progress / result banner */}
+        {refreshing && refreshProgress && (
+          <div className="bg-[#151821] border border-[#2a2d3a] rounded-xl px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-gray-300 text-sm font-medium">
+                Refreshing stats — {refreshProgress.done} / {refreshProgress.total}
+              </p>
+              <p className="text-gray-500 text-xs truncate max-w-[55%]">{refreshProgress.label}</p>
+            </div>
+            <div className="h-1.5 bg-[#0d0f16] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[#ff4655] transition-all duration-300"
+                style={{ width: `${refreshProgress.total ? (refreshProgress.done / refreshProgress.total) * 100 : 0}%` }}
+              />
+            </div>
+            <p className="text-gray-600 text-[11px] mt-2">Keep this page open — calls are spaced 5s apart to respect API limits.</p>
+          </div>
+        )}
+        {!refreshing && refreshResult && (
+          <div className={`rounded-xl px-4 py-3 border ${refreshResult.failed > 0 ? 'bg-yellow-900/20 border-yellow-700/40' : 'bg-green-900/10 border-green-700/40'}`}>
+            <p className={`text-sm font-medium ${refreshResult.failed > 0 ? 'text-yellow-300' : 'text-green-400'}`}>
+              Refreshed {refreshResult.refreshed} map(s){refreshResult.failed > 0 ? `, ${refreshResult.failed} failed (match ID may have aged out of the API).` : '.'}
+            </p>
+          </div>
+        )}
 
         {/* Bracket-lock notice for organizers once the tournament has begun */}
         {organizerMode && tournamentHasBegun(t) && (

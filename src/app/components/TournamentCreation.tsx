@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map as MapIcon, Search, Copy, Check, Youtube, Image as ImageIcon, Lock } from 'lucide-react';
+import { Plus, X, Upload, ChevronRight, ChevronLeft, Trash2, ExternalLink, Swords, Grid3x3, Loader, Map as MapIcon, Search, Copy, Check, Youtube, Image as ImageIcon, Lock, RefreshCw } from 'lucide-react';
 import * as ChallongeAPI from '../services/challongeApiDirect';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
 import { TwoStageTournamentModal } from './TwoStageTournamentModal';
@@ -310,6 +310,180 @@ function applyMatchToTournament(tournament: Tournament, updatedMatch: BracketMat
     generatedBracket: replaceIn(tournament.generatedBracket),
     stage1Bracket: replaceIn(tournament.stage1Bracket),
     stage2Bracket: replaceIn(tournament.stage2Bracket),
+    knockoutBracket: replaceIn(tournament.knockoutBracket),
+  };
+}
+
+// One scheduled refresh unit: a stored map (with a Valorant matchId) belonging
+// to a specific bracket match, paired with the two teams to resolve rosters.
+interface RefreshUnit {
+  match: BracketMatch;
+  mapIndex: number;
+  matchId: string;
+  team1: TeamInTournament | null;
+  team2: TeamInTournament | null;
+}
+
+// Enumerate every stored map across all of a tournament's brackets that carries
+// a Valorant matchId — these are the maps a bulk refresh can re-pull.
+export function collectRefreshUnits(tournament: Tournament): RefreshUnit[] {
+  const brackets = [
+    tournament.generatedBracket,
+    tournament.stage1Bracket,
+    tournament.stage2Bracket,
+    tournament.knockoutBracket,
+  ];
+  const teamById = (id: string) => tournament.teams.find(t => t.id === id) ?? null;
+  const units: RefreshUnit[] = [];
+  const seenMatchIds = new Set<string>(); // de-dupe across brackets sharing matches
+  for (const b of brackets) {
+    if (!b) continue;
+    for (const m of b.rounds.flat()) {
+      if (seenMatchIds.has(m.id)) continue;
+      seenMatchIds.add(m.id);
+      (m.maps ?? []).forEach((map, mapIndex) => {
+        if (map.matchId) {
+          units.push({ match: m, mapIndex, matchId: map.matchId, team1: teamById(m.team1Id), team2: teamById(m.team2Id) });
+        }
+      });
+    }
+  }
+  return units;
+}
+
+// Bulk-refresh every imported map in a tournament, re-pulling each from the
+// Valorant API by its stored matchId. A fixed delay is inserted BETWEEN calls
+// (not before the first, not after the last) to stay under rate limits.
+// `onProgress` reports after each map so the UI can show "3 / 12". Failures on
+// one map are recorded and skipped — the rest still refresh.
+export async function refreshAllMatchStats(
+  tournament: Tournament,
+  opts: {
+    delayMs?: number;
+    onProgress?: (done: number, total: number, label: string) => void;
+    signal?: { cancelled: boolean };
+  } = {},
+): Promise<{ tournament: Tournament; refreshed: number; failed: { matchId: string; error: string }[] }> {
+  const { delayMs = 5000, onProgress, signal } = opts;
+  const units = collectRefreshUnits(tournament);
+  const failed: { matchId: string; error: string }[] = [];
+  let refreshed = 0;
+  let current = tournament;
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  for (let i = 0; i < units.length; i++) {
+    if (signal?.cancelled) break;
+    const u = units[i];
+    const label = `${u.match.team1Name} vs ${u.match.team2Name} · map ${u.mapIndex + 1}`;
+    onProgress?.(i, units.length, label);
+
+    if (!u.team1 || !u.team2) {
+      failed.push({ matchId: u.matchId, error: `Teams missing for ${label}` });
+    } else {
+      try {
+        const team1Roster = u.team1.players.map(p => p.riotId || p.name);
+        const team2Roster = u.team2.players.map(p => p.riotId || p.name);
+        const displayNameByRiotId: Record<string, string> = {};
+        for (const p of [...u.team1.players, ...u.team2.players]) {
+          if (p.riotId) displayNameByRiotId[normalizeRiotId(p.riotId)] = p.name;
+        }
+        const result = await ValorantAPI.buildMatchResultFromId(
+          u.matchId, team1Roster, team2Roster, u.match.team1Id, u.match.team2Id, displayNameByRiotId,
+        );
+        // Refresh ONLY the per-player stats and round flow. Map scores, names,
+        // and the match winner were already verified at import — re-deriving
+        // them from the API could flip a side mapping and silently break a
+        // completed result (and thus the tournament's completed status). Keep
+        // the existing score; fall back to the API value only if none was set.
+        const prevMap = (u.match.maps ?? [])[u.mapIndex];
+        const freshMap: MatchMapResult = {
+          ...prevMap,
+          mapName: prevMap?.mapName || result.mapName,
+          team1Score: prevMap?.team1Score ?? result.team1Score,
+          team2Score: prevMap?.team2Score ?? result.team2Score,
+          playerStats: result.playerStats,
+          matchId: u.matchId,
+          roundFlow: result.roundFlow,
+        };
+        const updatedMaps = (u.match.maps ?? []).map((m, idx) => (idx === u.mapIndex ? freshMap : m));
+        const firstWithStats = updatedMaps.find(m => m.playerStats && m.playerStats.length > 0);
+        // Preserve match-level result fields (winner, score) untouched.
+        const updatedMatch: BracketMatch = {
+          ...u.match,
+          maps: updatedMaps,
+          playerStats: firstWithStats?.playerStats ?? u.match.playerStats,
+        };
+        // Mutate the in-flight `u.match` reference so a later map on the SAME match
+        // reads the freshly-updated maps array (avoids clobbering earlier slots).
+        u.match.maps = updatedMaps;
+        u.match.playerStats = updatedMatch.playerStats;
+        current = applyMatchToTournament(current, updatedMatch);
+        refreshed++;
+      } catch (e) {
+        failed.push({ matchId: u.matchId, error: e instanceof Error ? e.message : 'fetch failed' });
+      }
+    }
+
+    onProgress?.(i + 1, units.length, label);
+    // Gap before the next call only.
+    if (i < units.length - 1 && !signal?.cancelled) await sleep(delayMs);
+  }
+
+  return { tournament: current, refreshed, failed };
+}
+
+// Derive a match's winner purely from its stored map scores, using the match's
+// own BOn format. Returns undefined when the series isn't decided. Mirrors the
+// in-modal computeWinnerFromMaps so a recompute matches what Save would produce.
+function winnerFromMaps(match: BracketMatch): string | undefined {
+  const maps = match.maps ?? [];
+  if (maps.length === 0) return match.winner;
+  const maxMaps = match.format === 'bo1' ? 1 : match.format === 'bo5' ? 5 : 3;
+  let w1 = 0, w2 = 0;
+  for (const m of maps) {
+    if (m.team1Score > m.team2Score) w1++;
+    else if (m.team2Score > m.team1Score) w2++;
+  }
+  const needed = Math.ceil(maxMaps / 2);
+  if (w1 >= needed) return match.team1Id;
+  if (w2 >= needed) return match.team2Id;
+  if (maps.length >= maxMaps && w1 !== w2) return w1 > w2 ? match.team1Id : match.team2Id;
+  return undefined;
+}
+
+// Maintenance: recompute every match's winner from its stored map scores across
+// all brackets. Recovers tournaments whose results were corrupted (e.g. a side
+// mapping flipped during a stats pull). Only touches matches that actually have
+// maps with a decided score; leaves manually-set winners on map-less matches.
+// Returns the repaired tournament and how many winners changed.
+export function recomputeAllWinners(tournament: Tournament): { tournament: Tournament; changed: number } {
+  let changed = 0;
+  const fixBracket = (b?: BracketGenerated): BracketGenerated | undefined => {
+    if (!b) return b;
+    return {
+      ...b,
+      rounds: b.rounds.map(round =>
+        round.map(m => {
+          // Only matches with real map data are eligible; don't disturb byes or
+          // manually-decided slots that carry no maps.
+          if (!m.maps || m.maps.length === 0) return m;
+          const w = winnerFromMaps(m);
+          if (w === m.winner) return m;
+          changed++;
+          return { ...m, winner: w };
+        }),
+      ),
+    };
+  };
+  return {
+    tournament: {
+      ...tournament,
+      generatedBracket: fixBracket(tournament.generatedBracket),
+      stage1Bracket: fixBracket(tournament.stage1Bracket),
+      stage2Bracket: fixBracket(tournament.stage2Bracket),
+      knockoutBracket: fixBracket(tournament.knockoutBracket),
+    },
+    changed,
   };
 }
 
@@ -1944,6 +2118,54 @@ function MatchEditModal({
     }
   };
 
+  // Re-pull every already-populated map by its stored matchId, so maps imported
+  // before a stats change (e.g. attack/defense splits) are recomputed in place.
+  // Scores, map order, and any manually-entered maps without a matchId are kept.
+  const handleRefreshStats = async () => {
+    setFetchError(null);
+    if (!team1 || !team2) { setFetchError('Both teams must be assigned before refreshing.'); return; }
+    const existing = form.maps ?? [];
+    const toRefresh = existing
+      .map((m, i) => ({ m, i }))
+      .filter(e => e.m.matchId);
+    if (toRefresh.length === 0) { setFetchError('No imported maps to refresh.'); return; }
+
+    const team1Roster = team1.players.map(p => p.riotId || p.name);
+    const team2Roster = team2.players.map(p => p.riotId || p.name);
+    const displayNameByRiotId: Record<string, string> = {};
+    for (const p of [...team1.players, ...team2.players]) {
+      if (p.riotId) displayNameByRiotId[normalizeRiotId(p.riotId)] = p.name;
+    }
+
+    setFetching(true);
+    try {
+      const refreshedBySlot: Record<number, MatchMapResult> = {};
+      for (const { m, i } of toRefresh) {
+        const result = await ValorantAPI.buildMatchResultFromId(
+          m.matchId!, team1Roster, team2Roster, form.team1Id, form.team2Id, displayNameByRiotId
+        );
+        refreshedBySlot[i] = {
+          mapName: result.mapName,
+          team1Score: result.team1Score,
+          team2Score: result.team2Score,
+          playerStats: result.playerStats,
+          matchId: m.matchId,
+          roundFlow: result.roundFlow,
+        };
+      }
+      setForm(f => {
+        const cur = f.maps ?? [];
+        const merged = cur.map((m, i) => refreshedBySlot[i] ?? m);
+        const firstWithStats = merged.find(m => m.playerStats && m.playerStats.length > 0);
+        return { ...f, maps: merged, playerStats: firstWithStats?.playerStats ?? [] };
+      });
+    } catch (e) {
+      setFetchError(e instanceof Error ? e.message : 'Failed to refresh one of the maps.');
+    } finally {
+      setFetching(false);
+    }
+  };
+
   // Finder apply: fetch one custom game by ID and write it to a single map slot,
   // preserving other slots (placeholder for any gap before it).
   const handleApplyFinderGame = async (apiMatchId: string, mapSlotIndex: number) => {
@@ -2227,6 +2449,18 @@ function MatchEditModal({
                   {fetching && <Loader className="w-4 h-4 animate-spin" />}
                   {fetching ? 'Fetching…' : 'Fetch & Populate'}
                 </button>
+                {/* Re-pull already-imported maps in place (recomputes newer stats
+                    like attack/defense splits without re-entering match IDs). */}
+                {(form.maps ?? []).some(m => m.matchId) && (
+                  <button
+                    onClick={handleRefreshStats}
+                    disabled={fetching}
+                    className="w-full mt-2 px-4 py-2.5 rounded-lg border border-[#2a2d3a] text-gray-300 text-sm font-semibold hover:border-[#ff4655]/50 hover:text-white transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={`w-4 h-4${fetching ? ' animate-spin' : ''}`} />
+                    {fetching ? 'Refreshing…' : `Refresh stats (${(form.maps ?? []).filter(m => m.matchId).length} map${(form.maps ?? []).filter(m => m.matchId).length === 1 ? '' : 's'})`}
+                  </button>
+                )}
                 {fetchError && (
                   <p className="text-xs text-[#ff4655] bg-[#ff4655]/10 px-3 py-2 rounded border border-[#ff4655]/30 mt-2">{fetchError}</p>
                 )}
