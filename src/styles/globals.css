@@ -2454,7 +2454,8 @@ body {
   }
 
   /* Status badge floats to the card's top-right corner so it no longer eats a
-     full row in the meta block — keeps the tile compact. */
+     row in the meta block. It's pulled OUT of the badge-row flow and pinned to
+     the card (which is position: relative). */
   .arena-match-card__meta .arena-match-card__badge {
     position: absolute;
     top: 0.7rem;
@@ -2463,7 +2464,8 @@ body {
   }
 
   /* Bottom row: tournament name centered, expand chevron pinned to the far
-     right. The badge is absolutely positioned (top-right) so it's out of flow. */
+     right. The badge-row stays in normal flow (NOT a positioning context) so
+     the badge above escapes to the card corner; only the chevron remains here. */
   .arena-match-card__meta {
     flex-direction: row;
     align-items: center;
@@ -2476,7 +2478,7 @@ body {
     padding-top: 0.6rem;
     min-width: 0;
     gap: 0;
-    position: relative;
+    position: static;
   }
   .arena-match-card__tournament {
     font-size: 0.875rem;
@@ -2494,13 +2496,12 @@ body {
     color: var(--arena-accent);
     letter-spacing: 0.01em;
   }
-  /* Chevron sits at the extreme right of the bottom row. */
+  /* Chevron row sits at the extreme right of the bottom row (in flow). The badge
+     inside it is absolute (escapes to the card corner), leaving just the chevron. */
   .arena-match-card__meta .arena-match-card__badge-row {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-top: 0.3rem; /* offset the row's padding-top so it stays centered */
+    position: static;
+    flex-shrink: 0;
+    margin-left: auto;
   }
 
   /* Reserve room on the eyebrow row so the date never runs under the badge. */
