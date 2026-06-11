@@ -426,27 +426,32 @@ export function TournamentManager({
             <h2 className="text-white font-bold text-lg">{t.name}</h2>
             <p className="text-gray-500 text-sm">{t.overview}</p>
           </div>
-          {/* Maintenance: recompute winners from stored map scores (recovery) */}
-          <button
-            onClick={() => handleRecomputeWinners(t)}
-            disabled={refreshing}
-            title="Recompute every match's winner from its stored map scores (recovers a corrupted result/completed status)"
-            className="px-3 py-2 rounded-lg bg-[#1e2130] hover:bg-[#2a2d3a] transition-colors text-gray-300 hover:text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Wrench className="w-4 h-4" />
-            Recompute results
-          </button>
-          {/* Bulk refresh every imported map's scoreboard (5s apart) */}
-          {collectRefreshUnits(t).length > 0 && (
-            <button
-              onClick={() => handleRefreshAllStats(t)}
-              disabled={refreshing}
-              title="Re-pull every imported map's stats from the Valorant API (5s apart)"
-              className="px-3 py-2 rounded-lg bg-[#1e2130] hover:bg-[#2a2d3a] transition-colors text-gray-300 hover:text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={`w-4 h-4${refreshing ? ' animate-spin' : ''}`} />
-              {refreshing ? 'Refreshing…' : 'Refresh stats'}
-            </button>
+          {/* Maintenance actions (recompute / bulk refresh) — superadmin only */}
+          {isSuperAdmin && (
+            <>
+              {/* Recompute winners from stored map scores (recovery) */}
+              <button
+                onClick={() => handleRecomputeWinners(t)}
+                disabled={refreshing}
+                title="Recompute every match's winner from its stored map scores (recovers a corrupted result/completed status)"
+                className="px-3 py-2 rounded-lg bg-[#1e2130] hover:bg-[#2a2d3a] transition-colors text-gray-300 hover:text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <Wrench className="w-4 h-4" />
+                Recompute results
+              </button>
+              {/* Bulk refresh every imported map's scoreboard (5s apart) */}
+              {collectRefreshUnits(t).length > 0 && (
+                <button
+                  onClick={() => handleRefreshAllStats(t)}
+                  disabled={refreshing}
+                  title="Re-pull every imported map's stats from the Valorant API (5s apart)"
+                  className="px-3 py-2 rounded-lg bg-[#1e2130] hover:bg-[#2a2d3a] transition-colors text-gray-300 hover:text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-4 h-4${refreshing ? ' animate-spin' : ''}`} />
+                  {refreshing ? 'Refreshing…' : 'Refresh stats'}
+                </button>
+              )}
+            </>
           )}
           <button
             onClick={() => setEditingTournamentId(t.id)}

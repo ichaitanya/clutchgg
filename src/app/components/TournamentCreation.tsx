@@ -15,6 +15,7 @@ import { upsertTournament, uploadImage, getTournaments } from '../services/db';
 import { normalizePhotoUrl } from '../utils/excelImportUtils';
 import { normalizeRiotId } from '../utils/riotId';
 import { computeRRStandings } from './BracketDisplay';
+import { ImageCropModal } from './ImageCropModal';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -3753,25 +3754,44 @@ function TournamentForm({
   );
   const [coverImage, setCoverImage] = useState(initialTournament?.coverImage || '');
   const [coverUploading, setCoverUploading] = useState(false);
+  // When a file is picked, hold its local object URL here to drive the crop
+  // modal; null means the modal is closed.
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
 
-  // Upload the cover to Storage and keep only the public URL (covers were the
-  // biggest source of blob bloat as inline base64).
-  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Step 1: a file was picked → open the crop modal on its local preview.
+  // We don't upload until the user confirms a crop.
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const localPreview = URL.createObjectURL(file);
+    setCropSrc(URL.createObjectURL(file));
+    e.target.value = ''; // allow re-picking the same file later
+  };
+
+  // Step 2: the user confirmed a crop → upload the cropped banner blob and keep
+  // only the public URL (covers were the biggest source of base64 bloat).
+  const handleCropConfirm = async (blob: Blob) => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+    const localPreview = URL.createObjectURL(blob);
     setCoverImage(localPreview);
     setCoverUploading(true);
     try {
+      const file = new File([blob], 'cover.jpg', { type: 'image/jpeg' });
       const url = await uploadImage(file, 'tournament-covers');
       setCoverImage(url);
     } catch (err) {
       console.error('Cover upload failed', err);
-      alert('Cover image upload failed. Please try again.');
+      const msg = err instanceof Error ? err.message : 'Cover image upload failed. Please try again.';
+      alert(msg);
       setCoverImage(initialTournament?.coverImage || '');
     } finally {
       setCoverUploading(false);
     }
+  };
+
+  const handleCropCancel = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
   };
 
   const handlePrizeCountChange = (count: number) => {
@@ -3783,7 +3803,9 @@ function TournamentForm({
   };
 
   const handlePrizeChange = (index: number, value: string) => {
-    setPrizePlaces(prev => prev.map((p, i) => (i === index ? value : p)));
+    // Prize amounts are capped at 8 characters.
+    const v = value.slice(0, 8);
+    setPrizePlaces(prev => prev.map((p, i) => (i === index ? v : p)));
   };
 
   const ordinal = (n: number) => {
@@ -3830,9 +3852,11 @@ function TournamentForm({
             className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors resize-none"
             placeholder="Describe the tournament..."
             rows={4}
+            maxLength={1000}
             value={overview}
-            onChange={e => setOverview(e.target.value)}
+            onChange={e => setOverview(e.target.value.slice(0, 1000))}
           />
+          <p className="text-[11px] text-gray-600 mt-1 text-right">{overview.length}/1000</p>
         </div>
 
         {/* Cover Image */}
@@ -3840,44 +3864,53 @@ function TournamentForm({
           <label className="block text-xs text-gray-400 mb-1.5 font-medium">
             Cover Image
           </label>
-          <p className="text-xs text-gray-600 mb-3">Display image on hero section and tournament page. Recommended: 1200x600px</p>
-          <div className="flex gap-3">
-            {coverImage && (
-              <div className="w-32 h-20 rounded border border-[#2a2d3a] overflow-hidden flex-shrink-0">
-                <img src={coverImage} alt="Cover" className="w-full h-full object-cover" />
-              </div>
-            )}
-            <label className="flex-1 flex items-center justify-center border-2 border-dashed border-[#2a2d3a] rounded-lg p-4 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                disabled={coverUploading}
-                onChange={handleCoverUpload}
-              />
-              <div className="text-center">
-                {coverUploading ? (
-                  <>
-                    <Loader className="w-5 h-5 text-[#ff4655] mx-auto mb-2 animate-spin" />
-                    <span className="text-xs text-gray-400">Uploading…</span>
-                  </>
-                ) : (
-                  <>
-                    <ImageIcon className="w-5 h-5 text-gray-400 mx-auto mb-2" />
-                    <span className="text-xs text-gray-400">Click to upload image</span>
-                  </>
+          <p className="text-xs text-gray-600 mb-3">Banner shown on the hero section and tournament page. Cropped to a 2:1 ratio (e.g. 1200×600).</p>
+
+          {coverImage ? (
+            // Full-width banner preview at the real 2:1 aspect, with re-crop /
+            // replace / remove controls.
+            <div className="space-y-2">
+              <div className="relative w-full aspect-[2/1] rounded-lg border border-[#2a2d3a] overflow-hidden bg-[#0d0f16]">
+                <img src={coverImage} alt="Cover banner" className="w-full h-full object-cover" />
+                {coverUploading && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                    <Loader className="w-5 h-5 text-[#ff4655] animate-spin" />
+                  </div>
                 )}
               </div>
+              <div className="flex gap-2">
+                {/* Re-crop the current banner */}
+                <button
+                  type="button"
+                  onClick={() => setCropSrc(coverImage)}
+                  disabled={coverUploading}
+                  className="px-3 py-1.5 bg-[#1e2130] hover:bg-[#2a2d3a] text-gray-300 hover:text-white text-xs rounded transition-colors disabled:opacity-50"
+                >
+                  Re-crop
+                </button>
+                <label className="px-3 py-1.5 bg-[#1e2130] hover:bg-[#2a2d3a] text-gray-300 hover:text-white text-xs rounded transition-colors cursor-pointer">
+                  Replace
+                  <input type="file" accept="image/*" className="hidden" disabled={coverUploading} onChange={handleCoverUpload} />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setCoverImage('')}
+                  disabled={coverUploading}
+                  className="px-3 py-1.5 bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] text-xs rounded transition-colors disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ) : (
+            <label className="flex items-center justify-center border-2 border-dashed border-[#2a2d3a] rounded-lg p-6 cursor-pointer hover:border-[#ff4655]/50 transition-colors">
+              <input type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
+              <div className="text-center">
+                <ImageIcon className="w-5 h-5 text-gray-400 mx-auto mb-2" />
+                <span className="text-xs text-gray-400">Click to upload image</span>
+              </div>
             </label>
-            {coverImage && (
-              <button
-                onClick={() => setCoverImage('')}
-                className="px-3 py-1 bg-[#ff4655]/20 hover:bg-[#ff4655]/30 text-[#ff4655] text-xs rounded h-fit transition-colors"
-              >
-                Remove
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
         {/* Event Details Section */}
@@ -3923,9 +3956,16 @@ function TournamentForm({
             </label>
             <input
               type="date"
-              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+              // Selectable range: today through the same date 3 years out.
+              min={new Date().toISOString().slice(0, 10)}
+              max={(() => { const d = new Date(); d.setFullYear(d.getFullYear() + 3); return d.toISOString().slice(0, 10); })()}
+              className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors cursor-pointer"
               value={startDate}
               onChange={e => setStartDate(e.target.value)}
+              // Open the native calendar on tapping anywhere in the field, not
+              // just the picker icon (showPicker is a no-op where unsupported).
+              onClick={e => { try { (e.currentTarget as HTMLInputElement).showPicker?.(); } catch { /* not supported */ } }}
+              onFocus={e => { try { (e.currentTarget as HTMLInputElement).showPicker?.(); } catch { /* not supported */ } }}
             />
           </div>
 
@@ -3977,35 +4017,42 @@ function TournamentForm({
                 </span>
                 <input
                   type="text"
+                  maxLength={8}
                   className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
                   placeholder="e.g. 50,000"
                   value={prizeTotal}
-                  onChange={e => setPrizeTotal(e.target.value)}
+                  onChange={e => setPrizeTotal(e.target.value.slice(0, 8))}
                 />
               </div>
             </div>
 
-            {/* Number of winning teams */}
-            <div className="mb-4">
-              <label className="block text-xs text-gray-400 mb-1.5 font-medium">
-                Number of Teams Receiving a Prize
-              </label>
-              <input
-                type="number"
-                min="0"
-                max="64"
-                className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
-                placeholder="e.g. 3"
-                value={prizePlaces.length === 0 ? '' : prizePlaces.length.toString()}
-                onChange={e => {
-                  const n = parseInt(e.target.value, 10);
-                  handlePrizeCountChange(Number.isNaN(n) || n < 0 ? 0 : Math.min(n, 64));
-                }}
-              />
-              <p className="text-[11px] text-gray-600 mt-1">
-                Pick how many placements win, then enter each prize below. You can change these any time.
-              </p>
-            </div>
+            {/* Number of winning teams — can't exceed the team cap (e.g. a
+                10-team event can award at most 10 placements). */}
+            {(() => {
+              const teamCap = Math.max(1, Math.min(64, parseInt(maxTeams, 10) || 64));
+              return (
+                <div className="mb-4">
+                  <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                    Number of Teams Receiving a Prize
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={teamCap}
+                    className="w-full bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
+                    placeholder="e.g. 3"
+                    value={prizePlaces.length === 0 ? '' : prizePlaces.length.toString()}
+                    onChange={e => {
+                      const n = parseInt(e.target.value, 10);
+                      handlePrizeCountChange(Number.isNaN(n) || n < 0 ? 0 : Math.min(n, teamCap));
+                    }}
+                  />
+                  <p className="text-[11px] text-gray-600 mt-1">
+                    Pick how many placements win (max {teamCap}, the team limit), then enter each prize below. You can change these any time.
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Prize per placement */}
             {prizePlaces.length > 0 && (
@@ -4020,6 +4067,7 @@ function TournamentForm({
                     </span>
                     <input
                       type="text"
+                      maxLength={8}
                       className="flex-1 bg-[#0d0f16] border border-[#2a2d3a] rounded-lg px-3 py-2.5 text-white text-sm focus:border-[#ff4655] focus:outline-none transition-colors"
                       placeholder={`e.g. ${(prizePlaces.length - i) * 10},000`}
                       value={prize}
@@ -4131,6 +4179,17 @@ function TournamentForm({
           {isEditing ? 'Save' : 'Continue'} <ChevronRight className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Cover-image crop modal (banner is 2:1) */}
+      {cropSrc && (
+        <ImageCropModal
+          src={cropSrc}
+          aspect={2}
+          outputWidth={1200}
+          onCancel={handleCropCancel}
+          onCrop={handleCropConfirm}
+        />
+      )}
     </div>
   );
 }

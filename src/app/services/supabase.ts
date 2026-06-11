@@ -59,6 +59,21 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   },
 });
 
+// Build a one-off client whose every request carries an explicit bearer token.
+// Storage uploads go through a different code path than PostgREST queries, and
+// the shared auth client can fire a storage request WITHOUT the Authorization
+// header if its in-memory auth state was reset (our lock-avoidance reads do
+// this). Passing the JWT here guarantees `authenticated`-role RLS is satisfied.
+export function bearerClient(accessToken: string) {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+      fetch: fetchWithTimeout,
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
 // The localStorage key supabase-js uses for the session, in the DEFAULT format
 // `sb-<project-ref>-auth-token`. We don't override storageKey (that would log
 // out every existing session on deploy), we just need to know where to read.

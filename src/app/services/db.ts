@@ -1,4 +1,4 @@
-import { supabase, dbClient } from './supabase';
+import { supabase, dbClient, getSession, bearerClient } from './supabase';
 import type { Tournament } from '../components/TournamentCreation';
 import type { AdminData, NewsItem, TopPlayer, StandingTeam } from '../components/AdminPanel';
 
@@ -569,14 +569,25 @@ export async function uploadHeroVideo(file: File): Promise<string> {
 export type ImageBucket = 'team-logos' | 'player-photos' | 'news-images' | 'tournament-covers';
 
 export async function uploadImage(file: File, bucket: ImageBucket): Promise<string> {
+  // Storage RLS requires an authenticated JWT (is_staff()). The shared auth
+  // client can fire a storage request WITHOUT the Authorization header if its
+  // in-memory auth state was reset by our lock-avoidance reads — the request
+  // then hits the bucket as `anon` and fails with "new row violates row-level
+  // security policy". So we resolve the live session and upload through a client
+  // that carries the access token explicitly on every request.
+  const session = await getSession();
+  if (!session?.access_token) {
+    throw new Error('Your session has expired. Please log in again to upload images.');
+  }
+  const client = bearerClient(session.access_token);
   const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
   const rand = Math.random().toString(36).slice(2, 8);
   const path = `${Date.now()}-${rand}.${ext}`;
-  const { error } = await supabase.storage
+  const { error } = await client.storage
     .from(bucket)
     .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '31536000' });
   if (error) throw error;
-  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  const { data } = client.storage.from(bucket).getPublicUrl(path);
   return data.publicUrl;
 }
 

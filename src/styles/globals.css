@@ -6304,6 +6304,41 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   min-height: 130px;
 }
 
+/* Error state for invalid fields + per-field message and char-count hint */
+.arena-contact__input--error,
+.arena-contact__input--error:focus {
+  border-color: var(--arena-accent);
+}
+.arena-contact__field-error {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--arena-accent);
+  margin: 0.3rem 0 0;
+}
+.arena-contact__hint {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  color: var(--arena-text-dim);
+  margin: 0.3rem 0 0;
+  text-align: right;
+}
+
+/* Phone row: country-code select + number input side by side */
+.arena-contact__phone {
+  display: flex;
+  gap: 0.5rem;
+}
+.arena-contact__phone-code {
+  width: auto;
+  flex-shrink: 0;
+  cursor: pointer;
+  padding-right: 0.6rem;
+}
+.arena-contact__phone-num {
+  flex: 1;
+  min-width: 0;
+}
+
 .arena-contact__error {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 0.8125rem;
@@ -6366,6 +6401,77 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   font-size: 0.8125rem;
   color: var(--arena-text-dim);
   margin: 0;
+}
+
+/* Centered success modal shown after a tournament request is submitted */
+.arena-success-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(0, 0, 0, 0.72);
+  animation: arena-fade-in 0.2s ease;
+}
+.arena-success-modal {
+  width: 100%;
+  max-width: 420px;
+  background: #161616;
+  border: 1px solid var(--arena-accent);
+  border-radius: 0.75rem;
+  padding: 2rem 1.75rem;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  animation: arena-success-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.arena-success-modal__icon {
+  font-size: 2.6rem;
+  line-height: 1;
+  display: block;
+  margin-bottom: 0.85rem;
+}
+.arena-success-modal__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 0.5rem;
+}
+.arena-success-modal__body {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  color: var(--arena-text-dim);
+  margin: 0 0 1.1rem;
+  line-height: 1.5;
+}
+.arena-success-modal__redirect {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--arena-accent);
+  margin: 0 0 1.25rem;
+}
+.arena-success-modal__btn {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--arena-accent);
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.65rem 1.5rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.arena-success-modal__btn:hover { background: #ff3344; }
+@keyframes arena-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes arena-success-pop {
+  from { opacity: 0; transform: scale(0.94) translateY(0.5rem); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 @media (max-width: 600px) {
