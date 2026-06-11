@@ -215,6 +215,9 @@ export interface BracketGenerated {
   rounds: BracketMatch[][];
   bracketType?: 'single' | 'double' | 'roundrobin';
   rrTeams?: RRTeamEntry[]; // for round robin: ordered list of participating teams
+  // Points awarded per match win in round-robin standings. Defaults to
+  // DEFAULT_POINTS_PER_WIN (3) when unset. Configurable when generating the bracket.
+  pointsPerWin?: number;
   customizationHistory: Array<{
     timestamp: string;
     changes: string;
@@ -230,6 +233,8 @@ export interface Stage1Config {
   // Only for groupstage format:
   groups?: Group[];
   teamsQualifyingPerGroup?: number;
+  // Points per match win for round-robin / group-stage standings (default 3).
+  pointsPerWin?: number;
 }
 
 export interface Tournament {
@@ -2993,6 +2998,11 @@ function CreateTournamentScreen({
         customizationHistory: [],
       };
     }
+    // Carry the configured points-per-win onto round-robin / group-stage brackets
+    // so standings rank by league points (defaults to 3 when unset).
+    if (stage1Bracket && stage1Bracket.bracketType === 'roundrobin' && config.pointsPerWin) {
+      stage1Bracket.pointsPerWin = config.pointsPerWin;
+    }
     setTournament(t => ({
       ...t,
       stage1Config: config,
@@ -3021,7 +3031,7 @@ function CreateTournamentScreen({
     const teamById = (id: string) => tournament.teams.find(t => t.id === id);
 
     if (b.bracketType === 'roundrobin') {
-      const standings = computeRRStandings(b.rounds, b.rrTeams ?? []);
+      const standings = computeRRStandings(b.rounds, b.rrTeams ?? [], b.pointsPerWin);
       return standings.slice(0, n)
         .map(r => teamById(r.teamId))
         .filter((t): t is TeamInTournament => !!t);

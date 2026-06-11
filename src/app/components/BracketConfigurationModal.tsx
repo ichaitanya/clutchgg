@@ -7,6 +7,7 @@ import {
   nextPowerOfTwo,
 } from '../utils/bracketUtils';
 import { importChallongeBracket } from '../services/challongeImporter';
+import { DEFAULT_POINTS_PER_WIN } from './BracketDisplay';
 import type { BracketGenerated, TeamInTournament } from './TournamentCreation';
 
 interface BracketConfigurationModalProps {
@@ -26,6 +27,8 @@ export function BracketConfigurationModal({
 }: BracketConfigurationModalProps) {
   const [step, setStep] = useState<'mode' | 'seed'>('mode');
   const [bracketType, setBracketType] = useState<'single' | 'double' | 'roundrobin'>('single');
+  // Points awarded per match win in round-robin standings (default 3).
+  const [pointsPerWin, setPointsPerWin] = useState(DEFAULT_POINTS_PER_WIN);
   const [useChallonge, setUseChallonge] = useState(false);
   const [seededTeams, setSeededTeams] = useState<TeamInTournament[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -70,6 +73,7 @@ export function BracketConfigurationModal({
         break;
       case 'roundrobin':
         bracket = generateSimplifiedRoundRobinBracket(teams);
+        bracket.pointsPerWin = pointsPerWin;
         break;
     }
 
@@ -153,6 +157,24 @@ export function BracketConfigurationModal({
                   )}
                 </div>
               </div>
+
+              {/* Round-robin scoring: points awarded per match win. */}
+              {bracketType === 'roundrobin' && (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-[#2a2d3a] bg-[#0d0f16]">
+                  <div>
+                    <p className="text-white text-sm font-semibold">Points per win</p>
+                    <p className="text-gray-500 text-xs mt-0.5">Standings rank by total points (wins × this value).</p>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={pointsPerWin}
+                    onChange={e => setPointsPerWin(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                    className="w-16 px-2 py-1.5 rounded-md bg-[#1e2130] border border-[#2a2d3a] text-white text-sm text-center focus:border-[#ff4655] focus:outline-none"
+                  />
+                </div>
+              )}
 
               {/* Generator Selection */}
               <div>

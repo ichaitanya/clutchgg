@@ -87,7 +87,7 @@ export function UpcomingMatch({
       </div>
 
       <div className="arena-upcoming__meta">
-        <span className="arena-upcoming__tournament">{tournament}</span>
+        <span className="arena-upcoming__tournament" title={tournament}>{tournament}</span>
         <span className="arena-upcoming__dot" />
         <span className="arena-upcoming__format">{formatLabel}</span>
       </div>

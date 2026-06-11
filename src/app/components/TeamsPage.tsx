@@ -9,7 +9,9 @@ import { getTournaments, loadWithRetry } from '../services/db';
 import { statMatchesPlayer } from './StatsPage';
 import { computeRRStandings } from './BracketDisplay';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
+import { effectiveStatus, deriveScore, isTeamSlotName } from '../utils/tournamentDerive';
 import { orderRosterIglFirst } from '../utils/roster';
+import { mapImageUrl } from '../utils/valorantAssets';
 
 type ViewMode = 'teams' | 'players';
 
@@ -22,14 +24,33 @@ interface PlayerStatLine {
   hsPercent: number;
 }
 
+// One match in a team's track record, oriented to the selected team (its own
+// score first), with the opponent resolved for display.
+interface TeamMatch {
+  id: string;
+  status: 'upcoming' | 'live' | 'completed';
+  date?: string;
+  time?: string;
+  oppName: string;
+  oppLogo?: string;
+  teamScore: number;
+  oppScore: number;
+  won: boolean;
+  // Map results oriented to the team (teamScore first) for the expandable view.
+  maps: { mapName: string; teamScore: number; oppScore: number }[];
+}
+
 // One tournament the selected team took part in: how many matches they played,
-// the live status, and (only when completed) their final standing.
+// the live status, (only when completed) their final standing, and the team's
+// upcoming + completed matches for the expandable track-record row.
 interface TournamentRecord {
   tournamentId: string;
   tournamentName: string;
   matchesPlayed: number;
   status: 'planning' | 'registration' | 'in-progress' | 'completed';
   placement: string; // final standing, or '' when not yet completed/determinable
+  upcoming: TeamMatch[];   // soonest first
+  completed: TeamMatch[];  // most recent first
 }
 
 // Human label for a tournament status.
@@ -70,7 +91,7 @@ export function computePlacement(t: Tournament, teamId: string): string | null {
   // For round-robin / group-stage tournaments, derive rank from the standings.
   const rrBracket = [t.generatedBracket, t.stage1Bracket].find(b => b?.bracketType === 'roundrobin');
   if (rrBracket && !t.stage2Bracket) {
-    const rows = computeRRStandings(rrBracket.rounds, rrBracket.rrTeams ?? []);
+    const rows = computeRRStandings(rrBracket.rounds, rrBracket.rrTeams ?? [], rrBracket.pointsPerWin);
     const idx = rows.findIndex(r => r.teamId === teamId);
     if (idx >= 0) return ordinal(idx + 1);
   }
@@ -81,7 +102,7 @@ export function computePlacement(t: Tournament, teamId: string): string | null {
     for (const g of t.stage1Config.groups ?? []) {
       const matches = t.stage1Bracket.rounds.flat().filter(m => m.id.includes(`gs_${g.id}_`));
       const rrTeams = g.teams.map(tm => ({ id: tm.id, name: tm.name }));
-      const rows = computeRRStandings([matches], rrTeams);
+      const rows = computeRRStandings([matches], rrTeams, t.stage1Bracket.pointsPerWin);
       const idx = rows.findIndex(r => r.teamId === teamId);
       if (idx >= 0) best = best === null ? idx + 1 : Math.min(best, idx + 1);
     }
@@ -110,6 +131,172 @@ export function computePlacement(t: Tournament, teamId: string): string | null {
   }
 
   return null;
+}
+
+// One match line in the track-record expansion, oriented to the team. Mirrors
+// the homepage Recent Results row: score + opponent, with an optional
+// expandable map-scores panel (completed matches only).
+function TeamMatchRow({ m }: { m: TeamMatch }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const expandable = m.status === 'completed' && m.maps.length > 0;
+  const when = m.date
+    ? new Date(`${m.date}T${m.time || '00:00'}`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : '';
+  return (
+    <div className="arena-tp-matchwrap">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => navigate(`/tournament-match/${m.id}`)}
+        onKeyDown={e => { if (e.key === 'Enter') navigate(`/tournament-match/${m.id}`); }}
+        className={`arena-team-rec-match${m.status === 'completed' ? (m.won ? ' arena-team-rec-match--w' : ' arena-team-rec-match--l') : ''}`}
+      >
+        <span className="arena-team-rec-match__opp">
+          <span className="arena-team-rec-match__vs">vs</span>
+          <span className="arena-recent__logo">
+            {m.oppLogo ? <img src={m.oppLogo} alt="" /> : <span>{m.oppName.trim().slice(0, 2).toUpperCase()}</span>}
+          </span>
+          <span className="arena-team-rec-match__name" title={m.oppName}>{m.oppName}</span>
+        </span>
+        {m.status === 'completed' ? (
+          <span className={`arena-team-rec-match__result arena-team-rec-match__result--${m.won ? 'w' : 'l'}`}>
+            <span className="arena-team-rec-match__result-tag">{m.won ? 'W' : 'L'}</span>
+            <span className="arena-team-rec-match__result-score">{m.teamScore}–{m.oppScore}</span>
+          </span>
+        ) : (
+          <span className="arena-team-rec-match__when">{when || 'TBD'}</span>
+        )}
+        {expandable && (
+          <span
+            role="button"
+            tabIndex={0}
+            className={`arena-tp-matchrow__expand${open ? ' arena-tp-matchrow__expand--open' : ''}`}
+            title={open ? 'Hide map scores' : 'Show map scores'}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }
+            }}
+          >
+            <ChevronDown className="w-4 h-4" />
+          </span>
+        )}
+      </div>
+      {expandable && open && (
+        <div className="arena-tp-mapscores">
+          {m.maps.map((mp, mi) => {
+            const w1 = mp.teamScore > mp.oppScore;
+            const w2 = mp.oppScore > mp.teamScore;
+            const splash = mapImageUrl(mp.mapName);
+            return (
+              <div
+                key={mi}
+                className="arena-tp-mapscores__row"
+                style={splash ? {
+                  backgroundImage: `linear-gradient(90deg, rgba(10,10,10,0.94) 0%, rgba(10,10,10,0.72) 45%, rgba(10,10,10,0.9) 100%), url(${splash})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center 35%',
+                } : undefined}
+              >
+                <span className="arena-tp-mapscores__map">{mp.mapName || `Map ${mi + 1}`}</span>
+                <span className="arena-tp-mapscores__score">
+                  <span className={w1 ? 'arena-tp-mapscores__win' : ''}>{mp.teamScore}</span>
+                  <span className="arena-tp-mapscores__sep">–</span>
+                  <span className={w2 ? 'arena-tp-mapscores__win' : ''}>{mp.oppScore}</span>
+                </span>
+                <span className="arena-tp-mapscores__taker">{w1 ? 'Win' : w2 ? 'Loss' : 'Tied'}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One tournament in the team's track record: a header row that expands to show
+// the team's upcoming (top 3 → all) and completed (last 5 → all) matches.
+function TeamRecordRow({ rec }: { rec: TournamentRecord }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [showAllCompleted, setShowAllCompleted] = useState(false);
+  const hasMatches = rec.upcoming.length > 0 || rec.completed.length > 0;
+  const shownUpcoming = showAllUpcoming ? rec.upcoming : rec.upcoming.slice(0, 3);
+  const shownCompleted = showAllCompleted ? rec.completed : rec.completed.slice(0, 5);
+  // The team's series record in this tournament (for the header badge).
+  const wins = rec.completed.filter(m => m.won).length;
+  const losses = rec.completed.length - wins;
+  return (
+    <div className={`arena-team-rec${expanded ? ' arena-team-rec--open' : ''}`}>
+      <div className="arena-team-rec__head">
+        <span className="arena-roster-record__trophy">
+          <Trophy className="w-4 h-4" />
+        </span>
+        <div className="arena-roster-record__name-wrap">
+          <Link to={`/tournament/${rec.tournamentId}`} className="arena-roster-record__name arena-team-rec__name-link">
+            {rec.tournamentName}
+          </Link>
+          <p className="arena-roster-record__meta">
+            <span className={`arena-team-rec__status arena-team-rec__status--${rec.status}`}>{STATUS_LABEL[rec.status]}</span>
+            {rec.completed.length > 0 && (
+              <span className="arena-team-rec__record">
+                <span className="arena-team-rec__record-w">{wins}W</span>
+                <span className="arena-team-rec__record-sep">·</span>
+                <span className="arena-team-rec__record-l">{losses}L</span>
+              </span>
+            )}
+          </p>
+        </div>
+        <div className="arena-roster-record__placement">
+          <p className="arena-roster-analytics__stat-label">Final Standing</p>
+          <p className="arena-roster-record__placement-value">{rec.placement || '—'}</p>
+        </div>
+        {hasMatches ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(e => !e)}
+            className={`arena-team-rec__toggle${expanded ? ' arena-team-rec__toggle--open' : ''}`}
+            title={expanded ? 'Hide matches' : 'Show matches'}
+          >
+            <ChevronDown className="w-5 h-5" />
+          </button>
+        ) : (
+          <span className="arena-team-rec__toggle arena-team-rec__toggle--empty" />
+        )}
+      </div>
+
+      {expanded && hasMatches && (
+        <div className="arena-team-rec__body">
+          {rec.upcoming.length > 0 && (
+            <div className="arena-team-rec__group">
+              <p className="arena-team-rec__group-title">Upcoming</p>
+              <div className="arena-team-rec__matches">
+                {shownUpcoming.map(m => <TeamMatchRow key={m.id} m={m} />)}
+              </div>
+              {rec.upcoming.length > 3 && (
+                <button type="button" className="arena-team-rec__more" onClick={() => setShowAllUpcoming(s => !s)}>
+                  {showAllUpcoming ? 'Show less' : `View all ${rec.upcoming.length} upcoming`}
+                </button>
+              )}
+            </div>
+          )}
+          {rec.completed.length > 0 && (
+            <div className="arena-team-rec__group">
+              <p className="arena-team-rec__group-title">Completed</p>
+              <div className="arena-team-rec__matches">
+                {shownCompleted.map(m => <TeamMatchRow key={m.id} m={m} />)}
+              </div>
+              {rec.completed.length > 5 && (
+                <button type="button" className="arena-team-rec__more" onClick={() => setShowAllCompleted(s => !s)}>
+                  {showAllCompleted ? 'Show less' : `View all ${rec.completed.length} completed`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TeamsPage() {
@@ -355,15 +542,50 @@ export function TeamsPage() {
       const teamHere = findTeamInTournament(t, selectedTeam.name);
       if (!teamHere) continue;
 
-      // Count this team's completed matches across every bracket in the tournament.
+      // Collect this team's real matches across every bracket, oriented to the
+      // team (its own score first), split into upcoming and completed.
       const brackets = [t.generatedBracket, t.stage1Bracket, t.stage2Bracket].filter(Boolean) as BracketGenerated[];
-      let matchesPlayed = 0;
+      const logoFor = (teamId: string, name: string) => {
+        const byId = t.teams.find(tm => tm.id === teamId);
+        if (byId?.logo) return byId.logo;
+        const norm = name.trim().toLowerCase();
+        return t.teams.find(tm => tm.name.trim().toLowerCase() === norm)?.logo;
+      };
+      const upcoming: TeamMatch[] = [];
+      const completed: TeamMatch[] = [];
       for (const b of brackets) {
         for (const m of b.rounds.flat()) {
-          if (m.team1Id !== teamHere.id && m.team2Id !== teamHere.id) continue;
-          if (m.winner) matchesPlayed++;
+          const isT1 = m.team1Id === teamHere.id;
+          const isT2 = m.team2Id === teamHere.id;
+          if (!isT1 && !isT2) continue;
+          const oppName = isT1 ? m.team2Name : m.team1Name;
+          const oppId = isT1 ? m.team2Id : m.team1Id;
+          if (isTeamSlotName(oppName)) continue; // opponent not decided yet
+          const mStatus = effectiveStatus(m);
+          const { s1, s2 } = deriveScore(m);
+          const teamScore = isT1 ? s1 : s2;
+          const oppScore = isT1 ? s2 : s1;
+          const maps = (m.maps ?? [])
+            .filter(mp => mp.team1Score > 0 || mp.team2Score > 0)
+            .map(mp => ({
+              mapName: mp.mapName,
+              teamScore: isT1 ? mp.team1Score : mp.team2Score,
+              oppScore: isT1 ? mp.team2Score : mp.team1Score,
+            }));
+          const tm: TeamMatch = {
+            id: m.id, status: mStatus, date: m.date, time: m.time,
+            oppName, oppLogo: logoFor(oppId, oppName),
+            teamScore, oppScore, won: teamScore > oppScore, maps,
+          };
+          if (mStatus === 'completed') completed.push(tm);
+          else upcoming.push(tm);
         }
       }
+      // Upcoming: soonest scheduled first. Completed: most recent first.
+      const time = (mt: TeamMatch) => mt.date ? new Date(`${mt.date}T${mt.time || '00:00'}`).getTime() : 0;
+      upcoming.sort((a, b) => (time(a) || Infinity) - (time(b) || Infinity));
+      completed.sort((a, b) => time(b) - time(a));
+      const matchesPlayed = completed.length;
 
       // Standing is only meaningful once the tournament has finished.
       const status = deriveTournamentStatus(t);
@@ -375,6 +597,8 @@ export function TeamsPage() {
         matchesPlayed,
         status,
         placement,
+        upcoming,
+        completed,
       });
     }
     return records;
@@ -657,28 +881,7 @@ export function TeamsPage() {
 
                 <div className="arena-roster-analytics__list">
                   {tournamentRecords.map(rec => (
-                    <Link
-                      key={rec.tournamentId}
-                      to={`/tournament/${rec.tournamentId}`}
-                      className="arena-roster-record__row"
-                    >
-                      <span className="arena-roster-record__trophy">
-                        <Trophy className="w-4 h-4" />
-                      </span>
-                      <div className="arena-roster-record__name-wrap">
-                        <p className="arena-roster-record__name">{rec.tournamentName}</p>
-                        <p className="arena-roster-record__meta">
-                          {STATUS_LABEL[rec.status]} · {rec.matchesPlayed} match{rec.matchesPlayed !== 1 ? 'es' : ''} played
-                        </p>
-                      </div>
-                      <div className="arena-roster-record__placement">
-                        <p className="arena-roster-analytics__stat-label">Final Standing</p>
-                        <p className="arena-roster-record__placement-value">
-                          {rec.placement || '—'}
-                        </p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-gray-600 arena-roster-analytics__chevron" />
-                    </Link>
+                    <TeamRecordRow key={rec.tournamentId} rec={rec} />
                   ))}
                 </div>
               </section>

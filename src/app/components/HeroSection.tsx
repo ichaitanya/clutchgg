@@ -3,11 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { Tournament } from './TournamentCreation';
 
+// A match currently live, surfaced as a banner inside the hero.
+export interface LiveHeroMatch {
+  matchId: string;
+  team1Name: string;
+  team2Name: string;
+  team1Logo?: string;
+  team2Logo?: string;
+  tournamentName?: string;
+  streamUrl?: string;
+  s1: number;
+  s2: number;
+}
+
 interface HeroSectionProps {
   heroLink?: string;
   heroVideo?: string;
   standingsTournamentId?: string;
   spotlightTournament?: Tournament | null;
+  liveMatch?: LiveHeroMatch | null;
 }
 
 // Extract YouTube video ID from any youtube.com / youtu.be URL.
@@ -125,8 +139,10 @@ function YouTubeBackground({ videoId }: { videoId: string }) {
   );
 }
 
-export function HeroSection({ heroLink, heroVideo, standingsTournamentId, spotlightTournament }: HeroSectionProps) {
+export function HeroSection({ heroLink, heroVideo, standingsTournamentId, spotlightTournament, liveMatch }: HeroSectionProps) {
   const navigate = useNavigate();
+  // The Watch button prefers the live match's stream, then the admin hero link.
+  const watchUrl = liveMatch?.streamUrl || heroLink;
 
   const ytId = heroVideo ? getYouTubeId(heroVideo) : null;
   const isYouTube = !!ytId;
@@ -179,19 +195,42 @@ export function HeroSection({ heroLink, heroVideo, standingsTournamentId, spotli
             <span className="accent">CROWN.</span>
           </h1>
 
-          <p className="arena-body" style={{ maxWidth: '420px', fontSize: '0.9375rem' }}>
-            Experience the pinnacle of competitive excellence. Follow the world's elite
-            rosters as they battle for the seasonal championship.
-          </p>
+          {liveMatch ? (
+            /* Happening now: live banner replaces the static tagline */
+            <button
+              type="button"
+              onClick={() => navigate(`/tournament-match/${liveMatch.matchId}`)}
+              className="arena-hero__live"
+            >
+              <span className="arena-hero__live-chip">
+                <span className="arena-hero__live-dot" /> LIVE
+              </span>
+              <span className="arena-hero__live-teams">
+                {liveMatch.team1Logo && <img src={liveMatch.team1Logo} alt="" className="arena-hero__live-logo" />}
+                <span className="arena-hero__live-name">{liveMatch.team1Name}</span>
+                <span className="arena-hero__live-score">{liveMatch.s1} : {liveMatch.s2}</span>
+                <span className="arena-hero__live-name">{liveMatch.team2Name}</span>
+                {liveMatch.team2Logo && <img src={liveMatch.team2Logo} alt="" className="arena-hero__live-logo" />}
+              </span>
+              {liveMatch.tournamentName && (
+                <span className="arena-hero__live-tournament">{liveMatch.tournamentName}</span>
+              )}
+            </button>
+          ) : (
+            <p className="arena-body" style={{ maxWidth: '420px', fontSize: '0.9375rem' }}>
+              Experience the pinnacle of competitive excellence. Follow the world's elite
+              rosters as they battle for the seasonal championship.
+            </p>
+          )}
 
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.75rem', flexWrap: 'wrap' }}>
             <button
-              onClick={() => { if (heroLink) window.open(heroLink, '_blank'); }}
-              disabled={!heroLink}
-              className={`arena-btn arena-btn--primary${!heroLink ? ' opacity-60 cursor-not-allowed' : ''}`}
+              onClick={() => { if (watchUrl) window.open(watchUrl, '_blank'); }}
+              disabled={!watchUrl}
+              className={`arena-btn arena-btn--primary${!watchUrl ? ' opacity-60 cursor-not-allowed' : ''}`}
               style={{ minWidth: '180px' }}
             >
-              Watch Broadcast
+              {liveMatch ? 'Watch Live' : 'Watch Broadcast'}
             </button>
             <button
               onClick={() => navigate(standingsTournamentId ? `/tournament/${standingsTournamentId}#bracket` : '/matches')}

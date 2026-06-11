@@ -8,9 +8,10 @@ import { NewsCard } from './components/NewsCard';
 import { Footer } from './components/Footer';
 import { LoadingState } from './components/LoadingState';
 // Utilities used directly by the home page stay eager (they pull no heavy deps).
-import { getTopPlayersByAcs } from './components/StatsPage';
-import { computeRRStandings } from './components/BracketDisplay';
-import { ArrowRight } from 'lucide-react';
+import { getRankedPlayerRows, type PlayerRow } from './components/StatsPage';
+import { computeRRStandings, DEFAULT_POINTS_PER_WIN } from './components/BracketDisplay';
+import { agentIconUrl, mapImageUrl } from './utils/valorantAssets';
+import { ArrowRight, ChevronDown } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
 import { loadAdminData, loadWithRetryPolled } from './services/db';
@@ -79,6 +80,21 @@ function getEffectiveStatus(match: BracketMatch): 'upcoming' | 'live' | 'complet
   return getMatchStatus(match.date, match.time);
 }
 
+// Series score from map wins; falls back to 1-0 from the winner field when no
+// maps were recorded (manually-decided matches).
+function deriveSeriesScore(match: BracketMatch): { s1: number; s2: number } {
+  const maps = match.maps ?? [];
+  let s1 = 0, s2 = 0;
+  for (const m of maps) {
+    if (m.team1Score > m.team2Score) s1++;
+    else if (m.team2Score > m.team1Score) s2++;
+  }
+  if (s1 === 0 && s2 === 0 && match.winner) {
+    return match.winner === match.team1Id ? { s1: 1, s2: 0 } : { s1: 0, s2: 1 };
+  }
+  return { s1, s2 };
+}
+
 // Names standing in for an undecided bracket slot (winner-of, TBD, empty seats).
 function isPlaceholderSlot(name: string): boolean {
   if (!name) return true;
@@ -98,6 +114,10 @@ function isPlaceholderSlot(name: string): boolean {
 
 function Home() {
   const [adminData, setAdminData] = useState<AdminData | null>(null);
+  // Top Performance leaderboard metric (toggle pills above the cards).
+  const [perfMetric, setPerfMetric] = useState<'kills' | 'acs' | 'kd' | 'hsPercent'>('kills');
+  // Which Recent Results row has its map scores expanded (homepage).
+  const [expandedRecentId, setExpandedRecentId] = useState<string | null>(null);
 
   // Initial retrying load + background polling so the home spotlight/standings
   // stay current on an open tab, and an immediate refresh on tab refocus.
@@ -126,6 +146,7 @@ function Home() {
           b.rounds.flat().map(match => ({
             ...match,
             status: getEffectiveStatus(match),
+            tournamentId: tournament.id,
             tournamentName: tournament.name,
             team1Logo: logoFor(match.team1Id, match.team1Name),
             team2Logo: logoFor(match.team2Id, match.team2Name),
@@ -134,10 +155,21 @@ function Home() {
       })
     : [];
 
+  // Spotlight tournament resolved up front so the homepage's Upcoming / Recent
+  // sections can scope to it (they show only the spotlight event's matches).
+  const spotlightTournament = adminData
+    ? resolveSpotlightTournament(adminData.tournaments, adminData.spotlightTournamentId)
+    : null;
+  // Spotlight-only matches: when a spotlight exists, restrict to its bracket
+  // matches; otherwise fall back to every tournament's matches.
+  const spotlightBracketMatches = spotlightTournament
+    ? tournamentBracketMatches.filter(m => m.tournamentId === spotlightTournament.id)
+    : tournamentBracketMatches;
+
   // Derive display data: first try tournament brackets, then fall back to admin matches
   const upcomingMatches = (() => {
-    const all = tournamentBracketMatches.length > 0
-      ? tournamentBracketMatches.filter(m =>
+    const all = spotlightBracketMatches.length > 0
+      ? spotlightBracketMatches.filter(m =>
           m.status === 'upcoming' &&
           !isPlaceholderSlot(m.team1Name) &&
           !isPlaceholderSlot(m.team2Name))
@@ -147,12 +179,39 @@ function Home() {
     return all ? all.slice(0, 6) : null;
   })();
 
+  // Recent results: latest completed series, newest scheduled date first (matches
+  // without a date keep bracket order, which trends later-round-last → reversed).
+  const recentResults = (() => {
+    const done = spotlightBracketMatches.filter(m =>
+      m.status === 'completed' &&
+      !isPlaceholderSlot(m.team1Name) &&
+      !isPlaceholderSlot(m.team2Name));
+    done.reverse();
+    done.sort((a, b) => {
+      const ta = a.date ? new Date(`${a.date}T${a.time || '00:00'}`).getTime() : 0;
+      const tb = b.date ? new Date(`${b.date}T${b.time || '00:00'}`).getTime() : 0;
+      return tb - ta;
+    });
+    return done.slice(0, 4);
+  })();
+
+  // A match currently in its live window — prefer one carrying a stream URL so
+  // the hero's Watch button has somewhere to go.
+  const liveMatch = (() => {
+    const live = tournamentBracketMatches.filter(m =>
+      m.status === 'live' &&
+      !isPlaceholderSlot(m.team1Name) &&
+      !isPlaceholderSlot(m.team2Name));
+    if (live.length === 0) return null;
+    return live.find(m => m.streamUrl) ?? live[0];
+  })();
+
   const standings = adminData ? adminData.standings : null;
   const news = adminData ? adminData.news.filter(n => n.visible) : null;
 
   // Auto-standings: if a tournament is round-robin or group-based, compute its
   // standings tables directly for the homepage (instead of manual standings).
-  type StandRow = { id: string; rank: number; name: string; wins: number; losses: number };
+  type StandRow = { id: string; rank: number; name: string; wins: number; losses: number; points: number };
   const autoStandings: { tournament: any; tournamentId: string; tournamentName: string; groups: { title: string; rows: StandRow[] }[] } | null = (() => {
     if (!adminData) return null;
     // If the admin picked a spotlight tournament, consider only it;
@@ -167,8 +226,8 @@ function Home() {
         const groups = (t.stage1Config.groups ?? []).map(g => {
           const matches = t.stage1Bracket!.rounds.flat().filter(m => m.id.includes(`gs_${g.id}_`));
           const rrTeams = g.teams.map(tm => ({ id: tm.id, name: tm.name }));
-          const rows = computeRRStandings([matches], rrTeams).map((r, i) => ({
-            id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses,
+          const rows = computeRRStandings([matches], rrTeams, t.stage1Bracket!.pointsPerWin).map((r, i) => ({
+            id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses, points: r.points,
           }));
           return { title: g.name, rows };
         }).filter(g => g.rows.length > 0);
@@ -177,8 +236,8 @@ function Home() {
       // Round robin (single-stage generatedBracket or stage1Bracket).
       const rr = [t.generatedBracket, t.stage1Bracket].find(b => b?.bracketType === 'roundrobin');
       if (rr) {
-        const rows = computeRRStandings(rr.rounds, rr.rrTeams ?? []).map((r, i) => ({
-          id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses,
+        const rows = computeRRStandings(rr.rounds, rr.rrTeams ?? [], rr.pointsPerWin).map((r, i) => ({
+          id: r.teamId, rank: i + 1, name: r.teamName, wins: r.wins, losses: r.losses, points: r.points,
         }));
         if (rows.length > 0) return { tournament: t, tournamentId: t.id, tournamentName: t.name, groups: [{ title: 'Standings', rows }] };
       }
@@ -186,21 +245,15 @@ function Home() {
     return null;
   })();
 
-  // Spotlight tournament (for hero section + stands). Works for any format, not
-  // just RRB/group. When the admin hasn't pinned one, auto-pick the first
-  // in-progress tournament, then the first overall — matching the admin panel's
-  // "Auto (first in-progress, then first)" dropdown option.
-  const spotlightTournament = adminData
-    ? resolveSpotlightTournament(adminData.tournaments, adminData.spotlightTournamentId)
-    : null;
-
-  // Top players ranked by average ACS, computed from applied tournament match
-  // stats. Scoped to the spotlight tournament (if one is selected); otherwise
-  // considers all tournaments. Falls back to admin-entered / placeholder players
-  // when no stats exist.
-  const topByAcs = adminData
-    ? getTopPlayersByAcs(spotlightTournament ? [spotlightTournament] : adminData.tournaments, 5)
+  // Every player with recorded stats, scoped to the spotlight tournament when
+  // one is selected. The Top Performance cards sort this by the toggled metric;
+  // the Top Performance cards sort this by the toggled metric.
+  const playerPool: PlayerRow[] = adminData
+    ? getRankedPlayerRows(spotlightTournament ? [spotlightTournament] : adminData.tournaments)
     : [];
+  const topPerformers = [...playerPool]
+    .sort((a, b) => b[perfMetric] - a[perfMetric])
+    .slice(0, 4);
 
   // First paragraph of an article body, used as the Editorial card excerpt.
   // Strips @[label](ref) mention syntax and other markdown artifacts before display.
@@ -231,13 +284,11 @@ function Home() {
           <th>Team</th>
           <th>W</th>
           <th>L</th>
-          <th>Win%</th>
+          <th>Pts</th>
         </tr>
       </thead>
       <tbody>
         {rows.map(team => {
-          const total = team.wins + team.losses;
-          const wr = total === 0 ? '0%' : `${Math.round((team.wins / total) * 100)}%`;
           const inTop = team.rank <= highlightTop;
           // Top rows: fully visible, rank-1 gets left accent bar via --1 modifier.
           // Rows beyond cutoff: stepped opacity fade.
@@ -256,7 +307,7 @@ function Home() {
               </td>
               <td>{team.wins}</td>
               <td>{team.losses}</td>
-              <td className={isFirst ? 'arena-winpct--top' : ''}>{wr}</td>
+              <td className={isFirst ? 'arena-winpct--top' : ''}>{team.points}</td>
             </tr>
           );
         })}
@@ -266,7 +317,7 @@ function Home() {
 
   // Normalize manual standings into the same shape used by StandingsTable.
   const manualRows: StandRow[] | null = standings
-    ? standings.map(t => ({ id: t.id, rank: t.rank, name: t.name, wins: t.wins, losses: t.losses }))
+    ? standings.map(t => ({ id: t.id, rank: t.rank, name: t.name, wins: t.wins, losses: t.losses, points: t.wins * DEFAULT_POINTS_PER_WIN }))
     : null;
 
   return (
@@ -274,7 +325,22 @@ function Home() {
       <Header />
 
       {/* Hero */}
-      <HeroSection heroLink={adminData?.heroLink} heroVideo={adminData?.heroVideo} standingsTournamentId={spotlightTournament?.id} spotlightTournament={spotlightTournament} />
+      <HeroSection
+        heroLink={adminData?.heroLink}
+        heroVideo={adminData?.heroVideo}
+        standingsTournamentId={spotlightTournament?.id}
+        spotlightTournament={spotlightTournament}
+        liveMatch={liveMatch ? {
+          matchId: liveMatch.id,
+          team1Name: liveMatch.team1Name,
+          team2Name: liveMatch.team2Name,
+          team1Logo: liveMatch.team1Logo,
+          team2Logo: liveMatch.team2Logo,
+          tournamentName: liveMatch.tournamentName,
+          streamUrl: liveMatch.streamUrl,
+          ...deriveSeriesScore(liveMatch),
+        } : null}
+      />
 
       {/* Upcoming Matches + Standings */}
       <section className="arena-section">
@@ -323,6 +389,105 @@ function Home() {
                 </div>
               )}
             </div>
+
+            {/* Recent Results — latest completed series, so the page stays alive
+                between events when nothing is upcoming. */}
+            {recentResults.length > 0 && (
+              <>
+                <div className="arena-section-header" style={{ marginTop: '0.5rem' }}>
+                  <h2 className="arena-heading">
+                    Recent <span style={{ color: 'var(--arena-accent)' }}>Results</span>
+                  </h2>
+                  <Link to="/matches" className="arena-btn--ghost">All Results</Link>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {recentResults.map(m => {
+                    const { s1, s2 } = deriveSeriesScore(m);
+                    const t1Won = s1 > s2;
+                    const t2Won = s2 > s1;
+                    const Logo = ({ src, name }: { src?: string; name: string }) => (
+                      <span className="arena-recent__logo">
+                        {src ? <img src={src} alt="" /> : <span>{name.trim().slice(0, 2).toUpperCase()}</span>}
+                      </span>
+                    );
+                    // Maps with an actual recorded score — drive the expandable panel.
+                    const playedMaps = (m.maps ?? []).filter(mp => mp.team1Score > 0 || mp.team2Score > 0);
+                    const expandable = playedMaps.length > 0;
+                    const expanded = expandedRecentId === m.id;
+                    return (
+                      <div key={m.id} className="arena-tp-matchwrap">
+                        <Link to={`/tournament-match/${m.id}`} className="arena-recent">
+                          <span className={`arena-recent__team arena-recent__team--r${t1Won ? ' arena-recent__team--won' : ''}`}>
+                            <span className="arena-recent__name">{m.team1Name}</span>
+                            <Logo src={m.team1Logo} name={m.team1Name} />
+                          </span>
+                          <span className="arena-recent__score">
+                            <span className={t1Won ? 'arena-recent__score--win' : ''}>{s1}</span>
+                            <span className="arena-recent__score-sep">:</span>
+                            <span className={t2Won ? 'arena-recent__score--win' : ''}>{s2}</span>
+                          </span>
+                          <span className={`arena-recent__team${t2Won ? ' arena-recent__team--won' : ''}`}>
+                            <Logo src={m.team2Logo} name={m.team2Name} />
+                            <span className="arena-recent__name">{m.team2Name}</span>
+                          </span>
+                          <span className="arena-recent__meta">
+                            <span className="arena-recent__meta-name" title={m.tournamentName}>{m.tournamentName}</span>
+                            {expandable && (
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                className={`arena-tp-matchrow__expand${expanded ? ' arena-tp-matchrow__expand--open' : ''}`}
+                                title={expanded ? 'Hide map scores' : 'Show map scores'}
+                                onClick={e => { e.preventDefault(); e.stopPropagation(); setExpandedRecentId(expanded ? null : m.id); }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setExpandedRecentId(expanded ? null : m.id);
+                                  }
+                                }}
+                              >
+                                <ChevronDown className="w-4 h-4" />
+                              </span>
+                            )}
+                          </span>
+                        </Link>
+                        {expandable && expanded && (
+                          <div className="arena-tp-mapscores">
+                            {playedMaps.map((map, mi) => {
+                              const m1 = map.team1Score > map.team2Score;
+                              const m2 = map.team2Score > map.team1Score;
+                              const splash = mapImageUrl(map.mapName);
+                              return (
+                                <div
+                                  key={mi}
+                                  className="arena-tp-mapscores__row"
+                                  style={splash ? {
+                                    backgroundImage: `linear-gradient(90deg, rgba(10,10,10,0.94) 0%, rgba(10,10,10,0.72) 45%, rgba(10,10,10,0.9) 100%), url(${splash})`,
+                                    backgroundSize: 'cover',
+                                    backgroundPosition: 'center 35%',
+                                  } : undefined}
+                                >
+                                  <span className="arena-tp-mapscores__map">{map.mapName || `Map ${mi + 1}`}</span>
+                                  <span className="arena-tp-mapscores__score">
+                                    <span className={m1 ? 'arena-tp-mapscores__win' : ''}>{map.team1Score}</span>
+                                    <span className="arena-tp-mapscores__sep">–</span>
+                                    <span className={m2 ? 'arena-tp-mapscores__win' : ''}>{map.team2Score}</span>
+                                  </span>
+                                  <span className="arena-tp-mapscores__taker">
+                                    {m1 ? m.team1Name : m2 ? m.team2Name : 'Tied'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Standings */}
@@ -389,18 +554,60 @@ function Home() {
               <p className="arena-label">Season Leaders</p>
             )}
             <h2 className="arena-heading arena-heading--lg">Top Performance</h2>
+            {/* Leaderboard metric toggle — re-ranks the cards below */}
+            {playerPool.length > 0 && (
+              <div className="arena-perf-toggle">
+                {([
+                  { key: 'kills', label: 'Kills' },
+                  { key: 'acs', label: 'ACS' },
+                  { key: 'kd', label: 'K/D' },
+                  { key: 'hsPercent', label: 'HS%' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setPerfMetric(opt.key)}
+                    className={`arena-perf-toggle__btn${perfMetric === opt.key ? ' arena-perf-toggle__btn--active' : ''}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {topByAcs.length > 0 ? (
-              topByAcs.slice(0, 4).map(player => {
+            {topPerformers.length > 0 ? (
+              topPerformers.map(player => {
+                const icon = agentIconUrl(player.agent);
+                const metricValue =
+                  perfMetric === 'kills' ? `${player.kills}`
+                  : perfMetric === 'acs' ? `${Math.round(player.acs)}`
+                  : perfMetric === 'kd' ? player.kd.toFixed(2)
+                  : `${Math.round(player.hsPercent)}%`;
+                const metricLabel =
+                  perfMetric === 'kills' ? 'Kills'
+                  : perfMetric === 'acs' ? 'ACS'
+                  : perfMetric === 'kd' ? 'K/D'
+                  : 'HS%';
                 const card = (
                   <>
-                    <p className="arena-player-card__team">{player.teamName}</p>
-                    <p className="arena-player-card__name">{player.playerName}</p>
+                    <div className="arena-player-card__top">
+                      {/* MVP-style player tile: photo (or initials) with the
+                          agent icon tucked into the corner */}
+                      <span className="arena-player-card__photo">
+                        {player.photo
+                          ? <img src={player.photo} alt={player.playerName} />
+                          : <span className="arena-player-card__initials">{player.playerName.trim().slice(0, 2).toUpperCase()}</span>}
+                        {icon && <img src={icon} alt={player.agent} title={player.agent} className="arena-player-card__agent" />}
+                      </span>
+                      <span className="arena-player-card__id">
+                        <p className="arena-player-card__team">{player.teamName}</p>
+                        <p className="arena-player-card__name">{player.playerName}</p>
+                      </span>
+                    </div>
                     <div className="arena-player-card__stats">
                       <div>
-                        <p className="arena-player-card__stat-label">Kills</p>
-                        <p className="arena-player-card__stat-value">{player.kills}</p>
+                        <p className="arena-player-card__stat-label">{metricLabel}</p>
+                        <p className="arena-player-card__stat-value arena-player-card__stat-value--hot">{metricValue}</p>
                       </div>
                       <div>
                         <p className="arena-player-card__stat-label">K/D/A</p>

@@ -28,7 +28,7 @@ function deriveQualifiedTeams(
 
   if (bracket.bracketType === 'roundrobin') {
     // Use standings order
-    const standings = computeRRStandings(bracket.rounds, bracket.rrTeams || []);
+    const standings = computeRRStandings(bracket.rounds, bracket.rrTeams || [], bracket.pointsPerWin);
     return standings
       .slice(0, n)
       .map(row => findTeam(row.teamId))
@@ -495,21 +495,32 @@ export interface RRStandingsRow {
   wins: number;
   losses: number;
   wl: number;       // wins - losses
+  points: number;   // wins * pointsPerWin (primary ranking metric)
   roundsWon: number;
   roundsLost: number;
   roundDiff: number; // roundsWon - roundsLost (tiebreaker)
   played: number;
 }
 
+// Points awarded per round-robin match win, when a bracket doesn't specify its
+// own weight. Changed from 1 → 3 so a win is worth 3 league points by default.
+export const DEFAULT_POINTS_PER_WIN = 3;
+
 /**
  * Compute round robin standings from match results.
- * Primary sort: W-L (wins minus losses).
+ * Primary sort: points (wins × pointsPerWin).
  * Tiebreaker: round difference (rounds won - rounds lost across all matches).
  * "Rounds" here means individual match instances treated as a single unit per match
  * since each match has one winner — so roundDiff equals wl for match-based scoring.
  * We expose it separately so it can be extended to best-of-N series later.
+ *
+ * pointsPerWin is configurable per bracket; defaults to DEFAULT_POINTS_PER_WIN.
  */
-export function computeRRStandings(rounds: BracketMatch[][], rrTeams: RRTeamEntry[]): RRStandingsRow[] {
+export function computeRRStandings(
+  rounds: BracketMatch[][],
+  rrTeams: RRTeamEntry[],
+  pointsPerWin: number = DEFAULT_POINTS_PER_WIN,
+): RRStandingsRow[] {
   const map: Record<string, RRStandingsRow> = {};
 
   for (const team of rrTeams) {
@@ -519,6 +530,7 @@ export function computeRRStandings(rounds: BracketMatch[][], rrTeams: RRTeamEntr
       wins: 0,
       losses: 0,
       wl: 0,
+      points: 0,
       roundsWon: 0,
       roundsLost: 0,
       roundDiff: 0,
@@ -546,9 +558,14 @@ export function computeRRStandings(rounds: BracketMatch[][], rrTeams: RRTeamEntr
   }
 
   return Object.values(map)
-    .map(r => ({ ...r, wl: r.wins - r.losses, roundDiff: r.roundsWon - r.roundsLost }))
+    .map(r => ({
+      ...r,
+      wl: r.wins - r.losses,
+      points: r.wins * pointsPerWin,
+      roundDiff: r.roundsWon - r.roundsLost,
+    }))
     .sort((a, b) => {
-      if (b.wl !== a.wl) return b.wl - a.wl;
+      if (b.points !== a.points) return b.points - a.points;
       return b.roundDiff - a.roundDiff;
     });
 }
@@ -825,7 +842,7 @@ export function BracketDisplay({
 
   // Round Robin: show match schedule + live standings
   if (bracket.bracketType === 'roundrobin') {
-    const standings = computeRRStandings(bracket.rounds, bracket.rrTeams || []);
+    const standings = computeRRStandings(bracket.rounds, bracket.rrTeams || [], bracket.pointsPerWin);
     return (
       <div className="space-y-6">
         {/* Standings table */}
@@ -841,6 +858,7 @@ export function BracketDisplay({
                 <tr className="text-gray-500 text-xs uppercase border-b border-[#2a2d3a]">
                   <th className="px-3 py-2 text-left w-8">#</th>
                   <th className="px-3 py-2 text-left">Team</th>
+                  <th className="px-3 py-2 text-center">Pts</th>
                   <th className="px-3 py-2 text-center">W</th>
                   <th className="px-3 py-2 text-center">L</th>
                   <th className="px-3 py-2 text-center">W-L</th>
@@ -859,6 +877,7 @@ export function BracketDisplay({
                     <td className="px-3 py-2.5 font-medium">
                       <Link to={`/teams/${row.teamId}`} className="text-white hover:text-[#ff4655] transition-colors">{row.teamName}</Link>
                     </td>
+                    <td className="px-3 py-2.5 text-center text-yellow-400 font-bold">{row.points}</td>
                     <td className="px-3 py-2.5 text-center text-green-400 font-semibold">{row.wins}</td>
                     <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{row.losses}</td>
                     <td className="px-3 py-2.5 text-center font-bold">

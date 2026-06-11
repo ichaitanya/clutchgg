@@ -542,6 +542,9 @@ function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers, leaders,
               // Resolve this stat row to a roster player so the name links to
               // their profile (stats are keyed by Riot ID, not roster slot id).
               const rosterPlayer = rosterPlayers.find(p => statMatchesPlayer(s, p));
+              // Prefer the CURRENT roster name over the stat's frozen playerName,
+              // so admin renames in the team editor show through immediately.
+              const displayName = rosterPlayer?.name?.trim() || s.playerName;
               const kdVal = s.kd > 0 ? s.kd : s.deaths > 0 ? s.kills / s.deaths : s.kills;
               return (
                 <tr key={s.playerId} className={i % 2 === 0 ? 'arena-md-table__alt' : ''}>
@@ -551,10 +554,10 @@ function StatsTable({ teamName, teamStats, tournamentId, rosterPlayers, leaders,
                         onClick={() => navigate(`/player/${tournamentId}/${rosterPlayer.id}`)}
                         className="arena-md-table__player"
                       >
-                        {s.playerName}
+                        {displayName}
                       </button>
                     ) : (
-                      <span className="arena-md-table__player arena-md-table__player--static">{s.playerName}</span>
+                      <span className="arena-md-table__player arena-md-table__player--static">{displayName}</span>
                     )}
                   </td>
                   <td className="arena-md-table__left">
@@ -895,8 +898,26 @@ export function TournamentMatchPage() {
       : top.teamId === match.team1Id;
     const side = onTeam1 ? team1 : team2;
     const rosterPlayer = (side?.players ?? []).find(p => statMatchesPlayer(top, p));
+    // Single standout agent: the one the MVP performed best on (highest single-map
+    // ACS) across the series — not every agent they touched. Falls back to the
+    // aggregated agent string's first entry for single-map / no-per-map cases.
+    const bestAgent = (() => {
+      let best: { agent: string; acs: number } | null = null;
+      for (const m of match.maps ?? []) {
+        for (const s of m.playerStats ?? []) {
+          if (s.playerId !== top.playerId || !s.agent) continue;
+          if (!best || s.acs > best.acs) best = { agent: s.agent, acs: s.acs };
+        }
+      }
+      return best?.agent
+        ?? (top.agent ?? '').split(',').map(a => a.trim()).filter(Boolean)[0]
+        ?? '';
+    })();
     return {
       stat: top,
+      // Prefer the current roster name so admin renames show through.
+      playerName: rosterPlayer?.name?.trim() || top.playerName,
+      bestAgent,
       teamName: onTeam1 ? team1Name : team2Name,
       teamLogo: side?.logo,
       photo: rosterPlayer?.photo,
@@ -1086,9 +1107,9 @@ export function TournamentMatchPage() {
 
         {/* ── Series MVP ─────────────────────────────────────────────────── */}
         {mvp && (() => {
-          // A series MVP may have played several agents across maps; the Total
-          // view joins them comma-separated. Show every one as a stacked crest.
-          const mvpAgents = (mvp.stat.agent ?? '').split(',').map(a => a.trim()).filter(Boolean);
+          // A series MVP may have played several agents across maps — surface only
+          // the one they performed best on (highest single-map ACS).
+          const bestAgent = mvp.bestAgent;
           const kdText = mvp.stat.kd > 0
             ? mvp.stat.kd.toFixed(2)
             : (mvp.stat.deaths > 0 ? (mvp.stat.kills / mvp.stat.deaths).toFixed(2) : mvp.stat.kills.toFixed(2));
@@ -1109,16 +1130,16 @@ export function TournamentMatchPage() {
 
               <span className="arena-md-mvp__photo">
                 {mvp.photo
-                  ? <img src={mvp.photo} alt={mvp.stat.playerName} />
-                  : <span className="arena-md-mvp__initials">{teamInitials(mvp.stat.playerName)}</span>}
-                {mvpAgents.length > 0 && (
+                  ? <img src={mvp.photo} alt={mvp.playerName} />
+                  : <span className="arena-md-mvp__initials">{teamInitials(mvp.playerName)}</span>}
+                {bestAgent && (
                   <span className="arena-md-mvp__agents">
-                    {mvpAgents.map((a, idx) => {
-                      const icon = agentIconUrl(a);
+                    {(() => {
+                      const icon = agentIconUrl(bestAgent);
                       return icon
-                        ? <img key={idx} src={icon} alt={a} title={a} className="arena-md-mvp__agent-icon" />
-                        : <span key={idx} title={a} className="arena-md-mvp__agent-icon arena-md-mvp__agent-icon--fallback">{a.slice(0, 2).toUpperCase()}</span>;
-                    })}
+                        ? <img src={icon} alt={bestAgent} title={bestAgent} className="arena-md-mvp__agent-icon" />
+                        : <span title={bestAgent} className="arena-md-mvp__agent-icon arena-md-mvp__agent-icon--fallback">{bestAgent.slice(0, 2).toUpperCase()}</span>;
+                    })()}
                   </span>
                 )}
               </span>
@@ -1127,11 +1148,11 @@ export function TournamentMatchPage() {
                 <span className="arena-md-mvp__badge">
                   <Trophy className="w-3 h-3" /> MVP
                 </span>
-                <span className="arena-md-mvp__name">{mvp.stat.playerName}</span>
+                <span className="arena-md-mvp__name">{mvp.playerName}</span>
                 <span className="arena-md-mvp__team">
                   {mvp.teamLogo && <img src={mvp.teamLogo} alt="" className="arena-md-mvp__crest" />}
                   <span className="arena-md-mvp__team-name">{mvp.teamName}</span>
-                  {mvp.stat.agent && <span className="arena-md-mvp__agent">· {mvp.stat.agent}</span>}
+                  {bestAgent && <span className="arena-md-mvp__agent">· {bestAgent}</span>}
                 </span>
               </span>
 

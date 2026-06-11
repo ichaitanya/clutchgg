@@ -11,9 +11,12 @@ import { formatPrize } from './TournamentCreation';
 import type { NewsItem } from './AdminPanel';
 import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
 import { getStageOptions, statMatchesPlayer } from './StatsPage';
-import { BracketDisplay } from './BracketDisplay';
+import { BracketDisplay, DEFAULT_POINTS_PER_WIN } from './BracketDisplay';
 import { computePlacement } from './TeamsPage';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
+import {
+  effectiveStatus, deriveScore, teamForm, deriveStageProgress, isTeamSlotName,
+} from '../utils/tournamentDerive';
 import { orderRosterIglFirst } from '../utils/roster';
 import { mapImageUrl } from '../utils/valorantAssets';
 import { bracketRoundLabel } from '../utils/bracketRounds';
@@ -34,57 +37,6 @@ function ordinal(n: number) {
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
-}
-
-function getMatchStatus(date?: string, time?: string): 'upcoming' | 'live' | 'completed' {
-  if (!date) return 'upcoming';
-  try {
-    const dt = new Date(`${date}T${time || '00:00'}`);
-    const diffH = (dt.getTime() - Date.now()) / 36e5;
-    if (diffH > -3 && diffH < 3) return 'live';
-    if (diffH < -3) return 'completed';
-    return 'upcoming';
-  } catch {
-    return 'upcoming';
-  }
-}
-
-function isMatchDecidedByMaps(match: BracketMatch): boolean {
-  const maps = match.maps ?? [];
-  if (maps.length === 0) return false;
-  const maxMaps = match.format === 'bo1' ? 1 : match.format === 'bo5' ? 5 : 3;
-  let w1 = 0, w2 = 0;
-  for (const m of maps) {
-    if (m.team1Score > m.team2Score) w1++;
-    else if (m.team2Score > m.team1Score) w2++;
-  }
-  const needed = Math.ceil(maxMaps / 2);
-  if (w1 >= needed || w2 >= needed) return true;
-  if (maps.length >= maxMaps && w1 !== w2) return true;
-  return false;
-}
-
-function effectiveStatus(m: BracketMatch): 'upcoming' | 'live' | 'completed' {
-  if (m.winner || isMatchDecidedByMaps(m)) return 'completed';
-  return getMatchStatus(m.date, m.time);
-}
-
-// Series score (map wins per side). Falls back to a 1-0 from the recorded
-// winner when no maps were entered.
-function deriveScore(m: BracketMatch): { s1: number; s2: number } {
-  const maps = m.maps ?? [];
-  if (maps.length === 0) {
-    return {
-      s1: m.winner === m.team1Id ? 1 : 0,
-      s2: m.winner === m.team2Id ? 1 : 0,
-    };
-  }
-  let s1 = 0, s2 = 0;
-  for (const map of maps) {
-    if (map.team1Score > map.team2Score) s1++;
-    else if (map.team2Score > map.team1Score) s2++;
-  }
-  return { s1, s2 };
 }
 
 // Champion + runner-up of a finished elimination tournament: the winner of the
@@ -208,76 +160,11 @@ function deriveLeaders(t: Tournament): { label: string; player: PlayerTotals; va
   return out;
 }
 
-// Last N series results (chronological bracket order) for one team — the
-// W/L form dots on the Teams tab.
-function teamForm(
-  matches: { match: BracketMatch; status: string }[],
-  teamId: string,
-  n = 3,
-): { won: boolean; opponent: string }[] {
-  const out: { won: boolean; opponent: string }[] = [];
-  for (const { match: m, status } of matches) {
-    if (status !== 'completed') continue;
-    const isT1 = m.team1Id === teamId;
-    const isT2 = m.team2Id === teamId;
-    if (!isT1 && !isT2) continue;
-    const { s1, s2 } = deriveScore(m);
-    if (s1 === s2) continue;
-    out.push({
-      won: isT1 ? s1 > s2 : s2 > s1,
-      opponent: isT1 ? m.team2Name : m.team1Name,
-    });
-  }
-  return out.slice(-n);
-}
-
 // Rank weight for a placement string: '1st' → 1, 'Top 4' → 4, unknown → last.
 function placementRank(p: string | null): number {
   if (!p) return Number.MAX_SAFE_INTEGER;
   const m = p.match(/\d+/);
   return m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER;
-}
-
-// Round-by-round progress of the final stage bracket, for the overview's
-// progress stepper. Round-robin has no meaningful "rounds to a final" → empty.
-function deriveStageProgress(t: Tournament): { label: string; done: boolean }[] {
-  const b = t.stage2Bracket || t.generatedBracket;
-  if (!b?.rounds?.length || b.bracketType === 'roundrobin') return [];
-
-  const isDouble = b.rounds.flat().some(m => m.bracketSection === 'losers');
-  // Track the winners-side path to the title (plus the grand final for double
-  // elim) — the losers bracket runs in parallel and would clutter the stepper.
-  const mainRounds = b.rounds.filter(r =>
-    r.length > 0 && (!isDouble || !r[0].bracketSection || r[0].bracketSection === 'winners'),
-  );
-  const gfRounds = isDouble
-    ? b.rounds.filter(r => r.length > 0 && r[0].bracketSection === 'grand-final')
-    : [];
-
-  const n = mainRounds.length;
-  const labelFor = (i: number): string => {
-    const fromEnd = n - 1 - i;
-    if (fromEnd === 0) return isDouble ? 'WB Final' : 'Final';
-    if (fromEnd === 1) return 'Semi Finals';
-    if (fromEnd === 2) return 'Quarter Finals';
-    return `Round ${i + 1}`;
-  };
-
-  const steps = mainRounds.map((round, i) => ({
-    label: labelFor(i),
-    done: round.every(m => !!m.winner),
-  }));
-  for (const r of gfRounds) {
-    steps.push({ label: 'Grand Final', done: r.every(m => !!m.winner) });
-  }
-  return steps.length > 1 ? steps : [];
-}
-
-// A bracket match isn't a real, listable match until both slots are real teams.
-function isTeamSlotName(name: string) {
-  return !name || name === 'Select Team' || name.startsWith('Team Slot') || name === 'TBD' ||
-    name.startsWith('Winner') || name.startsWith('Loser') ||
-    name === 'LB TBD' || name === 'WB Champion' || name === 'LB Champion';
 }
 
 
@@ -964,6 +851,16 @@ function StandingsTab({ tournament, matches }: {
   const navigate = useNavigate();
   const isCompleted = deriveTournamentStatus(tournament) === 'completed';
 
+  // League points apply to round-robin / group-stage formats (a win is worth
+  // pointsPerWin). Elimination brackets advance by results, so points are N/A.
+  const rrBracket = [tournament.generatedBracket, tournament.stage1Bracket]
+    .find(b => b?.bracketType === 'roundrobin');
+  const isGroupStage = tournament.stage1Config?.format === 'groupstage';
+  const showPoints = !!rrBracket || isGroupStage;
+  const pointsPerWin = rrBracket?.pointsPerWin
+    ?? tournament.stage1Bracket?.pointsPerWin
+    ?? DEFAULT_POINTS_PER_WIN;
+
   const rows = useMemo(() => {
     const completed = matches.filter(m => m.status === 'completed');
     const built = tournament.teams.map(team => {
@@ -1018,6 +915,7 @@ function StandingsTab({ tournament, matches }: {
             <tr>
               <th className="arena-md-table__left arena-tp-standings__rank-h">#</th>
               <th className="arena-md-table__left">Team</th>
+              {showPoints && <th>Pts</th>}
               <th>Series</th>
               <th>Maps</th>
               <th>+/−</th>
@@ -1049,6 +947,9 @@ function StandingsTab({ tournament, matches }: {
                     <span className="arena-tp-standings__name">{r.team.name}</span>
                   </span>
                 </td>
+                {showPoints && (
+                  <td className="arena-tp-standings__pts">{r.seriesW * pointsPerWin}</td>
+                )}
                 <td>
                   <span className="arena-tp-standings__wl">
                     <span className="arena-tp-standings__w">{r.seriesW}</span>

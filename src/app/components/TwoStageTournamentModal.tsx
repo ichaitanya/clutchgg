@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { X, Plus, Trash2, ChevronRight, Swords, RotateCcw, Grid3x3 } from 'lucide-react';
+import { DEFAULT_POINTS_PER_WIN } from './BracketDisplay';
 import type { Group, TeamInTournament, Stage1Config, Stage1Format } from './TournamentCreation';
 
 interface TwoStageTournamentModalProps {
@@ -15,11 +16,13 @@ function FormatStep({
   onClose,
 }: {
   teams: TeamInTournament[];
-  onNext: (format: Stage1Format, qualifiersCount: number) => void;
+  onNext: (format: Stage1Format, qualifiersCount: number, pointsPerWin: number) => void;
   onClose: () => void;
 }) {
   const [format, setFormat] = useState<Stage1Format>('single');
   const [qualifiersCount, setQualifiersCount] = useState<number>(4);
+  // Points awarded per match win for round-robin / group-stage (default 3).
+  const [pointsPerWin, setPointsPerWin] = useState(DEFAULT_POINTS_PER_WIN);
 
   const formats: { id: Stage1Format; label: string; desc: string; icon: React.ReactNode }[] = [
     { id: 'single', label: 'Single Elimination', desc: 'One loss and you\'re out. Top finishers qualify.', icon: <Swords className="w-4 h-4" /> },
@@ -101,10 +104,28 @@ function FormatStep({
             </div>
           )}
 
+          {/* Round-robin / group-stage scoring: points per match win. */}
+          {(format === 'roundrobin' || format === 'groupstage') && (
+            <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-[#2a2d3a] bg-[#0d0f16]">
+              <div>
+                <p className="text-white text-sm font-semibold">Points per win</p>
+                <p className="text-gray-500 text-xs mt-0.5">Standings rank by total points (wins × this value).</p>
+              </div>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={pointsPerWin}
+                onChange={e => setPointsPerWin(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+                className="w-16 px-2 py-1.5 rounded-md bg-[#1e2130] border border-[#2a2d3a] text-white text-sm text-center focus:border-[#ff4655] focus:outline-none"
+              />
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4 border-t border-[#2a2d3a]">
             <button onClick={onClose} className="flex-1 py-3 rounded-lg border border-[#2a2d3a] text-gray-400 text-sm font-semibold hover:border-gray-500 hover:text-white transition-all">Cancel</button>
             <button
-              onClick={() => onNext(format, qualifiersCount)}
+              onClick={() => onNext(format, qualifiersCount, pointsPerWin)}
               className="flex-1 py-3 rounded-lg bg-[#ff4655] text-white text-sm font-semibold hover:bg-[#ff3344] transition-all flex items-center justify-center gap-2"
             >
               {format === 'groupstage' ? 'Set Up Groups' : 'Confirm & Generate'} <ChevronRight className="w-4 h-4" />
@@ -309,14 +330,16 @@ export function TwoStageTournamentModal({ teams, onClose, onComplete }: TwoStage
   const [step, setStep] = useState<'format' | 'groups'>('format');
   const [pendingFormat, setPendingFormat] = useState<Stage1Format>('single');
   const [pendingQualifiers, setPendingQualifiers] = useState<number>(4);
+  const [pendingPointsPerWin, setPendingPointsPerWin] = useState<number>(DEFAULT_POINTS_PER_WIN);
 
-  const handleFormatNext = (format: Stage1Format, qualifiersCount: number) => {
+  const handleFormatNext = (format: Stage1Format, qualifiersCount: number, pointsPerWin: number) => {
     setPendingFormat(format);
     setPendingQualifiers(qualifiersCount);
+    setPendingPointsPerWin(pointsPerWin);
     if (format === 'groupstage') {
       setStep('groups');
     } else {
-      onComplete({ format, qualifiersCount });
+      onComplete({ format, qualifiersCount, pointsPerWin });
     }
   };
 
@@ -336,6 +359,7 @@ export function TwoStageTournamentModal({ teams, onClose, onComplete }: TwoStage
           qualifiersCount: groups.length * teamsQualifyingPerGroup,
           groups,
           teamsQualifyingPerGroup,
+          pointsPerWin: pendingPointsPerWin,
         });
       }}
     />

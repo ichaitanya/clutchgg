@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
+import { DEFAULT_POINTS_PER_WIN } from './BracketDisplay';
 import { supabase, signIn, signOut, getStoredSession, refreshAccessTokenDirect, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
 import {
   loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
@@ -513,10 +514,9 @@ function StandingsEditor({ teams, onChange }: { teams: StandingTeam[]; onChange:
     onChange([...teams, newTeam]);
   };
   const remove = (id: string) => onChange(teams.filter(t => t.id !== id));
-  const recalcWinRate = (t: StandingTeam) => {
-    const total = t.wins + t.losses;
-    return total === 0 ? '0%' : `${Math.round((t.wins / total) * 100)}%`;
-  };
+  // League points shown to the admin for reference — wins × default weight (3),
+  // matching how these manual standings rank on the homepage.
+  const pointsFor = (t: StandingTeam) => t.wins * DEFAULT_POINTS_PER_WIN;
 
   return (
     <div className="space-y-3">
@@ -528,7 +528,7 @@ function StandingsEditor({ teams, onChange }: { teams: StandingTeam[]; onChange:
               <th className="px-4 py-3 text-left">Team Name</th>
               <th className="px-4 py-3 text-center w-24">Wins</th>
               <th className="px-4 py-3 text-center w-24">Losses</th>
-              <th className="px-4 py-3 text-center w-20">Win%</th>
+              <th className="px-4 py-3 text-center w-20">Pts</th>
               <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
@@ -560,7 +560,7 @@ function StandingsEditor({ teams, onChange }: { teams: StandingTeam[]; onChange:
                     value={team.losses} onChange={e => update(team.id, 'losses', Number(e.target.value))}
                   />
                 </td>
-                <td className="px-4 py-2 text-center text-gray-400 text-xs">{recalcWinRate(team)}</td>
+                <td className="px-4 py-2 text-center text-yellow-400 text-xs font-bold">{pointsFor(team)}</td>
                 <td className="px-4 py-2">
                   <button onClick={() => remove(team.id)} className="text-gray-600 hover:text-[#ff4655] transition-colors">
                     <Trash2 className="w-3.5 h-3.5" />

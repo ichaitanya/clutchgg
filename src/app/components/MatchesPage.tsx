@@ -569,7 +569,7 @@ export function MatchesPage() {
                               </div>
                             </div>
                             <div className="arena-match-card__meta">
-                              <p className="arena-match-card__tournament">{match.tournamentName}</p>
+                              <p className="arena-match-card__tournament" title={match.tournamentName}>{match.tournamentName}</p>
                               {/* Stage lives in the left eyebrow — repeating it here only added height. */}
                               <span className="arena-match-card__badge-row">
                                 <span className={`arena-match-card__badge arena-match-card__badge--${match.status}`}>

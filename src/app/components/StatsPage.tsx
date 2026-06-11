@@ -105,6 +105,10 @@ export interface PlayerRow {
   kills: number;
   deaths: number;
   assists: number;
+  // Most-played agent across the aggregated maps (for icon display).
+  agent?: string;
+  // Roster photo, resolved alongside the roster link below.
+  photo?: string;
   // Optional link target: the tournament + roster slot id this player maps to,
   // so callers can build a /player/:tournamentId/:rosterPlayerId link.
   tournamentId?: string;
@@ -127,6 +131,7 @@ function aggregatePlayers(
     kills: number;
     deaths: number;
     assists: number;
+    agentCounts: Record<string, number>;
   };
   const acc: Record<string, Agg> = {};
   const order: string[] = [];
@@ -147,6 +152,7 @@ function aggregatePlayers(
               kills: 0,
               deaths: 0,
               assists: 0,
+              agentCounts: {},
             };
           }
           cur.mapsPlayed += 1;
@@ -155,6 +161,10 @@ function aggregatePlayers(
           cur.kills += s.kills;
           cur.deaths += s.deaths;
           cur.assists += s.assists;
+          // Tally agents (a Total row may hold a comma list — count each).
+          for (const ag of (s.agent ?? '').split(',').map(x => x.trim()).filter(Boolean)) {
+            cur.agentCounts[ag] = (cur.agentCounts[ag] ?? 0) + 1;
+          }
           // Keep the most recent non-empty name/team we see.
           if (s.playerName) cur.playerName = s.playerName;
           if (s.teamId) cur.teamId = s.teamId;
@@ -165,6 +175,8 @@ function aggregatePlayers(
 
   return order.map(id => {
     const a = acc[id];
+    // Most-played agent across the aggregated maps.
+    const agent = Object.entries(a.agentCounts).sort((x, y) => y[1] - x[1])[0]?.[0];
     return {
       playerId: id,
       playerName: a.playerName,
@@ -176,41 +188,54 @@ function aggregatePlayers(
       kills: a.kills,
       deaths: a.deaths,
       assists: a.assists,
+      agent,
     };
   });
 }
 
-// Top players by total kills across every stage of the given tournaments.
-// Used by the homepage "Top Players" widget. Players are aggregated globally by
-// id; only those with at least one played map are returned.
-export function getTopPlayersByAcs(tournaments: Tournament[], limit = 5): PlayerRow[] {
+// Every player with at least one played map across the given tournaments,
+// aggregated and resolved back to a roster slot (profile link + photo). The
+// homepage sorts this pool by whichever metric its toggle selects.
+export function getRankedPlayerRows(tournaments: Tournament[]): PlayerRow[] {
   const teamNameById: Record<string, string> = {};
   const brackets: BracketGenerated[] = [];
   for (const t of tournaments) {
     t.teams.forEach(team => { teamNameById[team.id] = team.name; });
     for (const stage of getStageOptions(t)) brackets.push(...stage.brackets);
   }
-  const top = aggregatePlayers(brackets, teamNameById)
-    .filter(p => p.mapsPlayed > 0)
-    .sort((a, b) => b.kills - a.kills)
-    .slice(0, limit);
+  const rows = aggregatePlayers(brackets, teamNameById).filter(p => p.mapsPlayed > 0);
 
   // Resolve each aggregated row back to a roster player so the homepage can link
-  // to their profile. The row's playerId is the stat key (Riot ID or slot id);
-  // match it against every tournament roster.
+  // to their profile (and show their photo). The row's playerId is the stat key
+  // (Riot ID or slot id); match it against every tournament roster.
   const candidates: { tournamentId: string; player: TournamentPlayer }[] = [];
   for (const t of tournaments) {
     for (const team of t.teams) {
       for (const player of team.players) candidates.push({ tournamentId: t.id, player });
     }
   }
-  return top.map(row => {
+  return rows.map(row => {
     const synthetic = { playerId: row.playerId, playerName: row.playerName } as MatchPlayerStat;
     const hit = candidates.find(c => statMatchesPlayer(synthetic, c.player));
     return hit
-      ? { ...row, tournamentId: hit.tournamentId, rosterPlayerId: hit.player.id }
+      ? {
+          ...row,
+          // Prefer the current roster name so admin renames show through (stats
+          // freeze the name at import time).
+          playerName: hit.player.name?.trim() || row.playerName,
+          tournamentId: hit.tournamentId,
+          rosterPlayerId: hit.player.id,
+          photo: hit.player.photo,
+        }
       : row;
   });
+}
+
+// Top players by total kills — kept for compatibility with existing callers.
+export function getTopPlayersByAcs(tournaments: Tournament[], limit = 5): PlayerRow[] {
+  return getRankedPlayerRows(tournaments)
+    .sort((a, b) => b.kills - a.kills)
+    .slice(0, limit);
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -282,8 +307,18 @@ export function StatsPage() {
 
   const rows = useMemo(() => {
     const players = aggregatePlayers(activeBrackets, teamNameById);
-    return players.sort((a, b) => (b[metric] as number) - (a[metric] as number));
-  }, [activeBrackets, teamNameById, metric]);
+    // Prefer the current roster name over the stat's frozen playerName so admin
+    // renames in the team editor show through (stats freeze the name at import).
+    const withCurrentNames = players.map(row => {
+      const synthetic = { playerId: row.playerId, playerName: row.playerName } as MatchPlayerStat;
+      for (const team of tournament?.teams ?? []) {
+        const p = team.players.find(pl => statMatchesPlayer(synthetic, pl));
+        if (p) return { ...row, playerName: p.name?.trim() || row.playerName };
+      }
+      return row;
+    });
+    return withCurrentNames.sort((a, b) => (b[metric] as number) - (a[metric] as number));
+  }, [activeBrackets, teamNameById, metric, tournament]);
 
   const metricDef = METRICS.find(m => m.key === metric)!;
 
