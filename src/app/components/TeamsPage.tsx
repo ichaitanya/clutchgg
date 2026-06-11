@@ -136,8 +136,15 @@ export function TeamsPage() {
     }
   }, [routeTeamId]);
 
-  // Collapse both expandable sections when navigating to a different team.
-  useEffect(() => { setShowAllRoster(false); setShowAllAnalytics(false); }, [selectedTeamId]);
+  // Collapse both expandable sections when navigating to a different team, and
+  // reset the scroll position — selecting a team is a state change (not a route
+  // change), so the global ScrollToTop doesn't fire and the roster would
+  // otherwise open already scrolled to wherever the team list was.
+  useEffect(() => {
+    if (selectedTeamId) window.scrollTo(0, 0);
+    setShowAllRoster(false);
+    setShowAllAnalytics(false);
+  }, [selectedTeamId]);
 
   const allTeams: (TeamInTournament & { tournamentName: string; tournamentId: string; overview?: string })[] = useMemo(() => {
     const norm = (s: string) => s.trim().toLowerCase();
