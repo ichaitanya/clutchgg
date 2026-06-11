@@ -28,8 +28,10 @@ function FormatStep({
     { id: 'groupstage', label: 'Group Stage', desc: 'Teams split into groups; top teams per group advance.', icon: <Grid3x3 className="w-4 h-4" /> },
   ];
 
-  // Qualifiers count options: powers of 2 that are < teams.length
-  const qualifierOptions = [2, 4, 8, 16].filter(n => n < teams.length);
+  // Qualifiers count options that are < teams.length. Round robin ranks every
+  // team, so 6 is a valid cut; bracket formats prefer powers of 2 but 6 is still
+  // offered (a Stage 2 of 6 seeds with two byes).
+  const qualifierOptions = [2, 4, 6, 8, 16].filter(n => n < teams.length);
   if (qualifierOptions.length === 0) qualifierOptions.push(2);
 
   return (
