@@ -309,6 +309,9 @@ export function TeamsPage() {
   // so we can show a loader instead of the "No teams created yet" empty state.
   const [loaded, setLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Teams list is paginated at 15 per page, ordered by recent tournament
+  // activity (most recently active squads first).
+  const [page, setPage] = useState(0);
   // Expand toggles (default collapsed): the substitutes roster list and the
   // Player Performance Index each show the first 5 until expanded, independently.
   const [showAllRoster, setShowAllRoster] = useState(false);
@@ -348,8 +351,28 @@ export function TeamsPage() {
       names: Set<string>;          // normalized player names in this group
       playerByName: Map<string, TournamentPlayer>;
       order: string[];             // insertion order of normalized names
+      activity: number;            // most-recent activity timestamp (ms), for ordering
     }
     const groups: Group[] = [];
+
+    // A tournament's recency: the latest match date across all its brackets,
+    // falling back to the event's scheduled start date (0 when nothing dated).
+    const tournamentActivity = (t: Tournament): number => {
+      let latest = 0;
+      const brackets = [t.generatedBracket, t.stage1Bracket, t.stage2Bracket];
+      for (const b of brackets) {
+        for (const m of b?.rounds.flat() ?? []) {
+          if (!m.date) continue;
+          const ts = new Date(`${m.date}T${m.time || '00:00'}`).getTime();
+          if (!Number.isNaN(ts)) latest = Math.max(latest, ts);
+        }
+      }
+      if (t.event?.startDate) {
+        const ts = new Date(t.event.startDate).getTime();
+        if (!Number.isNaN(ts)) latest = Math.max(latest, ts);
+      }
+      return latest;
+    };
 
     const upsertPlayer = (g: Group, p: TournamentPlayer) => {
       const k = norm(p.name);
@@ -368,6 +391,7 @@ export function TeamsPage() {
     };
 
     tournaments.forEach(tournament => {
+      const activity = tournamentActivity(tournament);
       tournament.teams.forEach(team => {
         const tk = norm(team.name);
         const teamNames = new Set(team.players.map(p => norm(p.name)).filter(Boolean));
@@ -384,6 +408,13 @@ export function TeamsPage() {
         if (match) {
           if (!match.row.logo && team.logo) match.row.logo = team.logo;
           team.players.forEach(p => upsertPlayer(match, p));
+          // Surface the most recently active tournament as the team's tag, and
+          // track the team's latest activity for list ordering.
+          if (activity > match.activity) {
+            match.activity = activity;
+            match.row.tournamentName = tournament.name;
+            match.row.tournamentId = tournament.id;
+          }
         } else {
           const g: Group = {
             row: {
@@ -396,6 +427,7 @@ export function TeamsPage() {
             names: new Set(),
             playerByName: new Map(),
             order: [],
+            activity,
           };
           team.players.forEach(p => upsertPlayer(g, p));
           groups.push(g);
@@ -403,17 +435,31 @@ export function TeamsPage() {
       });
     });
 
-    return groups.map(g => ({
-      ...g.row,
-      players: g.order.map(k => g.playerByName.get(k)!),
-    }));
+    // Most recently active squads first; ties fall back to name for stability.
+    return groups
+      .sort((a, b) => b.activity - a.activity || a.row.name.localeCompare(b.row.name))
+      .map(g => ({
+        ...g.row,
+        players: g.order.map(k => g.playerByName.get(k)!),
+      }));
   }, [tournaments]);
+
+  const TEAMS_PER_PAGE = 15;
 
   const filteredTeams = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return allTeams;
     return allTeams.filter(t => t.name.toLowerCase().includes(q));
   }, [allTeams, searchQuery]);
+
+  // Reset to the first page whenever the result set changes (search/data).
+  useEffect(() => { setPage(0); }, [searchQuery, filteredTeams.length]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredTeams.length / TEAMS_PER_PAGE));
+  const pagedTeams = useMemo(
+    () => filteredTeams.slice(page * TEAMS_PER_PAGE, page * TEAMS_PER_PAGE + TEAMS_PER_PAGE),
+    [filteredTeams, page],
+  );
 
   const selectedTeam = useMemo(() => {
     const fromList = allTeams.find(t => t.id === selectedTeamId);
@@ -667,7 +713,7 @@ export function TeamsPage() {
               <p className="arena-teams-search__empty">No teams match "{searchQuery}"</p>
             )}
             <div className="arena-team-grid">
-              {filteredTeams.map(team => (
+              {pagedTeams.map(team => (
                 <button
                   key={team.id}
                   type="button"
@@ -697,6 +743,29 @@ export function TeamsPage() {
                 </button>
               ))}
             </div>
+            {pageCount > 1 && (
+              <div className="arena-teams-pagination">
+                <button
+                  type="button"
+                  className="arena-teams-pagination__btn"
+                  disabled={page === 0}
+                  onClick={() => { setPage(p => Math.max(0, p - 1)); window.scrollTo(0, 0); }}
+                >
+                  <ChevronLeft className="w-4 h-4" /> Prev
+                </button>
+                <span className="arena-teams-pagination__status">
+                  Page {page + 1} of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  className="arena-teams-pagination__btn"
+                  disabled={page >= pageCount - 1}
+                  onClick={() => { setPage(p => Math.min(pageCount - 1, p + 1)); window.scrollTo(0, 0); }}
+                >
+                  Next <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         ) : selectedTeam ? (
           <div>

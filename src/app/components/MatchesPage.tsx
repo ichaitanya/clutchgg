@@ -178,6 +178,60 @@ function collectTournamentMatches(t: Tournament): ScheduleMatch[] {
 const STATUS_ORDER: MatchStatus[] = ['live', 'upcoming', 'completed'];
 const PAGE_SIZE = 15;
 
+// Group header for the match list: "Today", "Tomorrow", or "Fri, Jun 13".
+function dateGroupLabel(date?: string): string {
+  if (!date) return 'Date TBD';
+  const d = new Date(`${date}T00:00`);
+  if (Number.isNaN(d.getTime())) return 'Date TBD';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((d.getTime() - today.getTime()) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays === -1) return 'Yesterday';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// ── Next-match spotlight ──────────────────────────────────────────────────────
+// Featured hero card above the Upcoming list: the soonest scheduled match,
+// with big logos and a countdown, so the page leads with something alive.
+function MatchSpotlight({ match, onOpen }: { match: ScheduleMatch; onOpen: () => void }) {
+  const countdown = countdownLabel(match.date, match.time);
+  const scheduleText = match.date
+    ? `${new Date(`${match.date}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${match.time ? ` · ${match.time}` : ''}`
+    : 'Schedule TBD';
+  return (
+    <button type="button" className="matches-spotlight" onClick={onOpen}>
+      <div className="matches-spotlight__glow" />
+      <p className="matches-spotlight__eyebrow">
+        {match.status === 'live' ? 'Live Now' : 'Up Next'} · {match.tournamentName} · {match.stage}
+      </p>
+      <div className="matches-spotlight__teams">
+        <div className="matches-spotlight__team">
+          <span className="matches-spotlight__logo">
+            {match.team1Logo ? <img src={match.team1Logo} alt="" /> : teamInitials(match.team1Name)}
+          </span>
+          <p className="matches-spotlight__name">{match.team1Name}</p>
+        </div>
+        <div className="matches-spotlight__center">
+          <span className="matches-spotlight__vs">VS</span>
+          <span className="matches-spotlight__format">{FORMAT_LABEL[match.format]}</span>
+          {match.status === 'live'
+            ? <span className="matches-spotlight__countdown matches-spotlight__countdown--live">● Live</span>
+            : countdown && <span className="matches-spotlight__countdown">{countdown}</span>}
+        </div>
+        <div className="matches-spotlight__team">
+          <span className="matches-spotlight__logo">
+            {match.team2Logo ? <img src={match.team2Logo} alt="" /> : teamInitials(match.team2Name)}
+          </span>
+          <p className="matches-spotlight__name">{match.team2Name}</p>
+        </div>
+      </div>
+      <p className="matches-spotlight__schedule">{scheduleText}</p>
+    </button>
+  );
+}
+
 // ── Mini Calendar ─────────────────────────────────────────────────────────────
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -406,6 +460,61 @@ export function MatchesPage() {
 
   const activeFilterCount = (filterType !== 'all' ? 1 : 0) + (filterTournament !== 'all' ? 1 : 0) + (selectedDate ? 1 : 0);
 
+  // Head-to-head records across the whole schedule, keyed by the sorted pair
+  // of team names. Upcoming tiles use this to show "H2H 2–1".
+  const h2hRecords = useMemo(() => {
+    const rec = new Map<string, { a: string; aWins: number; bWins: number }>();
+    for (const m of allMatches) {
+      if (m.status !== 'completed' || m.winnerSide === null) continue;
+      const n1 = m.team1Name.trim().toLowerCase();
+      const n2 = m.team2Name.trim().toLowerCase();
+      const [a, b] = [n1, n2].sort();
+      const key = `${a}|${b}`;
+      const cur = rec.get(key) ?? { a, aWins: 0, bWins: 0 };
+      if ((m.winnerSide === 1 ? n1 : n2) === a) cur.aWins++; else cur.bWins++;
+      rec.set(key, cur);
+    }
+    return rec;
+  }, [allMatches]);
+
+  // "H2H 2–1" oriented to the tile's team1, or null when the teams never met.
+  const h2hLabel = (match: ScheduleMatch): string | null => {
+    const n1 = match.team1Name.trim().toLowerCase();
+    const n2 = match.team2Name.trim().toLowerCase();
+    const [a, b] = [n1, n2].sort();
+    const rec = h2hRecords.get(`${a}|${b}`);
+    if (!rec || rec.aWins + rec.bWins === 0) return null;
+    const w1 = a === n1 ? rec.aWins : rec.bWins;
+    const w2 = a === n1 ? rec.bWins : rec.aWins;
+    return `H2H ${w1}–${w2}`;
+  };
+
+  // Quick stats for the strip under the title (unfiltered, whole schedule).
+  const quickStats = useMemo(() => {
+    const todayKey = (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    const weekEnd = Date.now() + 7 * 86400000;
+    return {
+      live: allMatches.filter(m => m.status === 'live').length,
+      today: allMatches.filter(m => m.date === todayKey).length,
+      week: allMatches.filter(m =>
+        m.status !== 'completed' && Number.isFinite(m.sortTs) && m.sortTs >= Date.now() && m.sortTs <= weekEnd,
+      ).length,
+    };
+  }, [allMatches]);
+
+  // Spotlight: a live match if one exists, else the soonest scheduled upcoming
+  // match. Shown above the list on the Live/Upcoming tabs (first page only).
+  const spotlight = useMemo(() => {
+    if (activeTab === 'completed' || safePage !== 1) return null;
+    return byStatus.live.find(m => m.date)
+      ?? byStatus.upcoming.find(m => Number.isFinite(m.sortTs))
+      ?? byStatus.upcoming[0]
+      ?? null;
+  }, [activeTab, safePage, byStatus]);
+
   // First fetch still in flight — show a loader rather than the "no matches"
   // empty state, which would otherwise read as "nothing is scheduled".
   if (adminData === null) {
@@ -425,6 +534,23 @@ export function MatchesPage() {
       <main className="arena-page" style={{ paddingTop: '2rem', paddingBottom: '4rem' }}>
         <div style={{ textAlign: 'center', paddingBottom: '1.75rem' }}>
           <h1 className="arena-page-hero__title" style={{ margin: 0 }}>Match Schedule</h1>
+          <p className="matches-hero__sub">Every match across all ClutchGG tournaments — live scores, schedules, and results.</p>
+          {(quickStats.live > 0 || quickStats.today > 0 || quickStats.week > 0) && (
+            <div className="matches-hero__stats">
+              {quickStats.live > 0 && (
+                <span className="matches-hero__stat matches-hero__stat--live">
+                  <span className="arena-match-card__badge-dot arena-match-card__badge-dot--pulse" />
+                  {quickStats.live} Live Now
+                </span>
+              )}
+              {quickStats.today > 0 && (
+                <span className="matches-hero__stat"><strong>{quickStats.today}</strong> Today</span>
+              )}
+              {quickStats.week > 0 && (
+                <span className="matches-hero__stat"><strong>{quickStats.week}</strong> This Week</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Mobile filter toggle */}
@@ -508,8 +634,13 @@ export function MatchesPage() {
                   </div>
                 ) : (
                   <>
+                    {spotlight && (
+                      <MatchSpotlight match={spotlight} onOpen={() => navigate(`/tournament-match/${spotlight.id}`)} />
+                    )}
                     <div className="arena-match-list">
-                      {pageItems.map(match => {
+                      {pageItems.map((match, idx) => {
+                        const groupLabel = dateGroupLabel(match.date);
+                        const showGroup = idx === 0 || dateGroupLabel(pageItems[idx - 1].date) !== groupLabel;
                         const decided = match.status === 'completed' && match.winnerSide !== null;
                         const scheduleText = match.date
                           ? `${new Date(`${match.date}T00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${match.time ? ` · ${match.time}` : ''}`
@@ -523,6 +654,11 @@ export function MatchesPage() {
 
                         return (
                           <div key={match.id} className="arena-tp-matchwrap">
+                          {showGroup && (
+                            <p className={`matches-date-group${groupLabel === 'Today' ? ' matches-date-group--today' : ''}`}>
+                              {groupLabel}
+                            </p>
+                          )}
                           <button
                             type="button"
                             onClick={() => navigate(`/tournament-match/${match.id}`)}
@@ -555,6 +691,14 @@ export function MatchesPage() {
                                     <>
                                       <span className="arena-match-card__vs-badge">VS</span>
                                       <span className="arena-match-card__format">{FORMAT_LABEL[match.format]}</span>
+                                      {/* Live: score of the map in progress · Upcoming: head-to-head record */}
+                                      {match.status === 'live' && match.maps.length > 0 ? (
+                                        <span className="arena-match-card__h2h arena-match-card__h2h--live">
+                                          Map {match.maps.length} · {match.maps[match.maps.length - 1].team1Score}–{match.maps[match.maps.length - 1].team2Score}
+                                        </span>
+                                      ) : match.status === 'upcoming' && h2hLabel(match) ? (
+                                        <span className="arena-match-card__h2h">{h2hLabel(match)}</span>
+                                      ) : null}
                                     </>
                                   )}
                                 </div>

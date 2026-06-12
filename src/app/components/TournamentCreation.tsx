@@ -251,6 +251,9 @@ export interface Tournament {
   qualifiedTeams?: TeamInTournament[];    // teams that advance to stage 2
   stage2Format?: Stage2Format;
   stage2Bracket?: BracketGenerated;       // bracket for stage 2
+  // Which stats decide the Tournament MVP on two-stage events: both stages
+  // (default) or Stage 2 / playoffs only. Set by the organizer when editing.
+  mvpStageScope?: 'all' | 'stage2';
   // Legacy single-stage fields kept for backward compatibility:
   generatedBracket?: BracketGenerated;
   groupStage?: GroupStage;
@@ -3421,6 +3424,37 @@ function CreateTournamentScreen({
                   </div>
                 </div>
               )}
+
+              {/* Tournament MVP scope — two-stage events can score the MVP on
+                  both stages (default) or on Stage 2 / playoff stats only. */}
+              <div className="bg-[#0d0f16] border border-[#2a2d3a] rounded-xl p-4 mb-4">
+                <p className="text-white font-semibold text-sm mb-1">Tournament MVP Calculation</p>
+                <p className="text-gray-500 text-xs mb-3">
+                  Choose which stats determine the Tournament MVP for this two-stage event.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: 'all' as const, label: 'Both Stages', desc: 'Stage 1 + Stage 2 maps' },
+                    { value: 'stage2' as const, label: 'Stage 2 Only', desc: 'Playoff maps only' },
+                  ]).map(opt => {
+                    const active = (tournament.mvpStageScope ?? 'all') === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => setTournament(t => ({ ...t, mvpStageScope: opt.value }))}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          active
+                            ? 'bg-purple-900/30 border-purple-600 text-purple-300'
+                            : 'bg-[#151821] border-[#2a2d3a] text-gray-400 hover:border-purple-700/50'
+                        }`}
+                      >
+                        <p className="text-sm font-semibold">{opt.label}</p>
+                        <p className="text-xs mt-0.5 opacity-80">{opt.desc}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               {!isEditing && (
                 <button

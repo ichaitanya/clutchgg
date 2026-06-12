@@ -16,6 +16,39 @@ import { getTournaments, loadWithRetry } from '../services/db';
 import { agentIconUrl, mapImageUrl } from '../utils/valorantAssets';
 import { bracketRoundLabel } from '../utils/bracketRounds';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
+import { normalizeRiotId, normalizeRiotName } from '../utils/riotId';
+
+// Whether two roster entries are the SAME person across tournaments/teams.
+// Riot ID is the primary key (it survives team changes — TsWaGg#6969 is the
+// same player whether on Auros Gaming or APEX HAVOC), checked against each
+// player's current riotId and any historical alias riotId. When neither side
+// has a Riot ID we fall back to an exact (normalized) name match, preserving the
+// pre-Riot-ID behaviour for players who were only ever entered by name.
+function samePlayerIdentity(a: TournamentPlayer, b: TournamentPlayer): boolean {
+  if (a.id === b.id) return true;
+
+  const riotIds = (p: TournamentPlayer): string[] => {
+    const out: string[] = [];
+    if (p.riotId) out.push(normalizeRiotId(p.riotId));
+    for (const al of p.nameHistory ?? []) if (al.riotId) out.push(normalizeRiotId(al.riotId));
+    return out.filter(Boolean);
+  };
+  const aIds = riotIds(a);
+  const bIds = riotIds(b);
+  if (aIds.length && bIds.length) {
+    return aIds.some(id => bIds.includes(id));
+  }
+
+  // Name fallback (only when at least one side has no Riot ID to key on).
+  const names = (p: TournamentPlayer): string[] => {
+    const out = [normalizeRiotName(p.name)];
+    for (const al of p.nameHistory ?? []) if (al.name) out.push(normalizeRiotName(al.name));
+    return out.filter(Boolean);
+  };
+  const aNames = names(a);
+  const bNames = names(b);
+  return aNames.some(n => bNames.includes(n));
+}
 
 // Render an agent name with its official icon (falls back to a 2-letter chip).
 function AgentTag({ agent }: { agent?: string }) {
@@ -45,6 +78,8 @@ interface PlayerMapStat extends MatchPlayerStat {
   mapName: string;
   date?: string;
   won?: boolean; // this map's result for the player's team (undefined on ties)
+  myScore: number;   // map score, oriented to the player's team
+  oppScore: number;
   tournamentId: string;
   tournamentName: string;
 }
@@ -122,6 +157,8 @@ function collectPlayerMapStats(
             won: map.team1Score === map.team2Score
               ? undefined
               : (isT1 ? map.team1Score > map.team2Score : map.team2Score > map.team1Score),
+            myScore: isT1 ? map.team1Score : map.team2Score,
+            oppScore: isT1 ? map.team2Score : map.team1Score,
             tournamentId: tournament.id,
             tournamentName: tournament.name,
           });
@@ -132,14 +169,39 @@ function collectPlayerMapStats(
   return out;
 }
 
-// One tournament's worth of this player's stats, for the career section.
+// One match the player featured in, within a single tournament — the unit the
+// per-tournament expander lists (most recent first). Aggregates the player's
+// maps in that match into a single K/D/A + ACS line, oriented to their team.
+interface CareerMatch {
+  matchId: string;
+  stageLabel: string;
+  opponentName: string;
+  date?: string;
+  won?: boolean;        // series result for the player's team (undefined on tie/unknown)
+  maps: number;
+  kills: number;
+  deaths: number;
+  assists: number;
+  acs: number;          // averaged across the player's maps in this match
+  agents: string[];     // agents the player picked across this match's maps
+  mapLines: PlayerMapStat[]; // per-map lines, for the inline maps expander
+}
+
+// One tournament's worth of this player's stats, for the career section. Carries
+// the team they represented there and their match list (so each row can expand
+// into a per-tournament match history).
 interface CareerEntry {
   tournamentId: string;
   tournamentName: string;
+  teamId: string;
+  teamName: string;
   maps: number;
   kills: number;
   acs: number;
   placement: string | null; // only set once the tournament is completed
+  status: 'planning' | 'registration' | 'in-progress' | 'completed';
+  activity: number;         // recency (latest match ms, fallback event start) for ordering
+  matches: CareerMatch[];   // most recent first
 }
 
 interface Aggregate {
@@ -177,6 +239,195 @@ function aggregate(stats: PlayerMapStat[]): Aggregate {
   };
 }
 
+// Short date, e.g. "12 May" — shared by the tournament expander match rows.
+function shortDate(d?: string): string {
+  if (!d) return '';
+  const t = new Date(d);
+  if (isNaN(t.getTime())) return '';
+  return t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+// One tournament in the career section: a header row (tournament name links to
+// the tournament page; placement + totals; a chevron toggle at the end) that
+// expands into the player's match history *for that tournament*. Expanded by
+// default, showing the last 5 matches with a "View more" reveal for the rest.
+function CareerTournamentRow({ entry }: { entry: CareerEntry }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(true);     // expanded by default per spec
+  const [showAll, setShowAll] = useState(false);
+  // One match at a time can be expanded to show its per-map lines inline.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const shown = showAll ? entry.matches : entry.matches.slice(0, 5);
+  const hasMore = entry.matches.length > 5;
+
+  return (
+    <div className={`arena-pp-tourney${open ? ' arena-pp-tourney--open' : ''}`}>
+      <div className="arena-pp-tourney__head">
+        <Trophy className="arena-pp-tourney__icon w-4 h-4" />
+        <div className="arena-pp-tourney__id">
+          <Link to={`/tournament/${entry.tournamentId}`} className="arena-pp-tourney__name">
+            {entry.tournamentName}
+          </Link>
+          <span className="arena-pp-tourney__team">{entry.teamName}</span>
+        </div>
+        {entry.placement
+          ? <span className="arena-pp-tourney__place">{entry.placement}</span>
+          : entry.status !== 'completed' && (
+              <span className={`arena-pp-tourney__status arena-pp-tourney__status--${entry.status}`}>
+                {entry.status === 'in-progress' ? 'Ongoing' : entry.status === 'registration' ? 'Registration' : 'Upcoming'}
+              </span>
+            )}
+        <span className="arena-pp-tourney__stat">{entry.maps} <small>{entry.maps === 1 ? 'map' : 'maps'}</small></span>
+        <span className="arena-pp-tourney__stat arena-pp-tourney__stat--num">{Math.round(entry.acs)} <small>ACS</small></span>
+        <span className="arena-pp-tourney__stat arena-pp-tourney__stat--num">{entry.kills} <small>K</small></span>
+        {entry.matches.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            className={`arena-pp-tourney__toggle${open ? ' arena-pp-tourney__toggle--open' : ''}`}
+            title={open ? 'Hide matches' : 'Show matches'}
+            aria-label={open ? 'Hide matches' : 'Show matches'}
+          >
+            <ChevronDown className="w-5 h-5" />
+          </button>
+        ) : (
+          <span className="arena-pp-tourney__toggle arena-pp-tourney__toggle--empty" />
+        )}
+      </div>
+
+      {open && entry.matches.length > 0 && (
+        <div className="arena-pp-tourney__body">
+          {shown.map(m => {
+            const expanded = expandedId === m.matchId;
+            return (
+              <div key={m.matchId} className="arena-pp-tmatchwrap">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/tournament-match/${m.matchId}`)}
+                  onKeyDown={e => { if (e.key === 'Enter') navigate(`/tournament-match/${m.matchId}`); }}
+                  className={`arena-pp-tmatch${m.won === true ? ' arena-pp-tmatch--w' : m.won === false ? ' arena-pp-tmatch--l' : ''}`}
+                >
+                  <span className="arena-pp-tmatch__stage">{m.stageLabel}</span>
+                  <span className="arena-pp-tmatch__opp">vs {m.opponentName}</span>
+                  <span className="arena-pp-tmatch__agents">
+                    {m.agents.map(a => {
+                      const url = agentIconUrl(a);
+                      return url
+                        ? <img key={a} src={url} alt={a} title={a} className="arena-pp-tmatch__agent" />
+                        : <span key={a} className="arena-pp-tmatch__agent arena-pp-tmatch__agent--fallback" title={a}>{a.slice(0, 2).toUpperCase()}</span>;
+                    })}
+                  </span>
+                  <span className="arena-pp-tmatch__date">{m.date ? shortDate(m.date) : ''}</span>
+                  <span className="arena-pp-tmatch__kda">
+                    <span className="arena-pp-kda__k">{m.kills}</span>
+                    <span className="arena-pp-kda__sep">/</span>
+                    <span className="arena-pp-kda__d">{m.deaths}</span>
+                    <span className="arena-pp-kda__sep">/</span>
+                    <span className="arena-pp-kda__a">{m.assists}</span>
+                  </span>
+                  <span className={`arena-pp-tmatch__acs${m.acs >= 240 ? ' arena-pp-table__acs-hot' : ''}`}>
+                    {Math.round(m.acs)} <small>ACS</small>
+                  </span>
+                  <span className="arena-pp-tmatch__rescol">
+                    {m.won !== undefined && (
+                      <span className={`arena-pp-tmatch__res arena-pp-tmatch__res--${m.won ? 'w' : 'l'}`}>
+                        {m.won ? 'W' : 'L'}
+                      </span>
+                    )}
+                  </span>
+                  {m.mapLines.length > 0 ? (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className={`arena-pp-tmatch__expand${expanded ? ' arena-pp-tmatch__expand--open' : ''}`}
+                      title={expanded ? 'Hide maps' : 'Show maps'}
+                      onClick={e => { e.stopPropagation(); setExpandedId(expanded ? null : m.matchId); }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setExpandedId(expanded ? null : m.matchId);
+                        }
+                      }}
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </span>
+                  ) : (
+                    <span className="arena-pp-tmatch__expand arena-pp-tmatch__expand--empty" />
+                  )}
+                </div>
+
+                {expanded && m.mapLines.length > 0 && (
+                  <div className="arena-pp-maplines">
+                    {m.mapLines.map((ml, mi) => {
+                      const splash = mapImageUrl(ml.mapName);
+                      return (
+                        <div
+                          key={mi}
+                          className="arena-pp-mapline"
+                          style={splash ? {
+                            backgroundImage: `linear-gradient(90deg, rgba(10,10,10,0.94) 0%, rgba(10,10,10,0.72) 45%, rgba(10,10,10,0.92) 100%), url(${splash})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center 35%',
+                          } : undefined}
+                        >
+                          <span className="arena-pp-mapline__map">{ml.mapName || `Map ${mi + 1}`}</span>
+                          <span className="arena-pp-mapline__score">
+                            <span className={ml.won === true ? 'arena-pp-mapline__score-win' : ''}>{ml.myScore}</span>
+                            <span className="arena-pp-mapline__score-sep">–</span>
+                            <span className={ml.won === false ? 'arena-pp-mapline__score-win' : ''}>{ml.oppScore}</span>
+                          </span>
+                          <span className="arena-pp-tmatch__agents">
+                            {(() => {
+                              const a = (ml.agent ?? '').split(',')[0].trim();
+                              if (!a) return null;
+                              const url = agentIconUrl(a);
+                              return url
+                                ? <img src={url} alt={a} title={a} className="arena-pp-tmatch__agent" />
+                                : <span className="arena-pp-tmatch__agent arena-pp-tmatch__agent--fallback" title={a}>{a.slice(0, 2).toUpperCase()}</span>;
+                            })()}
+                          </span>
+                          <span className="arena-pp-tmatch__kda">
+                            <span className="arena-pp-kda__k">{ml.kills}</span>
+                            <span className="arena-pp-kda__sep">/</span>
+                            <span className="arena-pp-kda__d">{ml.deaths}</span>
+                            <span className="arena-pp-kda__sep">/</span>
+                            <span className="arena-pp-kda__a">{ml.assists}</span>
+                          </span>
+                          <span className={`arena-pp-tmatch__acs${ml.acs >= 240 ? ' arena-pp-table__acs-hot' : ''}`}>
+                            {Math.round(ml.acs)} <small>ACS</small>
+                          </span>
+                          <span className="arena-pp-tmatch__rescol">
+                            {ml.won !== undefined && (
+                              <span className={`arena-pp-tmatch__res arena-pp-tmatch__res--${ml.won ? 'w' : 'l'}`}>
+                                {ml.won ? 'W' : 'L'}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {hasMore && (
+            <button
+              type="button"
+              className="arena-pp-tourney__more"
+              onClick={() => setShowAll(s => !s)}
+            >
+              {showAll ? 'Show fewer matches' : `View all ${entry.matches.length} matches`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PlayerPage() {
   const { tournamentId = '', playerId = '' } = useParams();
   const navigate = useNavigate();
@@ -207,17 +458,17 @@ export function PlayerPage() {
 
   const found = resolved;
 
-  // The player's photo may have been uploaded on a different tournament's copy
-  // of this team (teams recur across tournaments). If this copy has no photo,
-  // backfill it from another copy matched by team name + player name.
+  // The player's photo may have been uploaded on a different tournament/team
+  // copy of this person (they recur across tournaments, possibly on different
+  // teams). If this copy has no photo, backfill it from any other copy that is
+  // the SAME person by Riot-ID identity (name fallback) — so a photo set on the
+  // Auros Gaming stint shows on the APEX HAVOC stint too.
   const photo = useMemo(() => {
     if (!found) return undefined;
     if (found.player.photo) return found.player.photo;
-    const norm = (s: string) => s.trim().toLowerCase();
     for (const t of tournaments) {
       for (const team of t.teams) {
-        if (norm(team.name) !== norm(found.team.name)) continue;
-        const match = team.players.find(p => norm(p.name) === norm(found.player.name) && p.photo);
+        const match = team.players.find(p => p.photo && samePlayerIdentity(p, found.player));
         if (match?.photo) return match.photo;
       }
     }
@@ -226,19 +477,16 @@ export function PlayerPage() {
 
   const { mapStats, careers } = useMemo(() => {
     if (!resolved) return { mapStats: [] as PlayerMapStat[], careers: [] as CareerEntry[] };
-    const norm = (s: string) => s.trim().toLowerCase();
     const allStats: PlayerMapStat[] = [];
     const careerList: CareerEntry[] = [];
     const seen = new Set<string>();
-    // Collect from every tournament where a team with the same name contains
-    // this player — covers the case where the same squad appears across multiple
-    // tournament entries (e.g. vct + rrb + vvv all having Fire5 Esports).
+    // Collect from every tournament + team where this *person* appears — matched
+    // by Riot ID (with name fallback) rather than team name, so a player who
+    // changed teams between tournaments (e.g. Auros Gaming → APEX HAVOC) has all
+    // their tournaments unified into one career instead of a profile per team.
     for (const t of tournaments) {
       for (const tm of t.teams) {
-        if (norm(tm.name) !== norm(resolved.team.name)) continue;
-        const rosterPlayer = tm.players.find(p =>
-          p.id === resolved.player.id || norm(p.name) === norm(resolved.player.name)
-        );
+        const rosterPlayer = tm.players.find(p => samePlayerIdentity(p, resolved.player));
         if (!rosterPlayer) continue;
         const rows: PlayerMapStat[] = [];
         for (const row of collectPlayerMapStats(t, rosterPlayer, tm.id)) {
@@ -249,32 +497,99 @@ export function PlayerPage() {
         }
         if (rows.length === 0) continue;
         allStats.push(...rows);
+
+        // Group this tournament's maps into per-match lines, oriented to the
+        // player's team, then sort most-recent first for the expander.
+        const byMatch = new Map<string, PlayerMapStat[]>();
+        for (const r of rows) {
+          const arr = byMatch.get(r.matchId) ?? [];
+          arr.push(r);
+          byMatch.set(r.matchId, arr);
+        }
+        const matches: CareerMatch[] = [...byMatch.values()].map(mlist => {
+          const ag = aggregate(mlist);
+          const wins = mlist.filter(m => m.won === true).length;
+          const losses = mlist.filter(m => m.won === false).length;
+          return {
+            matchId: mlist[0].matchId,
+            stageLabel: mlist[0].stageLabel,
+            opponentName: mlist[0].opponentName,
+            date: mlist[0].date,
+            won: wins === losses ? undefined : wins > losses,
+            maps: mlist.length,
+            kills: ag.kills,
+            deaths: ag.deaths,
+            assists: ag.assists,
+            acs: ag.acs,
+            agents: [...new Set(
+              mlist.map(m => (m.agent ?? '').split(',')[0].trim()).filter(Boolean),
+            )],
+            mapLines: mlist,
+          };
+        });
+        const matchTime = (m: CareerMatch) =>
+          m.date ? new Date(`${m.date}T00:00`).getTime() : Number.NEGATIVE_INFINITY;
+        matches.sort((a, b) => matchTime(b) - matchTime(a));
+
         const a = aggregate(rows);
+        const latestMatchMs = Math.max(
+          ...matches.map(matchTime).filter(n => Number.isFinite(n)),
+          t.event?.startDate ? new Date(t.event.startDate).getTime() || 0 : 0,
+          0,
+        );
+        const status = deriveTournamentStatus(t);
         careerList.push({
           tournamentId: t.id,
           tournamentName: t.name,
+          teamId: tm.id,
+          teamName: tm.name,
           maps: rows.length,
           kills: a.kills,
           acs: a.acs,
-          placement: deriveTournamentStatus(t) === 'completed' ? computePlacement(t, tm.id) : null,
+          placement: status === 'completed' ? computePlacement(t, tm.id) : null,
+          status,
+          activity: latestMatchMs,
+          matches,
         });
       }
     }
+    // Order: live/ongoing tournaments first, then upcoming, then completed —
+    // a finished event never outranks an active one (so a player's "current"
+    // team is the one they're actively playing for). Within a tier, most recent
+    // first. This is why a completed Aorus stint stays below an in-progress
+    // Next Level stint even if its matches carry later dates.
+    const statusRank: Record<CareerEntry['status'], number> = {
+      'in-progress': 0,
+      'registration': 1,
+      'planning': 1,
+      'completed': 2,
+    };
+    careerList.sort((a, b) =>
+      statusRank[a.status] - statusRank[b.status] || b.activity - a.activity,
+    );
     return { mapStats: allStats, careers: careerList };
   }, [resolved, tournaments]);
 
-  const agg = useMemo(() => aggregate(mapStats), [mapStats]);
+  // The player's latest team + tournament (drives the hero chips). Falls back to
+  // wherever they were resolved from when there are no stats yet.
+  const latestStint = careers[0] ?? null;
+  // Other teams the player has represented (distinct, excluding the latest), for
+  // the "Past Teams" section. Keyed by normalized team name so the same squad
+  // across tournaments collapses to one entry.
+  const pastTeams = useMemo(() => {
+    const seenNames = new Set<string>();
+    if (latestStint) seenNames.add(latestStint.teamName.trim().toLowerCase());
+    const out: { teamId: string; teamName: string; tournamentName: string }[] = [];
+    for (const c of careers) {
+      const key = c.teamName.trim().toLowerCase();
+      if (seenNames.has(key)) continue;
+      seenNames.add(key);
+      out.push({ teamId: c.teamId, teamName: c.teamName, tournamentName: c.tournamentName });
+    }
+    return out;
+  }, [careers, latestStint]);
 
-  // Match history, most recent first: dated maps sort descending; undated ones
-  // follow in reverse insertion order (later bracket rounds were pushed later).
-  const sortedStats = useMemo(() => {
-    const ts = (s: PlayerMapStat) => {
-      if (!s.date) return Number.NEGATIVE_INFINITY;
-      const t = new Date(`${s.date}T00:00`).getTime();
-      return isNaN(t) ? Number.NEGATIVE_INFINITY : t;
-    };
-    return mapStats.slice().reverse().sort((a, b) => ts(b) - ts(a));
-  }, [mapStats]);
+  const agg = useMemo(() => aggregate(mapStats), [mapStats]);
 
   // Per-agent breakdown, most-played first.
   const agentBreakdown = useMemo(() => {
@@ -345,6 +660,13 @@ export function PlayerPage() {
   // The tournament the player actually belongs to (may differ from the URL one).
   const playerTournament = found.sourceTournament;
 
+  // Hero chips reflect the player's LATEST team/tournament (career is now unified
+  // across teams). Fall back to wherever they were resolved when no stats exist.
+  const heroTeamId = latestStint?.teamId ?? team.id;
+  const heroTeamName = latestStint?.teamName ?? team.name;
+  const heroTournamentId = latestStint?.tournamentId ?? playerTournament.id;
+  const heroTournamentName = latestStint?.tournamentName ?? playerTournament.name;
+
   const matchesPlayed = new Set(mapStats.map(s => s.matchId)).size;
   const summaryCards: { label: string; value: string; sub: string; highlight?: boolean }[] = [
     { label: 'ACS', value: Math.round(agg.acs).toString(), sub: 'avg per map', highlight: true },
@@ -353,22 +675,13 @@ export function PlayerPage() {
     { label: 'Maps', value: agg.mapsPlayed.toString(), sub: `across ${matchesPlayed} ${matchesPlayed === 1 ? 'match' : 'matches'}` },
   ];
 
-  // Short date for the history table, e.g. "12 May" — omitted when unknown.
-  const formatDate = (d?: string) => {
-    if (!d) return '—';
-    const t = new Date(d);
-    if (isNaN(t.getTime())) return '—';
-    return t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  };
-  const hasDates = mapStats.some(s => s.date && !isNaN(new Date(s.date).getTime()));
-
   return (
     <div className="min-h-screen bg-[#0e0e0e]">
       <Header />
 
       <main className="arena-md">
         {/* Back */}
-        <button onClick={() => navigate(`/teams/${team.id}`)} className="arena-md__back">
+        <button onClick={() => navigate(`/teams/${heroTeamId}`)} className="arena-md__back">
           <ChevronLeft className="w-4 h-4" />
           Back to Roster
         </button>
@@ -433,13 +746,13 @@ export function PlayerPage() {
             )}
 
             <div className="arena-pp-hero__chips">
-              <button type="button" onClick={() => navigate(`/teams/${team.id}`)} className="arena-pp-chip arena-pp-chip--link">
+              <button type="button" onClick={() => navigate(`/teams/${heroTeamId}`)} className="arena-pp-chip arena-pp-chip--link">
                 <Shield className="w-3.5 h-3.5" />
-                {team.name}
+                {heroTeamName}
               </button>
-              <button type="button" onClick={() => navigate(`/tournament/${playerTournament.id}`)} className="arena-pp-chip arena-pp-chip--link">
+              <button type="button" onClick={() => navigate(`/tournament/${heroTournamentId}`)} className="arena-pp-chip arena-pp-chip--link">
                 <Trophy className="w-3.5 h-3.5" />
-                {playerTournament.name}
+                {heroTournamentName}
               </button>
               {player.role && (
                 <span className="arena-pp-chip arena-pp-chip--role" style={getRoleStyle(player.role)}>
@@ -452,6 +765,26 @@ export function PlayerPage() {
               <div className="arena-pp-hero__agents">
                 <span className="arena-pp-hero__agents-label">Agents</span>
                 <AgentTag agent={agg.agents.join(', ')} />
+              </div>
+            )}
+
+            {pastTeams.length > 0 && (
+              <div className="arena-pp-hero__past">
+                <span className="arena-pp-hero__past-label">Past Teams</span>
+                <span className="arena-pp-hero__past-list">
+                  {pastTeams.map(pt => (
+                    <button
+                      key={pt.teamId}
+                      type="button"
+                      onClick={() => navigate(`/teams/${pt.teamId}`)}
+                      className="arena-pp-chip arena-pp-chip--link arena-pp-chip--ghost"
+                      title={`${pt.teamName} · ${pt.tournamentName}`}
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      {pt.teamName}
+                    </button>
+                  ))}
+                </span>
               </div>
             )}
           </div>
@@ -496,82 +829,100 @@ export function PlayerPage() {
           );
         })()}
 
-        {/* Agent / map breakdowns */}
+        {/* Agent / map breakdowns — column-aligned tables with usage/winrate bars */}
         {(agentBreakdown.length > 0 || mapBreakdown.length > 0) && (
           <div className="arena-pp-break">
-            {agentBreakdown.length > 0 && (
+            {agentBreakdown.length > 0 && (() => {
+              const maxMaps = Math.max(...agentBreakdown.map(a => a.maps));
+              return (
+                <div className="arena-tp-card">
+                  <h3 className="arena-tp-card__title">By Agent</h3>
+                  <div className="arena-pp-break__list">
+                    <div className="arena-pp-break__hrow arena-pp-break__grid--agent">
+                      <span>Agent</span>
+                      <span className="arena-pp-break__hcell--num">Maps</span>
+                      <span className="arena-pp-break__hcell--num">ACS</span>
+                      <span className="arena-pp-break__hcell--num">K/D</span>
+                    </div>
+                    {agentBreakdown.map(a => {
+                      const icon = agentIconUrl(a.agent);
+                      return (
+                        <div key={a.agent} className="arena-pp-break__row arena-pp-break__grid--agent">
+                          <span className="arena-pp-break__who">
+                            {icon
+                              ? <img src={icon} alt="" className="arena-pp-break__icon" />
+                              : <span className="arena-pp-break__icon arena-pp-break__icon--empty" />}
+                            <span className="arena-pp-break__namecol">
+                              <span className="arena-pp-break__name">{a.agent}</span>
+                              <span className="arena-pp-break__bar">
+                                <span
+                                  className="arena-pp-break__bar-fill"
+                                  style={{ width: `${Math.max(8, (a.maps / maxMaps) * 100)}%` }}
+                                />
+                              </span>
+                            </span>
+                          </span>
+                          <span className="arena-pp-break__cell arena-pp-break__cell--num">{a.maps}</span>
+                          <span className="arena-pp-break__cell arena-pp-break__cell--num arena-pp-break__cell--strong">{Math.round(a.acs)}</span>
+                          <span className="arena-pp-break__cell arena-pp-break__cell--num">{a.kd.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+            {mapBreakdown.length > 0 && (
               <div className="arena-tp-card">
-                <h3 className="arena-tp-card__title">By Agent</h3>
+                <h3 className="arena-tp-card__title">By Map</h3>
                 <div className="arena-pp-break__list">
-                  {agentBreakdown.map(a => {
-                    const icon = agentIconUrl(a.agent);
+                  <div className="arena-pp-break__hrow arena-pp-break__grid--map">
+                    <span>Map</span>
+                    <span className="arena-pp-break__hcell--num">Record</span>
+                    <span className="arena-pp-break__hcell--num">Maps</span>
+                    <span className="arena-pp-break__hcell--num">ACS</span>
+                  </div>
+                  {mapBreakdown.map(m => {
+                    const decided = m.wins + m.losses;
                     return (
-                      <div key={a.agent} className="arena-pp-break__row">
+                      <div key={m.map} className="arena-pp-break__row arena-pp-break__grid--map">
                         <span className="arena-pp-break__who">
-                          {icon
-                            ? <img src={icon} alt="" className="arena-pp-break__icon" />
-                            : <span className="arena-pp-break__icon arena-pp-break__icon--empty" />}
-                          <span className="arena-pp-break__name">{a.agent}</span>
+                          <span className="arena-pp-break__namecol">
+                            <span className="arena-pp-break__name">{m.map}</span>
+                            <span className="arena-pp-break__bar">
+                              {decided > 0 && (
+                                <>
+                                  <span className="arena-pp-break__bar-fill arena-pp-break__bar-fill--w" style={{ width: `${(m.wins / decided) * 100}%` }} />
+                                  <span className="arena-pp-break__bar-fill arena-pp-break__bar-fill--l" style={{ width: `${(m.losses / decided) * 100}%` }} />
+                                </>
+                              )}
+                            </span>
+                          </span>
                         </span>
-                        <span className="arena-pp-break__cell">{a.maps} {a.maps === 1 ? 'map' : 'maps'}</span>
-                        <span className="arena-pp-break__cell arena-pp-break__cell--num">{Math.round(a.acs)} <small>ACS</small></span>
-                        <span className="arena-pp-break__cell arena-pp-break__cell--num">{a.kd.toFixed(2)} <small>K/D</small></span>
+                        <span className="arena-pp-break__cell arena-pp-break__cell--num">
+                          <span className="arena-pp-break__w">{m.wins}W</span>
+                          <span className="arena-pp-break__sep">–</span>
+                          <span className="arena-pp-break__l">{m.losses}L</span>
+                        </span>
+                        <span className="arena-pp-break__cell arena-pp-break__cell--num">{m.maps}</span>
+                        <span className="arena-pp-break__cell arena-pp-break__cell--num arena-pp-break__cell--strong">{Math.round(m.acs)}</span>
                       </div>
                     );
                   })}
                 </div>
               </div>
             )}
-            {mapBreakdown.length > 0 && (
-              <div className="arena-tp-card">
-                <h3 className="arena-tp-card__title">By Map</h3>
-                <div className="arena-pp-break__list">
-                  {mapBreakdown.map(m => (
-                    <div key={m.map} className="arena-pp-break__row">
-                      <span className="arena-pp-break__who">
-                        <span className="arena-pp-break__name">{m.map}</span>
-                      </span>
-                      <span className="arena-pp-break__cell">
-                        <span className="arena-pp-break__w">{m.wins}W</span>
-                        <span className="arena-pp-break__sep"> – </span>
-                        <span className="arena-pp-break__l">{m.losses}L</span>
-                      </span>
-                      <span className="arena-pp-break__cell">{m.maps} {m.maps === 1 ? 'map' : 'maps'}</span>
-                      <span className="arena-pp-break__cell arena-pp-break__cell--num">{Math.round(m.acs)} <small>ACS</small></span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Career across tournaments */}
-        {careers.length > 0 && (
-          <div className="arena-tp-card arena-pp-career">
-            <h3 className="arena-tp-card__title"><Trophy className="w-4 h-4" /> Tournaments</h3>
-            <div className="arena-pp-break__list">
-              {careers.map(c => (
-                <Link key={c.tournamentId} to={`/tournament/${c.tournamentId}`} className="arena-pp-break__row arena-pp-career__row">
-                  <span className="arena-pp-break__who">
-                    <span className="arena-pp-break__name">{c.tournamentName}</span>
-                  </span>
-                  {c.placement && <span className="arena-pp-career__place">{c.placement}</span>}
-                  <span className="arena-pp-break__cell">{c.maps} {c.maps === 1 ? 'map' : 'maps'}</span>
-                  <span className="arena-pp-break__cell arena-pp-break__cell--num">{Math.round(c.acs)} <small>ACS</small></span>
-                  <span className="arena-pp-break__cell arena-pp-break__cell--num">{c.kills} <small>K</small></span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Match / map history */}
+        {/* Tournaments & match history — one row per tournament; the tournament
+            name links to its page, the chevron expands the player's match history
+            for that tournament (open by default, last 5 + view more). */}
         <section className="arena-md-section arena-pp-form">
-          <p className="arena-md-section__eyebrow">Form</p>
-          <h2 className="arena-md-section__title">Match History</h2>
+          <p className="arena-md-section__eyebrow">Track Record</p>
+          <h2 className="arena-md-section__title">Tournaments</h2>
 
-          {mapStats.length === 0 ? (
+          {careers.length === 0 ? (
             <div className="arena-stats-empty">
               <p className="arena-stats-empty__title">No stats recorded yet</p>
               <p className="arena-stats-empty__sub">
@@ -579,84 +930,10 @@ export function PlayerPage() {
               </p>
             </div>
           ) : (
-            <div className="arena-md-table-card">
-              <div className="arena-md-table-wrap">
-                <table className="arena-md-table arena-pp-table">
-                  <thead>
-                    <tr>
-                      <th className="arena-md-table__left">Stage</th>
-                      {hasDates && <th className="arena-md-table__left">Date</th>}
-                      <th className="arena-md-table__left">Opponent</th>
-                      <th className="arena-md-table__left">Map</th>
-                      <th className="arena-md-table__left">Agent</th>
-                      <th>K / D / A</th>
-                      <th>ACS</th>
-                      <th>HS%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedStats.map((s, i) => (
-                      <tr
-                        key={`${s.playerId}-${i}`}
-                        onClick={() => navigate(`/tournament-match/${s.matchId}`)}
-                        className={`arena-pp-table__row${i % 2 === 0 ? ' arena-md-table__alt' : ''}${s.won === true ? ' arena-pp-table__row--w' : s.won === false ? ' arena-pp-table__row--l' : ''}`}
-                      >
-                        <td className="arena-md-table__left"><span className="arena-pp-table__stage">{s.stageLabel}</span></td>
-                        {hasDates && <td className="arena-md-table__left arena-md-table__dim">{formatDate(s.date)}</td>}
-                        <td className="arena-md-table__left arena-pp-table__opp">vs {s.opponentName}</td>
-                        <td className="arena-md-table__left">
-                          {(() => {
-                            const splash = mapImageUrl(s.mapName);
-                            return (
-                              <span
-                                className="arena-pp-map-chip"
-                                style={splash ? {
-                                  backgroundImage: `linear-gradient(90deg, #131313 0%, rgba(19,19,19,0.85) 35%, rgba(19,19,19,0.45) 100%), url(${splash})`,
-                                  backgroundSize: 'cover',
-                                  backgroundPosition: 'center 30%',
-                                } : undefined}
-                              >
-                                {s.mapName}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td className="arena-md-table__left"><AgentTag agent={s.agent} /></td>
-                        <td>
-                          <span className="arena-pp-kda">
-                            <span className="arena-pp-kda__k">{s.kills}</span>
-                            <span className="arena-pp-kda__sep">/</span>
-                            <span className="arena-pp-kda__d">{s.deaths}</span>
-                            <span className="arena-pp-kda__sep">/</span>
-                            <span className="arena-pp-kda__a">{s.assists}</span>
-                          </span>
-                        </td>
-                        <td className={`arena-md-table__acs-top${s.acs >= 240 ? ' arena-pp-table__acs-hot' : ''}`}>{s.acs}</td>
-                        <td className="arena-md-table__dim">{s.hsPercent}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="arena-pp-table__totals">
-                      <td className="arena-md-table__left" colSpan={hasDates ? 4 : 3}>
-                        Total · {agg.mapsPlayed} {agg.mapsPlayed === 1 ? 'map' : 'maps'}
-                      </td>
-                      <td>—</td>
-                      <td>
-                        <span className="arena-pp-kda">
-                          <span className="arena-pp-kda__k">{agg.kills}</span>
-                          <span className="arena-pp-kda__sep">/</span>
-                          <span className="arena-pp-kda__d">{agg.deaths}</span>
-                          <span className="arena-pp-kda__sep">/</span>
-                          <span className="arena-pp-kda__a">{agg.assists}</span>
-                        </span>
-                      </td>
-                      <td>{Math.round(agg.acs)}</td>
-                      <td>{Math.round(agg.hsPercent)}%</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+            <div className="arena-pp-tourney-list">
+              {careers.map(c => (
+                <CareerTournamentRow key={`${c.tournamentId}-${c.teamId}`} entry={c} />
+              ))}
             </div>
           )}
         </section>

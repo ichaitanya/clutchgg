@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ChevronLeft, ChevronDown, Trophy, Users, Calendar, MapPin, DollarSign, Newspaper, Clock,
-  BarChart3, ArrowRight, Share2, Check,
+  BarChart3, ArrowRight, Share2, Check, Info,
 } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
@@ -20,6 +20,7 @@ import {
 import { orderRosterIglFirst } from '../utils/roster';
 import { mapImageUrl } from '../utils/valorantAssets';
 import { bracketRoundLabel } from '../utils/bracketRounds';
+import { calculateTournamentMvp, MVP_INFO_TEXT } from '../utils/tournamentMvp';
 
 type TabKey = 'overview' | 'matches' | 'bracket' | 'standings' | 'teams' | 'news';
 
@@ -135,13 +136,24 @@ function aggregatePlayerTotals(t: Tournament): PlayerTotals[] {
   }));
 }
 
-// Tournament MVP: the player with the most total kills.
-function deriveMvp(t: Tournament): PlayerTotals | null {
-  let best: PlayerTotals | null = null;
-  for (const p of aggregatePlayerTotals(t)) {
-    if (!best || p.kills > best.kills) best = p;
-  }
-  return best && best.kills > 0 ? best : null;
+// Tournament MVP info tooltip: small (i) icon that toggles the methodology
+// blurb on click/tap (works on both desktop and mobile, unlike title=).
+function MvpInfo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="arena-tp-mvp-info">
+      <button
+        type="button"
+        aria-label="How is the Tournament MVP calculated?"
+        className="arena-tp-mvp-info__btn"
+        onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        onBlur={() => setOpen(false)}
+      >
+        <Info className="w-3 h-3" />
+      </button>
+      {open && <span className="arena-tp-mvp-info__tip">{MVP_INFO_TEXT}</span>}
+    </span>
+  );
 }
 
 // Event leaders for the overview card: top player per category.
@@ -473,7 +485,7 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
   const available = Math.max(0, totalSlots - registered);
   const fillPct = totalSlots > 0 ? Math.min(100, (registered / totalSlots) * 100) : 0;
   const result = deriveTournamentStatus(tournament) === 'completed' ? deriveChampion(tournament) : null;
-  const mvp = result ? deriveMvp(tournament) : null;
+  const mvp = result ? calculateTournamentMvp(tournament) : null;
   const leaders = deriveLeaders(tournament);
   const progress = deriveStageProgress(tournament);
   return (
@@ -504,10 +516,10 @@ function Overview({ tournament, hasPrizePool, prizePool, prizePlaces, recentMatc
         </div>
         {mvp && (
           <Link to={`/player/${tournament.id}/${mvp.rosterId}`} className="arena-tp-champ__mvp">
-            <p className="arena-tp-champ__mvp-label">Tournament MVP</p>
+            <p className="arena-tp-champ__mvp-label">Tournament MVP <MvpInfo /></p>
             <p className="arena-tp-champ__mvp-name">{mvp.name}</p>
             <p className="arena-tp-champ__mvp-sub">
-              {mvp.kills} kills{mvp.teamName ? ` · ${mvp.teamName}` : ''}
+              MVP Score {mvp.mvpScore.toFixed(1)}{mvp.teamName ? ` · ${mvp.teamName}` : ''}
             </p>
           </Link>
         )}

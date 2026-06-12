@@ -898,17 +898,24 @@ export function TournamentMatchPage() {
       : top.teamId === match.team1Id;
     const side = onTeam1 ? team1 : team2;
     const rosterPlayer = (side?.players ?? []).find(p => statMatchesPlayer(top, p));
-    // Single standout agent: the one the MVP performed best on (highest single-map
-    // ACS) across the series — not every agent they touched. Falls back to the
-    // aggregated agent string's first entry for single-map / no-per-map cases.
+    // Single standout agent: the one the MVP picked most across the series's maps
+    // (pick count takes precedence — a comfort pick repeated over a BO3/BO5 is the
+    // signature agent). Ties — including when each agent was played the same number
+    // of maps — break on best single-map ACS. Falls back to the aggregated agent
+    // string's first entry for single-map / no-per-map cases.
     const bestAgent = (() => {
-      let best: { agent: string; acs: number } | null = null;
+      const byAgent = new Map<string, { agent: string; maps: number; bestAcs: number }>();
       for (const m of match.maps ?? []) {
         for (const s of m.playerStats ?? []) {
           if (s.playerId !== top.playerId || !s.agent) continue;
-          if (!best || s.acs > best.acs) best = { agent: s.agent, acs: s.acs };
+          const key = s.agent.trim().toLowerCase();
+          const cur = byAgent.get(key) ?? { agent: s.agent.trim(), maps: 0, bestAcs: 0 };
+          cur.maps += 1;
+          cur.bestAcs = Math.max(cur.bestAcs, s.acs);
+          byAgent.set(key, cur);
         }
       }
+      const best = [...byAgent.values()].sort((a, b) => b.maps - a.maps || b.bestAcs - a.bestAcs)[0];
       return best?.agent
         ?? (top.agent ?? '').split(',').map(a => a.trim()).filter(Boolean)[0]
         ?? '';
