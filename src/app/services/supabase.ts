@@ -631,7 +631,14 @@ export async function startClaimReauth(tournamentId: string, playerId: string) {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'discord',
     options: {
-      redirectTo: `${window.location.origin}/player/${tournamentId}/${playerId}?claim=1`,
+      // Land on /auth/callback, NOT /player/:tid/:pid. The latter is rewritten
+      // to the profile-meta serverless function (vercel.json), which serves
+      // crawler meta-HTML — on an OAuth return that produced a BLANK PAGE (the
+      // function's fallback bootstrap points at /src/main.tsx, which doesn't
+      // exist in the built site). /auth/callback is a normal SPA route: it
+      // consumes the OAuth hash, then forwards to the player page using the
+      // stored claim intent, where ClaimControls resumes the claim.
+      redirectTo: `${window.location.origin}/auth/callback?claim=1`,
       scopes: 'identify email connections',
     },
   });

@@ -97,48 +97,95 @@ export function ClaimControls({
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialog, setDialog] = useState<DialogKind | null>(null);
   const [busy, setBusy] = useState(false);
-  // Submit-once guard for the resume effect (StrictMode double-mount etc).
+  // Submit-once guard for the resume effect (StrictMode double-mount etc). Only
+  // set once we ACTUALLY act (submit or give up) — never while still waiting for
+  // the provider token to arrive (see the grace-window logic below).
   const resumed = useRef(false);
+  // True from the moment we see a valid claim intent for this card on return,
+  // until the provider token arrives or the grace window elapses. Used to start
+  // the one-shot "give up → reconnect" timer exactly once.
+  const waitingForToken = useRef(false);
 
   // Resume after the Discord round-trip: a stashed intent for THIS card (the
   // ?claim=1 param is just a hint; the intent is authoritative).
+  //
+  // RACE FIX: on return from Discord, `claimLoaded` (DB queries) and
+  // `providerToken` (delivered async via onAuthStateChange SIGNED_IN) settle
+  // INDEPENDENTLY. The old code consumed its single shot the instant
+  // claimLoaded+userId were ready; if the token hadn't landed yet it wrongly
+  // showed "reconnect" and the guard blocked recovery — the intermittent
+  // "it didn't claim / shows the claim message again" bug. Now we hold the shot
+  // open: while a valid reauth intent exists for this card but the token is not
+  // here yet, we WAIT (this effect re-runs when providerToken arrives via deps),
+  // and only fall back to reconnect after a bounded grace window.
   useEffect(() => {
     if (resumed.current || !claimLoaded) return;
     const intent = readClaimIntent();
     const isForThisCard = intent && intent.tournamentId === tournamentId && intent.playerId === playerId;
     if (!isForThisCard) return;
     if (!userId) return; // session not resolved yet — wait for a later render
-    resumed.current = true;
-    clearClaimIntent();
-    if (searchParams.has('claim')) {
-      searchParams.delete('claim');
-      setSearchParams(searchParams, { replace: true });
-    }
-    if (!providerToken || !intent.reauth) {
-      // Either the hash was consumed without a provider token (refresh raced it,
-      // or the user reloaded), or the only token we hold came from an ordinary
-      // login / background refresh rather than this claim's re-auth (so it may
-      // lack the `connections` scope). Don't submit a token we can't trust to be
-      // claim-grade — offer a fresh reconnect instead.
+
+    const submit = (token: string) => {
+      resumed.current = true;
+      clearClaimIntent();
+      if (searchParams.has('claim')) {
+        searchParams.delete('claim');
+        setSearchParams(searchParams, { replace: true });
+      }
+      setBusy(true);
+      submitClaim(token, tournamentId, playerId)
+        .then((result: ClaimSubmitResult) => {
+          onClaimResult?.(result.status);
+          if (result.status === 'submitted') {
+            setDialog({ kind: 'submitted' });
+            onClaimChanged();
+          } else if (result.status === 'no_riot_connection') setDialog({ kind: 'no_riot_connection' });
+          else if (result.status === 'riot_unverified') setDialog({ kind: 'riot_unverified' });
+          else if (result.status === 'riot_mismatch') setDialog({ kind: 'riot_mismatch', got: result.got, expected: result.expected });
+          else if (result.status === 'claim_taken') { setDialog({ kind: 'claim_taken' }); onClaimChanged(); }
+          else if (result.status === 'already_has_claim') { setDialog({ kind: 'already_has_claim' }); onClaimChanged(); }
+          else if (result.status === 'bad_token') setDialog({ kind: 'reconnect' });
+          else setDialog({ kind: 'error' });
+        })
+        .catch(() => setDialog({ kind: 'error' }))
+        .finally(() => setBusy(false));
+    };
+
+    const giveUp = () => {
+      // No claim-grade token arrived (hash consumed without one, a plain login /
+      // background refresh token, or the intent wasn't a genuine reauth). Don't
+      // submit a token we can't trust — offer a fresh reconnect.
+      resumed.current = true;
+      clearClaimIntent();
+      if (searchParams.has('claim')) {
+        searchParams.delete('claim');
+        setSearchParams(searchParams, { replace: true });
+      }
       setDialog({ kind: 'reconnect' });
+    };
+
+    // Happy path: a claim-grade token from this reauth is in hand → submit now.
+    if (providerToken && intent.reauth) {
+      submit(providerToken);
       return;
     }
-    setBusy(true);
-    submitClaim(providerToken, tournamentId, playerId)
-      .then((result: ClaimSubmitResult) => {
-        onClaimResult?.(result.status);
-        if (result.status === 'submitted') {
-          setDialog({ kind: 'submitted' });
-          onClaimChanged();
-        } else if (result.status === 'no_riot_connection') setDialog({ kind: 'no_riot_connection' });
-        else if (result.status === 'riot_unverified') setDialog({ kind: 'riot_unverified' });
-        else if (result.status === 'riot_mismatch') setDialog({ kind: 'riot_mismatch', got: result.got, expected: result.expected });
-        else if (result.status === 'claim_taken') { setDialog({ kind: 'claim_taken' }); onClaimChanged(); }
-        else if (result.status === 'already_has_claim') { setDialog({ kind: 'already_has_claim' }); onClaimChanged(); }
-        else if (result.status === 'bad_token') setDialog({ kind: 'reconnect' });
-        else setDialog({ kind: 'error' });
-      })
-      .finally(() => setBusy(false));
+
+    // The intent wasn't a real reauth (e.g. leftover) — nothing to wait for.
+    if (!intent.reauth) {
+      giveUp();
+      return;
+    }
+
+    // Reauth intent but token not here yet. Hold the shot open: this effect will
+    // re-run when providerToken lands (it's in deps). Arm a single fallback timer
+    // so we don't wait forever if the token truly never comes.
+    if (!waitingForToken.current) {
+      waitingForToken.current = true;
+      const timer = setTimeout(() => {
+        if (!resumed.current) giveUp();
+      }, 8000); // generous: covers slow SIGNED_IN delivery without hanging the UX
+      return () => clearTimeout(timer);
+    }
   }, [claimLoaded, userId, providerToken, tournamentId, playerId, searchParams, setSearchParams, onClaimChanged, onClaimResult]);
 
   const begin = async () => {

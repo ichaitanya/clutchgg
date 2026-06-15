@@ -2,14 +2,32 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Header } from './Header';
 import { LoadingState } from './LoadingState';
-import { supabase } from '../services/supabase';
+import { supabase, readClaimIntent } from '../services/supabase';
 
 // Landing route for OAuth redirects. The tokens arrive in the URL hash and the
 // auth client's detectSessionInUrl consumes them in the background — this page
-// just shows a spinner until SIGNED_IN fires, then forwards to /profile.
+// just shows a spinner until SIGNED_IN fires, then forwards.
+//
+// Claim flow: a profile-claim re-auth returns here with ?claim=1 and a stashed
+// claim intent. We forward to that player card (NOT /profile) carrying ?claim=1,
+// so ClaimControls' resume effect picks up the fresh provider_token and submits.
+// We do NOT clear the intent here — ClaimControls consumes it.
 export function AuthCallbackPage() {
   const navigate = useNavigate();
   const [failed, setFailed] = useState<string | null>(null);
+
+  // Where to send the user once signed in. Default /profile; for a claim return,
+  // the player card so the claim resumes.
+  const forwardTarget = (): string => {
+    const isClaim = new URLSearchParams(window.location.search).has('claim');
+    if (isClaim) {
+      const intent = readClaimIntent();
+      if (intent?.tournamentId && intent?.playerId) {
+        return `/player/${intent.tournamentId}/${intent.playerId}?claim=1`;
+      }
+    }
+    return '/profile';
+  };
 
   useEffect(() => {
     // Provider sent back an explicit error (user denied consent, etc.).
@@ -25,7 +43,7 @@ export function AuthCallbackPage() {
       if (done) return;
       if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') && session) {
         done = true;
-        navigate('/profile', { replace: true });
+        navigate(forwardTarget(), { replace: true });
       }
     });
 
@@ -36,7 +54,7 @@ export function AuthCallbackPage() {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
         done = true;
-        navigate('/profile', { replace: true });
+        navigate(forwardTarget(), { replace: true });
       }
     }, 800);
 
