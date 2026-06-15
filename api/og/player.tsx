@@ -296,35 +296,6 @@ export default async function handler(req: Request) {
 
   const font = await loadFont();
 
-  // ── Diagnostic mode: /api/og/player?...&debug=1 returns plaintext so we can
-  // see WHY the image is empty (font load, render throw) instead of a silent
-  // empty PNG. Remove once the card renders.
-  if (debug) {
-    let renderErr = '';
-    try {
-      const probe = new ImageResponse(<div style={{ display: 'flex', color: '#fff' }}>ok</div>, {
-        width: 100, height: 100,
-        fonts: font ? [{ name: 'Inter', data: font, weight: 700 as const, style: 'normal' as const }] : undefined,
-      });
-      // Force the body to materialize so a render error surfaces here.
-      await probe.arrayBuffer();
-    } catch (e) {
-      renderErr = String((e as Error)?.stack ?? (e as Error)?.message ?? e);
-    }
-    return new Response(
-      JSON.stringify({
-        pid,
-        fontLoaded: !!font,
-        fontBytes: font ? font.byteLength : 0,
-        careerFound: !!career,
-        careerErr,
-        renderErr,
-        vercelOg: '0.6.8',
-      }, null, 2),
-      { headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-
   const name = career?.name ?? 'ClutchGG Player';
   const team = career?.team ?? '';
   const badges = career ? computeBadges(career) : [];
@@ -333,8 +304,7 @@ export default async function handler(req: Request) {
   const hs = career ? `${Math.round(career.hsPercent)}%` : '—';
   const maps = career ? career.mapsPlayed.toString() : '—';
 
-  return new ImageResponse(
-    (
+  const card = (
       <div
         style={{
           width: '100%',
@@ -442,18 +412,41 @@ export default async function handler(req: Request) {
           </div>
         )}
       </div>
-    ),
-    {
-      width: 1200,
-      height: 630,
-      fonts: font
-        ? [{ name: 'Inter', data: font, weight: 700 as const, style: 'normal' as const }]
-        : undefined,
-      // Don't let a transient empty/failed render get cached for a year. Only
-      // cache aggressively when we actually produced a real card (font loaded).
-      headers: font
-        ? { 'Cache-Control': 'public, immutable, no-transform, max-age=31536000' }
-        : { 'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300' },
-    },
   );
+
+  const fonts = font
+    ? [{ name: 'Inter', data: font, weight: 700 as const, style: 'normal' as const }]
+    : undefined;
+
+  // ── Diagnostic mode: /api/og/player?...&debug=1 renders the REAL card and
+  // materializes the body so a Satori layout failure surfaces as readable text
+  // instead of a silent empty PNG. Remove once the card renders.
+  if (debug) {
+    let renderErr = '';
+    let bytes = -1;
+    try {
+      const probe = new ImageResponse(card, { width: 1200, height: 630, fonts });
+      bytes = (await probe.arrayBuffer()).byteLength;
+    } catch (e) {
+      renderErr = String((e as Error)?.stack ?? (e as Error)?.message ?? e);
+    }
+    return new Response(
+      JSON.stringify(
+        { pid, fontLoaded: !!font, careerFound: !!career, careerErr, renderedBytes: bytes, renderErr },
+        null, 2,
+      ),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  return new ImageResponse(card, {
+    width: 1200,
+    height: 630,
+    fonts,
+    // Don't let a transient empty/failed render get cached for a year. Only
+    // cache aggressively when we actually produced a real card (font loaded).
+    headers: font
+      ? { 'Cache-Control': 'public, immutable, no-transform, max-age=31536000' }
+      : { 'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300' },
+  });
 }
