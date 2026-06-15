@@ -325,8 +325,8 @@ export default async function handler(req: Request) {
         {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ width: 18, height: 40, background: ACCENT, borderRadius: 4 }} />
-          <div style={{ fontSize: 34, fontWeight: 900, color: '#fff', letterSpacing: 2 }}>
-            CLUTCH<span style={{ color: ACCENT }}>GG</span>
+          <div style={{ display: 'flex', fontSize: 34, fontWeight: 900, color: '#fff', letterSpacing: 2 }}>
+            <span>CLUTCH</span><span style={{ color: ACCENT }}>GG</span>
           </div>
           <div style={{ fontSize: 22, color: '#7a7a7a', letterSpacing: 4, marginLeft: 8, textTransform: 'uppercase' }}>
             Player Card
