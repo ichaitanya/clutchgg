@@ -8,17 +8,13 @@ import {
   Camera,
   LogOut,
   CheckCircle2,
-  Twitter,
-  Twitch,
-  Youtube,
-  Instagram,
   Users,
   Copy,
   Sparkles,
   Gamepad2,
   ChevronRight,
-  type LucideIcon,
 } from 'lucide-react';
+import { SOCIAL_FIELDS } from './socials';
 import { useAuth } from '../context/AuthContext';
 import {
   getMyClaims,
@@ -37,13 +33,8 @@ import {
 import { getMyReferralStats, type ReferralStats } from '../services/pickems';
 import { optimizeAvatar, AvatarError } from '../utils/avatarImage';
 
-// Social platforms shown on the profile editor, stored in socials jsonb.
-const SOCIAL_FIELDS: { key: string; label: string; placeholder: string; icon: LucideIcon }[] = [
-  { key: 'twitter', label: 'X / Twitter', placeholder: 'https://x.com/yourhandle', icon: Twitter },
-  { key: 'twitch', label: 'Twitch', placeholder: 'https://twitch.tv/yourchannel', icon: Twitch },
-  { key: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/@yourchannel', icon: Youtube },
-  { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/yourhandle', icon: Instagram },
-];
+// Social platforms (with icons) live in the shared socials module so the editor
+// and the public hero icon row stay in sync.
 
 // Product bio limit is 250 (the DB CHECK stays at 500 so no existing longer bio
 // is invalidated; the edge function and this UI enforce 250 going forward).

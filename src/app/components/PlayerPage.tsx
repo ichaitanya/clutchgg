@@ -8,6 +8,7 @@ import {
 import { Header } from './Header';
 import { Footer } from './Footer';
 import { useClaim, ClaimControls, ClaimedProfileBlock } from './ClaimProfile';
+import { SocialIconLinks } from './socials';
 import { useAuth } from '../context/AuthContext';
 import { findMyPlayerProfiles, startClaimReauth } from '../services/supabase';
 import type {
@@ -1081,6 +1082,11 @@ export function PlayerPage() {
               </div>
             )}
           </div>
+
+          {/* Owner's social links — pinned to the hero's bottom-right on desktop
+              (absolute), centered below the content on mobile. Only a claim that
+              still matches the card's Riot ID (verifiedOwner) shows them. */}
+          {verifiedOwner && <SocialIconLinks socials={verifiedOwner.socials} />}
         </div>
 
         {/* Summary stat strip */}

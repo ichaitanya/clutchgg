@@ -349,32 +349,15 @@ export function ClaimControls({
   );
 }
 
-// Claimed-owner block: bio + socials shown on the hero once a claim is
-// approved. The Verified Player tick is rendered by PlayerPage next to the
-// name; this block carries the owner-authored content.
+// Claimed-owner block: the owner-authored bio shown on the hero once a claim is
+// approved. The Verified Player tick is rendered by PlayerPage next to the name;
+// the owner's social links render as an icon row pinned to the hero's
+// bottom-right (SocialIconLinks in PlayerPage), not here.
 export function ClaimedProfileBlock({ owner }: { owner: PlayerAccount }) {
-  const socials = Object.entries(owner.socials ?? {}).filter(([, v]) => v && String(v).trim());
-  if (!owner.bio && socials.length === 0) return null;
+  if (!owner.bio) return null;
   return (
     <div className="arena-pp-hero__claimed" style={{ marginTop: '0.75rem' }}>
-      {owner.bio && (
-        <p className="arena-body--sm" style={{ maxWidth: 560, whiteSpace: 'pre-wrap' }}>{owner.bio}</p>
-      )}
-      {socials.length > 0 && (
-        <div className="arena-pp-hero__chips" style={{ marginTop: '0.5rem' }}>
-          {socials.map(([key, url]) => (
-            <a
-              key={key}
-              href={String(url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="arena-pp-chip arena-pp-chip--link arena-pp-chip--ghost"
-            >
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-            </a>
-          ))}
-        </div>
-      )}
+      <p className="arena-body--sm" style={{ maxWidth: 560, whiteSpace: 'pre-wrap' }}>{owner.bio}</p>
     </div>
   );
 }

@@ -5553,6 +5553,35 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   text-transform: uppercase;
   border: none;
 }
+/* Owner's social links — a row of icon buttons pinned to the hero's
+   bottom-right on desktop. Sits above the hero watermark (::after) via z-index. */
+.arena-pp-socials {
+  position: absolute;
+  right: 2rem;
+  bottom: 1.75rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.arena-pp-social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--arena-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--arena-text-secondary);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.arena-pp-social:hover {
+  color: var(--arena-accent);
+  border-color: rgba(255, 70, 85, 0.45);
+  background: rgba(255, 70, 85, 0.08);
+}
+
 /* "This looks like your profile" suggestion banner — accent-washed call to
    action shown only when the card matches the viewer's verified Riot ID. */
 .arena-pp-claim-suggest {
@@ -6576,6 +6605,9 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
 @media (max-width: 640px) {
   .arena-pp-hero { flex-direction: column; text-align: center; gap: 1.25rem; padding: 1.5rem 1.25rem; }
   .arena-pp-hero__chips, .arena-pp-hero__agents { justify-content: center; }
+  /* Socials: drop the desktop bottom-right pin and flow centered under the
+     content so they don't overlap the stacked mobile layout. */
+  .arena-pp-socials { position: static; justify-content: center; margin-top: 0.25rem; }
   .arena-pp-hero__name { font-size: 2.1rem; }
   .arena-pp-name-row { justify-content: center; }
   /* Center the achievements row + let its label sit above the chips on phones. */
