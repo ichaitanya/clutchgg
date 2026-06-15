@@ -12,3 +12,6 @@ dist/
 # Logs & OS/editor cruft
 *.log
 .DS_Store
+
+# Temporary local OG-card preview downloads
+_card_preview.png
