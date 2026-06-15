@@ -283,15 +283,47 @@ function Stat({ value, label, accent }: { value: string; label: string; accent?:
 export default async function handler(req: Request) {
   const { searchParams } = new URL(req.url);
   const pid = searchParams.get('pid') ?? '';
+  const debug = searchParams.get('debug') === '1';
 
   let career: Career | null = null;
+  let careerErr = '';
   try {
     if (pid) career = deriveCareer(await fetchTournaments(), pid);
-  } catch {
+  } catch (e) {
     career = null;
+    careerErr = String((e as Error)?.message ?? e);
   }
 
   const font = await loadFont();
+
+  // ── Diagnostic mode: /api/og/player?...&debug=1 returns plaintext so we can
+  // see WHY the image is empty (font load, render throw) instead of a silent
+  // empty PNG. Remove once the card renders.
+  if (debug) {
+    let renderErr = '';
+    try {
+      const probe = new ImageResponse(<div style={{ display: 'flex', color: '#fff' }}>ok</div>, {
+        width: 100, height: 100,
+        fonts: font ? [{ name: 'Inter', data: font, weight: 700 as const, style: 'normal' as const }] : undefined,
+      });
+      // Force the body to materialize so a render error surfaces here.
+      await probe.arrayBuffer();
+    } catch (e) {
+      renderErr = String((e as Error)?.stack ?? (e as Error)?.message ?? e);
+    }
+    return new Response(
+      JSON.stringify({
+        pid,
+        fontLoaded: !!font,
+        fontBytes: font ? font.byteLength : 0,
+        careerFound: !!career,
+        careerErr,
+        renderErr,
+        vercelOg: '0.6.8',
+      }, null, 2),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+  }
 
   const name = career?.name ?? 'ClutchGG Player';
   const team = career?.team ?? '';
