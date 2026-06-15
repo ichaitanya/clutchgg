@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+
+    // JSX: the api/og/*.tsx serverless functions render with @vercel/og (Satori)
+    // and use the automatic JSX runtime WITHOUT importing React. "react-jsx"
+    // tells the compiler to inject the runtime itself, which is what both Vite
+    // (@vitejs/plugin-react) and Vercel's @vercel/node builder need to compile
+    // the OG card TSX. Without this, those functions can fail to build on Vercel.
+    "jsx": "react-jsx",
+
+    "baseUrl": "."
+  },
+  // Scoped to api/ ONLY. The Vite app (src/) gets its JSX + "@" alias from
+  // vite.config.ts and is built by esbuild, which does not type-check — so it
+  // must NOT be included here (doing so would surface pre-existing src/ type
+  // errors to any type-aware builder). This config exists purely so Vercel's
+  // @vercel/node builder can compile the api/og/*.tsx functions (JSX runtime).
+  "include": ["api"]
+}
