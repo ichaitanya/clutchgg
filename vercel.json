@@ -2,6 +2,13 @@
   "rewrites": [
     {
       "source": "/player/:tid/:pid",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Twitterbot|Slackbot|Discordbot|TelegramBot|WhatsApp|LinkedInBot|Pinterest|redditbot|Google-PageRenderer|Googlebot|bingbot|Applebot|SkypeUriPreview|vkShare|W3C_Validator|Embedly|Iframely|outbrain|quora link preview|nuzzel|bitlybot|developers\\.google\\.com).*"
+        }
+      ],
       "destination": "/api/profile-meta?tid=:tid&pid=:pid"
     },
     {

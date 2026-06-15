@@ -763,7 +763,14 @@ export async function submitClaim(
     const { data, error } = await Promise.race([invoke, timeout]);
     if (error) return { status: 'error' };
     if (!data || data.error) return { status: 'error' };
-    return data as ClaimSubmitResult;
+    const result = data as ClaimSubmitResult;
+    // A successful claim changes the user's claim state (hasActiveClaim) and
+    // which cards should still suggest — drop the cached match result so the
+    // next findMyPlayerProfiles reflects it.
+    if (result.status === 'submitted' || result.status === 'claim_taken' || result.status === 'already_has_claim') {
+      clearMyPlayerProfilesCache();
+    }
+    return result;
   } catch {
     return { status: 'error' };
   }
@@ -836,23 +843,44 @@ export interface ProfileMatchResult {
 // Background match: server-side, find player cards whose riotId equals the
 // caller's verified Riot ID (find-my-player-profiles). Card Riot IDs never reach
 // the client — only the caller's own matches come back.
+// The match result is user-wide (every tournament in one call), not card-
+// specific, and unchanging within a session unless the user claims/unclaims —
+// so cache the resolved promise. This is what makes the "claim your profile"
+// banner appear instantly on every player page after the first load instead of
+// re-running the ~1-2s edge round-trip on every PlayerPage mount. Cleared by
+// clearMyPlayerProfilesCache() when a claim changes.
+let myProfilesCache: Promise<ProfileMatchResult> | null = null;
+
+export function clearMyPlayerProfilesCache() {
+  myProfilesCache = null;
+}
+
 export async function findMyPlayerProfiles(): Promise<ProfileMatchResult> {
+  if (myProfilesCache) return myProfilesCache;
   const empty: ProfileMatchResult = { status: 'error', matches: [], hasActiveClaim: false };
-  try {
-    const invoke = supabase.functions.invoke('find-my-player-profiles', { body: {} });
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('find-my-player-profiles timed out')), 15_000)
-    );
-    const { data, error } = await Promise.race([invoke, timeout]);
-    if (error || !data || data.error) return empty;
-    return {
-      status: data.status ?? 'error',
-      matches: Array.isArray(data.matches) ? data.matches : [],
-      hasActiveClaim: !!data.hasActiveClaim,
-    };
-  } catch {
-    return empty;
-  }
+  const run = async (): Promise<ProfileMatchResult> => {
+    try {
+      const invoke = supabase.functions.invoke('find-my-player-profiles', { body: {} });
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('find-my-player-profiles timed out')), 15_000)
+      );
+      const { data, error } = await Promise.race([invoke, timeout]);
+      if (error || !data || data.error) return empty;
+      return {
+        status: data.status ?? 'error',
+        matches: Array.isArray(data.matches) ? data.matches : [],
+        hasActiveClaim: !!data.hasActiveClaim,
+      };
+    } catch {
+      return empty;
+    }
+  };
+  const p = run();
+  // Only cache a successful result; let an errored/empty result retry next time.
+  myProfilesCache = p;
+  p.then(res => { if (res.status === 'error') myProfilesCache = null; })
+    .catch(() => { myProfilesCache = null; });
+  return p;
 }
 
 // Release a claim. The claimant can release their own; a superadmin can
@@ -866,6 +894,8 @@ export async function unclaimProfile(claimId: string): Promise<void> {
   const { data, error } = await Promise.race([invoke, timeout]);
   if (error) throw error;
   if (!data || data.error) throw new Error(data?.error || 'Unclaim failed');
+  // The user's slot is free again — suggestions should reappear next load.
+  clearMyPlayerProfilesCache();
 }
 
 // The signed-in user's current ACTIVE claim (pending or approved), if any.
