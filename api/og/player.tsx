@@ -334,7 +334,7 @@ export default async function handler(req: Request) {
         </div>
 
         {/* Identity */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 36, marginTop: 48 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 36, marginTop: 40 }}>
           <div
             style={{
               width: 168,
@@ -362,7 +362,7 @@ export default async function handler(req: Request) {
               <div style={{ fontSize: 30, color: '#bdbdbd', marginTop: 14 }}>{team}</div>
             ) : null}
             {topAgents.length > 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
                 <span style={{ fontSize: 20, color: '#7a7a7a', letterSpacing: 2, textTransform: 'uppercase' }}>
                   Agents
                 </span>
@@ -388,11 +388,13 @@ export default async function handler(req: Request) {
           </div>
         </div>
 
-        {/* Stat strip */}
+        {/* Stat strip. Fixed top margin (not marginTop:auto) so it always sits
+            BELOW the identity block — auto pulled it up and overlapped the
+            agents row once that row was added. */}
         <div
           style={{
             display: 'flex',
-            marginTop: 'auto',
+            marginTop: 44,
             background: 'rgba(22,22,22,0.85)',
             border: '1px solid #262626',
             borderRadius: 20,
