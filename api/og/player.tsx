@@ -238,6 +238,28 @@ function initials(name: string): string {
   return name.trim().slice(0, 2).toUpperCase();
 }
 
+// @vercel/og normally auto-loads a default font, but in a standalone (non-Next)
+// Vercel edge function that implicit fetch can silently fail and Satori then
+// renders an EMPTY image (a 200 with Content-Length: 0). Loading the font
+// ourselves and passing it to ImageResponse makes the render deterministic.
+// Cached per warm isolate so we fetch it at most once per cold start.
+let cachedFont: ArrayBuffer | null = null;
+async function loadFont(): Promise<ArrayBuffer | null> {
+  if (cachedFont) return cachedFont;
+  try {
+    // Inter Bold TTF via the fontsource CDN (real TTF, not woff2 — Satori can't
+    // use woff2; edge-friendly, no redirect). Covers the Latin glyphs the card uses.
+    const res = await fetch(
+      'https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.ttf',
+    );
+    if (!res.ok) return null;
+    cachedFont = await res.arrayBuffer();
+    return cachedFont;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchTournaments(): Promise<any[]> {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/tournaments_blob?select=data&order=created_at.asc`,
@@ -269,6 +291,8 @@ export default async function handler(req: Request) {
     career = null;
   }
 
+  const font = await loadFont();
+
   const name = career?.name ?? 'ClutchGG Player';
   const team = career?.team ?? '';
   const badges = career ? computeBadges(career) : [];
@@ -289,7 +313,7 @@ export default async function handler(req: Request) {
           // Vibrant accent glow bleeding from the top-right + a faint vignette.
           backgroundImage: `radial-gradient(900px 600px at 100% 0%, rgba(255,70,85,0.22), transparent 60%), radial-gradient(700px 500px at 0% 100%, rgba(255,70,85,0.10), transparent 55%)`,
           padding: 64,
-          fontFamily: 'sans-serif',
+          fontFamily: font ? 'Inter' : 'sans-serif',
           position: 'relative',
         }}
       >
@@ -323,7 +347,10 @@ export default async function handler(req: Request) {
               boxShadow: '0 0 0 8px rgba(255,70,85,0.12)',
             }}
           >
-            {career?.photo
+            {/* Only embed the photo if it's an absolute http(s) URL — Satori
+                throws on relative/data sources it can't fetch, which would blank
+                the whole card. Anything else falls back to initials. */}
+            {career?.photo && /^https?:\/\//.test(career.photo)
               ? <img src={career.photo} width={168} height={168} style={{ objectFit: 'cover' }} />
               : <div style={{ fontSize: 72, fontWeight: 900, color: '#777' }}>{initials(name)}</div>}
           </div>
@@ -384,6 +411,17 @@ export default async function handler(req: Request) {
         )}
       </div>
     ),
-    { width: 1200, height: 630 },
+    {
+      width: 1200,
+      height: 630,
+      fonts: font
+        ? [{ name: 'Inter', data: font, weight: 700 as const, style: 'normal' as const }]
+        : undefined,
+      // Don't let a transient empty/failed render get cached for a year. Only
+      // cache aggressively when we actually produced a real card (font loaded).
+      headers: font
+        ? { 'Cache-Control': 'public, immutable, no-transform, max-age=31536000' }
+        : { 'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300' },
+    },
   );
 }
