@@ -12,6 +12,7 @@ import type { NewsItem } from './AdminPanel';
 import { getTournaments, getNews, loadWithRetryPolled } from '../services/db';
 import { getStageOptions, statMatchesPlayer } from './StatsPage';
 import { BracketDisplay, DEFAULT_POINTS_PER_WIN } from './BracketDisplay';
+import { PickemsTab } from './pickems/PickemsTab';
 import { computePlacement } from './TeamsPage';
 import { deriveTournamentStatus } from '../utils/tournamentStatus';
 import {
@@ -22,7 +23,7 @@ import { mapImageUrl } from '../utils/valorantAssets';
 import { bracketRoundLabel } from '../utils/bracketRounds';
 import { calculateTournamentMvp, MVP_INFO_TEXT } from '../utils/tournamentMvp';
 
-type TabKey = 'overview' | 'matches' | 'bracket' | 'standings' | 'teams' | 'news';
+type TabKey = 'overview' | 'matches' | 'bracket' | 'standings' | 'teams' | 'news' | 'pickems';
 
 // Podium colors: gold / silver / bronze
 const PLACE_COLORS = ['#facc15', '#d1d5db', '#cd7f32'];
@@ -202,7 +203,7 @@ export function TournamentPage() {
   // Falls back to Overview for any missing/unknown hash.
   const [tab, setTab] = useState<TabKey>(() => {
     const hash = window.location.hash.replace('#', '') as TabKey;
-    return (['overview', 'matches', 'bracket', 'standings', 'teams', 'news'] as TabKey[]).includes(hash) ? hash : 'overview';
+    return (['overview', 'matches', 'bracket', 'standings', 'teams', 'news', 'pickems'] as TabKey[]).includes(hash) ? hash : 'overview';
   });
 
   // Initial retrying load + background polling so bracket/match updates appear
@@ -276,6 +277,7 @@ export function TournamentPage() {
     { key: 'standings', label: 'Standings' },
     { key: 'teams', label: 'Teams', count: tournament.teams.length },
     { key: 'news', label: 'News', count: tournamentNews.length },
+    { key: 'pickems', label: 'Pickems' },
   ];
 
   const statusLabel = deriveTournamentStatus(tournament);
@@ -461,6 +463,10 @@ export function TournamentPage() {
                 ))}
               </div>
             )
+          )}
+
+          {tab === 'pickems' && (
+            <PickemsTab tournament={tournament} matches={matches} />
           )}
         </div>
       </main>

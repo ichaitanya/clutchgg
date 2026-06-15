@@ -17,6 +17,7 @@ import type { Tournament, TournamentEvent, TeamInTournament, Stage1Config, Brack
 import { CreateTournamentScreen, tournamentHasBegun, collectRefreshUnits, refreshAllMatchStats, recomputeAllWinners } from './TournamentCreation';
 import { BracketDisplay } from './BracketDisplay';
 import { BracketConfigurationModal } from './BracketConfigurationModal';
+import { PickemsAdmin } from './pickems/PickemsAdmin';
 
 // True if a tournament has a round-robin or group-stage standing worth showing
 // on the homepage.
@@ -706,6 +707,9 @@ export function TournamentManager({
             ) : null}
           </>
         )}
+
+        {/* Pickems management (per match) */}
+        <PickemsAdmin tournament={t} isSuperAdmin={isSuperAdmin} />
 
         {/* Event Details Form Modal */}
         {editingEventDetails && editingEventDetails === t.id && (

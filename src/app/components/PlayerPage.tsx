@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ChevronLeft, ChevronDown, Trophy, Shield } from 'lucide-react';
+import {
+  ChevronLeft, ChevronDown, Trophy, Shield, BadgeCheck,
+  Share2, Check, Medal, Crown, Flame, Crosshair, Swords, Target,
+  Link2, Download, X, Sparkles, type LucideIcon,
+} from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { useClaim, ClaimControls, ClaimedProfileBlock } from './ClaimProfile';
+import { useAuth } from '../context/AuthContext';
+import { findMyPlayerProfiles, startClaimReauth } from '../services/supabase';
 import type {
   Tournament,
   TeamInTournament,
@@ -239,6 +246,75 @@ function aggregate(stats: PlayerMapStat[]): Aggregate {
   };
 }
 
+// ── Achievements ─────────────────────────────────────────────────────────────
+// Badges are DERIVED from data already on the page (career totals, per-tournament
+// placements, agent pool, career-best map) — no new tables or writes. Each badge
+// has a tone class for its accent color. Computed once and rendered in the hero.
+interface Badge {
+  key: string;
+  label: string;
+  detail: string;        // tooltip / sub-line explaining how it was earned
+  icon: LucideIcon;
+  tone: 'gold' | 'silver' | 'red' | 'green' | 'blue' | 'verified';
+}
+
+// "1st"/"2nd"… placements parse to a number; everything else (e.g. "Top 4") is
+// treated as not-a-podium. computePlacement returns strings like "1st".
+function placementRank(placement: string | null): number | null {
+  if (!placement) return null;
+  const n = parseInt(placement, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function computeBadges(
+  agg: Aggregate,
+  careers: CareerEntry[],
+  peakKills: number,
+  isVerified: boolean,
+): Badge[] {
+  const badges: Badge[] = [];
+
+  if (isVerified) {
+    badges.push({ key: 'verified', label: 'Verified Player', detail: 'This profile is claimed and verified by the player', icon: BadgeCheck, tone: 'verified' });
+  }
+
+  // Placement badges from completed tournaments (best result wins the medal).
+  const ranks = careers
+    .filter(c => c.status === 'completed')
+    .map(c => placementRank(c.placement))
+    .filter((n): n is number => n !== null);
+  const titles = ranks.filter(n => n === 1).length;
+  if (titles > 0) {
+    badges.push({ key: 'champion', label: titles > 1 ? `${titles}× Champion` : 'Champion', detail: `Won ${titles} tournament${titles > 1 ? 's' : ''}`, icon: Crown, tone: 'gold' });
+  } else if (ranks.some(n => n === 2)) {
+    badges.push({ key: 'finalist', label: 'Finalist', detail: 'Reached a tournament grand final (2nd place)', icon: Medal, tone: 'silver' });
+  } else if (ranks.some(n => n === 3)) {
+    badges.push({ key: 'podium', label: 'Podium', detail: 'Finished top 3 at a tournament', icon: Medal, tone: 'red' });
+  }
+
+  // Performance badges from career aggregates.
+  if (agg.mapsPlayed >= 5 && agg.acs >= 250) {
+    badges.push({ key: 'fragger', label: 'Star Fragger', detail: `${Math.round(agg.acs)} avg ACS across ${agg.mapsPlayed} maps`, icon: Swords, tone: 'red' });
+  }
+  if (agg.mapsPlayed >= 5 && agg.kd >= 1.2) {
+    badges.push({ key: 'positive-kd', label: 'Positive K/D', detail: `${agg.kd.toFixed(2)} career K/D`, icon: Target, tone: 'green' });
+  }
+  if (agg.hsPercent >= 25 && agg.mapsPlayed >= 5) {
+    badges.push({ key: 'sharpshooter', label: 'Sharpshooter', detail: `${Math.round(agg.hsPercent)}% avg headshots`, icon: Crosshair, tone: 'blue' });
+  }
+  if (peakKills >= 30) {
+    badges.push({ key: 'bomb', label: `${peakKills}-Bomb`, detail: `Dropped ${peakKills} kills on a single map`, icon: Flame, tone: 'gold' });
+  }
+
+  // Experience milestone.
+  const completed = careers.filter(c => c.status === 'completed').length;
+  if (completed >= 3) {
+    badges.push({ key: 'veteran', label: 'Veteran', detail: `Competed in ${completed} completed tournaments`, icon: Trophy, tone: 'silver' });
+  }
+
+  return badges;
+}
+
 // Short date, e.g. "12 May" — shared by the tournament expander match rows.
 function shortDate(d?: string): string {
   if (!d) return '';
@@ -434,8 +510,50 @@ export function PlayerPage() {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAliases, setShowAliases] = useState(false);
+  const [shared, setShared] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [cardError, setCardError] = useState(false); // OG image failed (e.g. local dev — no /api)
+  const [toast, setToast] = useState<string | null>(null);
+  // Background "this could be your profile" match for the signed-in viewer.
+  // Keyed by `${tournamentId}|${playerId}` (a claim is per-card, and the same
+  // person can be a different roster slot across tournaments) so the banner only
+  // shows on the exact card the match was found against.
+  const { userId: viewerId, playerAccount: viewerAccount } = useAuth();
+  const [myMatchKeys, setMyMatchKeys] = useState<Set<string> | null>(null);
+  const [iHaveActiveClaim, setIHaveActiveClaim] = useState(false);
+  const [claimingSuggested, setClaimingSuggested] = useState(false);
+  // Set the instant a claim submit succeeds, so the suggestion banner hides
+  // without waiting for the claim refetch / a manual page refresh.
+  const [claimSubmitted, setClaimSubmitted] = useState(false);
 
   useEffect(() => loadWithRetry(getTournaments, ts => { setTournaments(ts); setLoading(false); }), []);
+
+  // Esc closes the share-card modal.
+  useEffect(() => {
+    if (!shareOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShareOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [shareOpen]);
+
+  // Background match: which player cards belong to the signed-in viewer (by
+  // their captured Riot connection). Gate on verified (claiming needs Google +
+  // Discord anyway) AND a captured connection to match against — drives the
+  // suggestion banner. Card Riot IDs stay server-side (find-my-player-profiles).
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewerId || !viewerAccount?.is_verified || !viewerAccount?.riot_connection_verified) {
+      setMyMatchKeys(null);
+      setIHaveActiveClaim(false);
+      return;
+    }
+    findMyPlayerProfiles().then(res => {
+      if (cancelled) return;
+      setMyMatchKeys(new Set(res.matches.map(m => `${m.tournamentId}|${m.playerId}`)));
+      setIHaveActiveClaim(res.hasActiveClaim);
+    });
+    return () => { cancelled = true; };
+  }, [viewerId, viewerAccount?.is_verified, viewerAccount?.riot_connection_verified]);
 
   const tournament = useMemo(
     () => tournaments.find(t => t.id === tournamentId) || null,
@@ -474,6 +592,14 @@ export function PlayerPage() {
     }
     return undefined;
   }, [found, tournaments]);
+
+  // Profile claim state for this card (button / pending chip / claimed owner).
+  // Keyed to the tournament where the player actually lives — that's the blob
+  // the verify-riot-claim edge function searches.
+  const { claim, owner: claimOwner, myActiveClaim, loaded: claimLoaded, reload: reloadClaim } = useClaim(
+    resolved?.sourceTournament.id ?? '',
+    resolved?.player.id ?? '',
+  );
 
   const { mapStats, careers } = useMemo(() => {
     if (!resolved) return { mapStats: [] as PlayerMapStat[], careers: [] as CareerEntry[] };
@@ -660,6 +786,41 @@ export function PlayerPage() {
   // The tournament the player actually belongs to (may differ from the URL one).
   const playerTournament = found.sourceTournament;
 
+  // This exact card matches the signed-in viewer's captured Riot connection →
+  // suggest a claim. Keyed to the resolved (tournament, player) tuple so the
+  // banner shows only on the card the match was actually found against.
+  const isSuggestedMatch =
+    !!myMatchKeys &&
+    myMatchKeys.has(`${playerTournament.id}|${player.id}`) &&
+    !iHaveActiveClaim;
+
+  // Accept the suggestion → run the existing Discord re-auth claim flow. The
+  // ClaimControls instance (mounted in the hero) handles the ?claim=1 return and
+  // its result dialogs regardless of what kicked it off.
+  const acceptSuggestion = async () => {
+    setClaimingSuggested(true);
+    try { await startClaimReauth(playerTournament.id, player.id); }
+    catch { setClaimingSuggested(false); }
+  };
+
+  // A claim is approved against a SNAPSHOT of the card's Riot ID (claim.riot_id).
+  // tournaments_blob is mutable: an organizer can edit this card's riotId AFTER
+  // approval, which would leave the public "Verified Player" badge (and the
+  // claimed-owner avatar/bio override) standing against a card that no longer
+  // matches the verified Riot ID — i.e. vouching for the wrong person. So the
+  // badge/override only render when the card's CURRENT riotId still matches the
+  // claim's snapshot. (decide-claim enforces the same match at approval time;
+  // this is the read-side guard for edits that happen afterward.) A superadmin
+  // can clean up the now-stale claim via the admin panel.
+  const approvedClaimMatchesCard =
+    claim?.status === 'approved' &&
+    !!player.riotId?.trim() &&
+    !!claim.riot_id?.trim() &&
+    normalizeRiotId(player.riotId) === normalizeRiotId(claim.riot_id);
+  // The owner's profile (avatar/bio/socials) only overrides the roster card when
+  // the claim still matches — otherwise show the plain roster card.
+  const verifiedOwner = approvedClaimMatchesCard ? claimOwner : null;
+
   // Hero chips reflect the player's LATEST team/tournament (career is now unified
   // across teams). Fall back to wherever they were resolved when no stats exist.
   const heroTeamId = latestStint?.teamId ?? team.id;
@@ -675,22 +836,73 @@ export function PlayerPage() {
     { label: 'Maps', value: agg.mapsPlayed.toString(), sub: `across ${matchesPlayed} ${matchesPlayed === 1 ? 'match' : 'matches'}` },
   ];
 
+  // Derived achievement badges (no new data — see computeBadges).
+  const badges = computeBadges(agg, careers, peak?.kills ?? 0, approvedClaimMatchesCard);
+
+  // Canonical profile path (drop any incidental query/hash on the current URL).
+  // /player/:tid/:pid is rewritten server-side (vercel.json → api/profile-meta)
+  // to inject og:image tags pointing at the generated card (api/og/player), so
+  // pasting THIS link in Discord/Twitter/iMessage unfurls into a ClutchGG card.
+  const shareUrl = `${window.location.origin}/player/${playerTournament.id}/${player.id}`;
+  // Same image the link unfurls to — used for the in-app preview + download so
+  // what the user sees is pixel-identical to what others get.
+  const cardImageUrl = `${window.location.origin}/api/og/player?tid=${encodeURIComponent(playerTournament.id)}&pid=${encodeURIComponent(player.id)}`;
+  const shareText = `${player.name}${heroTeamName ? ` (${heroTeamName})` : ''} — ${Math.round(agg.acs)} ACS · ${agg.kd.toFixed(2)} K/D on ClutchGG`;
+
+  // Brief themed toast (auto-dismisses). One at a time is fine here.
+  const showToast = (msg: string, ms = 2400) => {
+    setToast(msg);
+    setTimeout(() => setToast(t => (t === msg ? null : t)), ms);
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShared(true);
+      setTimeout(() => setShared(false), 2000);
+      showToast('Profile link copied to clipboard');
+    } catch {
+      showToast('Couldn’t copy — copy the link from the address bar');
+    }
+  };
+  const handleNativeShare = async () => {
+    if (!navigator.share) return handleCopyLink();
+    try {
+      await navigator.share({ title: `${player.name} · ClutchGG`, text: shareText, url: shareUrl });
+      showToast('Shared!');
+    } catch { /* cancelled — no-op */ }
+  };
+
   return (
     <div className="min-h-screen bg-[#0e0e0e]">
       <Header />
 
       <main className="arena-md">
-        {/* Back */}
-        <button onClick={() => navigate(`/teams/${heroTeamId}`)} className="arena-md__back">
-          <ChevronLeft className="w-4 h-4" />
-          Back to Roster
-        </button>
+        {/* Back + Share */}
+        <div className="arena-pp-topbar">
+          <button onClick={() => navigate(`/teams/${heroTeamId}`)} className="arena-md__back">
+            <ChevronLeft className="w-4 h-4" />
+            Back to Roster
+          </button>
+          <button
+            type="button"
+            onClick={() => { setCardError(false); setShareOpen(true); }}
+            className="arena-pp-share"
+            title="Share this profile"
+          >
+            <Share2 className="w-4 h-4" />
+            Share
+          </button>
+        </div>
 
         {/* Player hero */}
         <div className="arena-pp-hero">
           <div className="arena-pp-hero__photo">
-            {photo
-              ? <img src={photo} alt={player.name} />
+            {/* The claimed owner's avatar wins over the roster photo — it's the
+                player's own self-chosen picture. Only when the claim still
+                matches the card's current Riot ID (see verifiedOwner). */}
+            {(verifiedOwner?.avatar_url || photo)
+              ? <img src={verifiedOwner?.avatar_url || photo} alt={player.name} />
               : <span className="arena-pp-hero__initials">{playerInitials(player.name)}</span>}
           </div>
 
@@ -700,6 +912,16 @@ export function PlayerPage() {
             {/* Name + optional history indicator */}
             <div className="arena-pp-name-row">
               <h1 className="arena-pp-hero__name">{player.name}</h1>
+              {approvedClaimMatchesCard && (
+                <span
+                  className="arena-pp-chip"
+                  title="This profile is claimed and verified by the player"
+                  style={{ borderColor: 'var(--arena-accent)', color: 'var(--arena-accent)', gap: '0.3em' }}
+                >
+                  <BadgeCheck className="w-3.5 h-3.5" />
+                  Verified Player
+                </span>
+              )}
               {(player.nameHistory ?? []).length > 0 && (
                 <div className="arena-pp-alias">
                   <button
@@ -759,12 +981,83 @@ export function PlayerPage() {
                   {player.role.toUpperCase()}
                 </span>
               )}
+              <ClaimControls
+                tournamentId={playerTournament.id}
+                playerId={player.id}
+                cardRiotId={player.riotId}
+                claim={claim}
+                myActiveClaim={myActiveClaim}
+                claimLoaded={claimLoaded}
+                isSuggestedMatch={isSuggestedMatch}
+                onClaimChanged={reloadClaim}
+                onClaimResult={(status) => {
+                  if (status === 'submitted') {
+                    setClaimSubmitted(true); // hide the banner immediately (no refresh)
+                    showToast('Claim submitted — it’s now in review with an admin.', 5000);
+                  } else if (status === 'claim_taken') {
+                    showToast('This profile has already been claimed by someone else.', 5000);
+                  } else if (status === 'already_has_claim') {
+                    showToast('You already hold a claim. Unclaim it first to claim a different profile.', 5000);
+                  } else if (status === 'riot_mismatch') {
+                    showToast('That profile’s Riot ID doesn’t match your verified account.', 5000);
+                  }
+                }}
+              />
             </div>
+
+            {/* "This could be you" suggestion banner — shown only when the card's
+                Riot ID matches the signed-in viewer's verified Riot ID, there's
+                no claim yet here, and they hold no claim elsewhere. Hidden the
+                instant a claim is submitted (claimSubmitted) so it doesn't linger
+                until the claim refetch lands. */}
+            {isSuggestedMatch && !claim && !claimSubmitted && (
+              <div className="arena-pp-claim-suggest" role="status">
+                <Sparkles className="arena-pp-claim-suggest__icon w-5 h-5" />
+                <div className="arena-pp-claim-suggest__text">
+                  <p className="arena-pp-claim-suggest__title">This looks like your profile</p>
+                  <p className="arena-pp-claim-suggest__sub">
+                    Your verified Riot ID matches this player. Claim it to make it yours.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="arena-pp-claim-suggest__btn"
+                  onClick={acceptSuggestion}
+                  disabled={claimingSuggested}
+                >
+                  <BadgeCheck className="w-4 h-4" />
+                  {claimingSuggested ? 'Working…' : 'Claim this profile'}
+                </button>
+              </div>
+            )}
+
+            {verifiedOwner && <ClaimedProfileBlock owner={verifiedOwner} />}
 
             {agg.agents.length > 0 && (
               <div className="arena-pp-hero__agents">
                 <span className="arena-pp-hero__agents-label">Agents</span>
                 <AgentTag agent={agg.agents.join(', ')} />
+              </div>
+            )}
+
+            {badges.length > 0 && (
+              <div className="arena-pp-hero__badges">
+                <span className="arena-pp-hero__badges-label">Achievements</span>
+                <div className="arena-pp-badges">
+                  {badges.map(b => {
+                    const Icon = b.icon;
+                    return (
+                      <span
+                        key={b.key}
+                        className={`arena-pp-badge arena-pp-badge--${b.tone}`}
+                        title={b.detail}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {b.label}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
@@ -938,6 +1231,84 @@ export function PlayerPage() {
           )}
         </section>
       </main>
+
+      {shareOpen && (
+        <div
+          className="arena-success-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Share profile card"
+          onClick={() => setShareOpen(false)}
+        >
+          <div className="arena-share-modal" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              className="arena-share-modal__close"
+              onClick={() => setShareOpen(false)}
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <p className="arena-share-modal__title">Share Card</p>
+            <p className="arena-share-modal__sub">
+              This is how <strong>{player.name}</strong>'s profile looks when the link is shared.
+            </p>
+
+            {/* The exact image the link unfurls to (api/og/player). 1200×630.
+                The /api route only runs in production (Vercel) — locally it 404s,
+                so show a friendly note instead of a broken image. */}
+            <div className={`arena-share-modal__preview${cardError ? ' arena-share-modal__preview--error' : ''}`}>
+              {cardError ? (
+                <div className="arena-share-modal__fallback">
+                  <Share2 className="w-6 h-6" />
+                  <p>Card preview generates on the live site.</p>
+                  <span>Copy or share the link — it’ll unfurl into the card automatically.</span>
+                </div>
+              ) : (
+                <img
+                  src={cardImageUrl}
+                  alt={`${player.name} — ClutchGG player card`}
+                  loading="eager"
+                  onError={() => setCardError(true)}
+                />
+              )}
+            </div>
+
+            <div className="arena-share-modal__actions">
+              <button type="button" className="arena-share-modal__btn arena-share-modal__btn--primary" onClick={handleCopyLink}>
+                {shared ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+                {shared ? 'Copied!' : 'Copy link'}
+              </button>
+              <a
+                className="arena-share-modal__btn"
+                href={cardImageUrl}
+                download={`${player.name.replace(/[^\w-]+/g, '_')}_clutchgg_card.png`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="w-4 h-4" />
+                Download
+              </a>
+              {typeof navigator !== 'undefined' && 'share' in navigator && (
+                <button type="button" className="arena-share-modal__btn" onClick={handleNativeShare}>
+                  <Share2 className="w-4 h-4" />
+                  Share…
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lightweight themed toast — bottom-center, auto-dismisses. */}
+      {toast && (
+        <div className="arena-toast" role="status" aria-live="polite">
+          <Check className="w-4 h-4" />
+          {toast}
+        </div>
+      )}
+
       <Footer />
     </div>
   );

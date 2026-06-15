@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/player/:tid/:pid",
+      "destination": "/api/profile-meta?tid=:tid&pid=:pid"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

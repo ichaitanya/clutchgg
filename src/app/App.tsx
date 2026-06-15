@@ -15,6 +15,7 @@ import { ArrowRight, ChevronDown } from 'lucide-react';
 import type { AdminData } from './components/AdminPanel';
 import type { BracketGenerated, BracketMatch } from './components/TournamentCreation';
 import { loadAdminData, loadWithRetryPolled } from './services/db';
+import { AuthProvider } from './context/AuthContext';
 import { resolveSpotlightTournament } from './utils/tournamentStatus';
 
 // Route pages are code-split so a first-time visitor only downloads the home
@@ -33,6 +34,9 @@ const PlayerPage = lazy(() => import('./components/PlayerPage').then(m => ({ def
 const ArticlePage = lazy(() => import('./components/ArticlePage').then(m => ({ default: m.ArticlePage })));
 const TournamentPage = lazy(() => import('./components/TournamentPage').then(m => ({ default: m.TournamentPage })));
 const ContactPage = lazy(() => import('./components/ContactPage').then(m => ({ default: m.ContactPage })));
+const LoginPage = lazy(() => import('./components/LoginPage').then(m => ({ default: m.LoginPage })));
+const AuthCallbackPage = lazy(() => import('./components/AuthCallbackPage').then(m => ({ default: m.AuthCallbackPage })));
+const PlayerProfilePage = lazy(() => import('./components/PlayerProfilePage').then(m => ({ default: m.PlayerProfilePage })));
 
 
 // Helper function to determine match status
@@ -727,6 +731,7 @@ function ScrollToTop() {
 export default function App() {
   return (
     <Router>
+      <AuthProvider>
       <ScrollToTop />
       <Suspense fallback={<div className="min-h-screen bg-[#0e0e0e]" />}>
         <Routes>
@@ -744,8 +749,12 @@ export default function App() {
           <Route path="/match/:matchId" element={<MatchScoreboard />} />
           <Route path="/tournament-match/:matchId" element={<TournamentMatchPage />} />
           <Route path="/contact" element={<ContactPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/profile" element={<PlayerProfilePage />} />
         </Routes>
       </Suspense>
+      </AuthProvider>
     </Router>
   );
 }

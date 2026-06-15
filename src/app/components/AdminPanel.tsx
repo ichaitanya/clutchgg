@@ -10,7 +10,7 @@ import {
 import { CreateTournamentScreen, type Tournament } from './TournamentCreation';
 import { TournamentManager } from './TournamentManager';
 import { DEFAULT_POINTS_PER_WIN } from './BracketDisplay';
-import { supabase, signIn, signOut, getStoredSession, refreshAccessTokenDirect, isSessionExpired, getCurrentProfile, changePassword, type Profile, type UserRole } from '../services/supabase';
+import { supabase, signIn, signOut, getStoredSession, refreshAccessTokenDirect, isSessionExpired, getCurrentProfile, changePassword, getPendingClaims, decideClaim, unclaimProfile, getPublicPlayerAccount, getAdminRiotMatches, getClaimContacts, type Profile, type UserRole, type PlayerClaim, type PlayerAccount, type RiotMatchUser, type ClaimContact } from '../services/supabase';
 import {
   loadAdminDataAuthed, upsertTournament, deleteTournament, upsertNews, deleteNews, replaceStandings,
   setSiteConfig, migrateFromLocalStorage, uploadHeroVideo, uploadImage, clearDbCache,
@@ -1275,6 +1275,298 @@ function RequestsPanel({ onApproved, showToast }: {
   );
 }
 
+// ─── Profile claims (superadmin) ─────────────────────────────────────────────
+// Approval queue for player-card claims. A claim only exists if the
+// verify-riot-claim edge function already matched the claimant's
+// Discord-verified Riot ID to the card — approval here is the final human
+// check before the card shows their profile.
+function ClaimsPanel({ showToast }: {
+  showToast: (msg: string, type: 'success' | 'error') => void;
+}) {
+  const [claims, setClaims] = useState<PlayerClaim[]>([]);
+  const [accounts, setAccounts] = useState<Record<string, PlayerAccount>>({});
+  const [contacts, setContacts] = useState<Record<string, ClaimContact>>({});
+  const [autoMatches, setAutoMatches] = useState<RiotMatchUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      // Step 1 — the claims list is what the admin needs first. Fetch it, render
+      // it, and clear the loading state immediately. Everything else (contacts,
+      // the auto-match scan) is supplementary and loads in the background so a
+      // slow blob scan / email lookup never blocks the queue from showing.
+      const rows = await getPendingClaims();
+      if (!mountedRef.current) return;
+      setClaims(rows);
+      if (!silent) setLoading(false);
+
+      const ids = [...new Set(rows.map(r => r.user_id))];
+
+      // Step 2 — supplementary data, all in parallel (independent of each other).
+      // Each updates its own slice as it arrives; failures are swallowed by the
+      // service wrappers (return [] / {}).
+      void Promise.all([
+        Promise.all(ids.map(id => getPublicPlayerAccount(id))).then(fetched => {
+          if (!mountedRef.current) return;
+          const map: Record<string, PlayerAccount> = {};
+          fetched.forEach(acc => { if (acc) map[acc.id] = acc; });
+          setAccounts(map);
+        }),
+        getClaimContacts(ids).then(contactMap => {
+          if (mountedRef.current) setContacts(contactMap);
+        }),
+        getAdminRiotMatches().then(matches => {
+          if (mountedRef.current) setAutoMatches(matches);
+        }),
+      ]);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await load(true);
+    if (mountedRef.current) setRefreshing(false);
+  };
+
+  const decide = async (claim: PlayerClaim, decision: 'approved' | 'rejected') => {
+    setBusyId(claim.id);
+    try {
+      await decideClaim(claim.id, decision);
+      if (!mountedRef.current) return;
+      showToast(
+        decision === 'approved'
+          ? `Approved — ${claim.player_name ?? claim.riot_id} is now a verified player`
+          : 'Claim rejected',
+        'success',
+      );
+      await load(true);
+    } catch (e) {
+      if (mountedRef.current) showToast(e instanceof Error ? e.message : 'Decision failed', 'error');
+    } finally {
+      if (mountedRef.current) setBusyId(null);
+    }
+  };
+
+  const forceUnclaim = async (claim: PlayerClaim) => {
+    setBusyId(claim.id);
+    try {
+      await unclaimProfile(claim.id);
+      if (!mountedRef.current) return;
+      showToast(`Released — ${claim.player_name ?? claim.riot_id} is claimable again`, 'success');
+      await load(true);
+    } catch (e) {
+      if (mountedRef.current) showToast(e instanceof Error ? e.message : 'Unclaim failed', 'error');
+    } finally {
+      if (mountedRef.current) setBusyId(null);
+    }
+  };
+
+  const pending = claims.filter(c => c.status === 'pending');
+  const handled = claims.filter(c => c.status !== 'pending');
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-white font-bold text-lg">Profile Claims</h2>
+          <p className="text-gray-500 text-sm">
+            Players whose Discord-verified Riot ID matched a tournament player card.
+            Approve to hand them the profile.
+          </p>
+        </div>
+        <button
+          onClick={refresh}
+          disabled={refreshing || loading}
+          className="text-xs text-gray-400 hover:text-white bg-[#1e2130] border border-[#2a2d3a] px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 flex items-center gap-1.5"
+        >
+          {refreshing && <Loader className="w-3 h-3 animate-spin" />}
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-gray-500 text-sm"><Loader className="w-4 h-4 animate-spin" /> Loading…</div>
+      ) : claims.length === 0 ? (
+        <div className="text-center py-12 text-gray-600 text-sm bg-[#151821] border border-[#2a2d3a] rounded-xl">
+          No claims yet.
+        </div>
+      ) : (
+        <>
+          {pending.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-gray-600 text-xs font-semibold uppercase">Pending ({pending.length})</p>
+              {pending.map(claim => {
+                const acc = accounts[claim.user_id];
+                return (
+                  <div key={claim.id} className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="text-white font-bold text-base">{claim.player_name || claim.riot_id}</h3>
+                        <p className="text-gray-400 text-sm mt-0.5">
+                          Riot ID <span className="text-white font-mono">{claim.riot_id}</span>
+                          {acc && <> · claimed by <span className="text-white">{acc.display_name}</span></>}
+                        </p>
+                        {/* Contact block — so an admin can reach the claimant for
+                            any confirmation before approving. */}
+                        {(() => {
+                          const c = contacts[claim.user_id];
+                          const rows: { label: string; value: string }[] = [];
+                          if (c?.email) rows.push({ label: 'Email', value: c.email });
+                          const dc = c?.discordUsername || acc?.discord_username;
+                          if (dc) rows.push({ label: 'Discord', value: c?.discordId ? `${dc} (${c.discordId})` : dc });
+                          if (c?.gameConnection) rows.push({ label: 'Verified game ID', value: c.gameConnection });
+                          if (rows.length === 0) return null;
+                          return (
+                            <div className="mt-2 flex flex-col gap-0.5">
+                              {rows.map(r => (
+                                <p key={r.label} className="text-xs text-gray-500">
+                                  <span className="text-gray-600">{r.label}:</span>{' '}
+                                  <span className="text-gray-300 font-mono select-all">{r.value}</span>
+                                </p>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                        <p className="text-gray-600 text-xs mt-2">
+                          <a
+                            href={`/player/${claim.tournament_id}/${claim.player_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[#ff4655] hover:underline"
+                          >
+                            View player card ↗
+                          </a>
+                          {' · '}{new Date(claim.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => decide(claim, 'approved')}
+                          disabled={busyId === claim.id}
+                          className="flex items-center gap-2 bg-[#ff4655] hover:bg-[#ff3344] disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all"
+                        >
+                          {busyId === claim.id ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => decide(claim, 'rejected')}
+                          disabled={busyId === claim.id}
+                          className="flex items-center gap-2 text-gray-400 hover:text-[#ff4655] disabled:opacity-50 bg-[#1e2130] border border-[#2a2d3a] text-sm font-medium px-4 py-2 rounded-lg transition-all"
+                        >
+                          <X className="w-4 h-4" /> Reject
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {handled.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-gray-600 text-xs font-semibold uppercase">History</p>
+              {handled.map(claim => (
+                <div key={claim.id} className="bg-[#101218] border border-[#1e2130] rounded-xl px-5 py-3 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-gray-300 text-sm font-medium truncate">{claim.player_name || claim.riot_id}</p>
+                    <p className="text-gray-600 text-xs">{claim.riot_id}{accounts[claim.user_id] ? ` · ${accounts[claim.user_id].display_name}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Force-release an approved claim so the card is claimable
+                        again (and the claimant's riot_id_verified is cleared). */}
+                    {claim.status === 'approved' && (
+                      <button
+                        onClick={() => forceUnclaim(claim)}
+                        disabled={busyId === claim.id}
+                        title="Release this claim"
+                        className="flex items-center gap-1.5 text-gray-400 hover:text-[#ff4655] disabled:opacity-50 bg-[#1e2130] border border-[#2a2d3a] text-xs font-medium px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        {busyId === claim.id ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                        Unclaim
+                      </button>
+                    )}
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                      claim.status === 'approved' ? 'bg-[#0d1f16] text-[#4ade80] border border-[#1a4a2e]' : 'bg-[#1f0d0d] text-[#f87171] border border-[#4a1a1a]'
+                    }`}>
+                      {claim.status.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Auto-matched users — anyone whose verified Riot connection matches a
+          player card. The actionable ones (no claim yet) are listed first so an
+          admin can nudge them. Read-only; claiming is still self-service. */}
+      {!loading && autoMatches.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <div>
+            <p className="text-gray-600 text-xs font-semibold uppercase">
+              Riot-matched players ({autoMatches.length})
+            </p>
+            <p className="text-gray-500 text-xs mt-1">
+              Users whose verified Discord→Riot connection matches a player card.
+              “Can claim” = matched but hasn’t claimed yet.
+            </p>
+          </div>
+          {autoMatches.map(u => (
+            <div key={u.userId} className="bg-[#151821] border border-[#2a2d3a] rounded-xl p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h3 className="text-white font-semibold text-sm">
+                    {u.displayName}
+                    {u.discordUsername && <span className="text-gray-500 font-normal"> · {u.discordUsername}</span>}
+                  </h3>
+                  <p className="text-gray-400 text-xs mt-0.5">
+                    Riot <span className="text-white font-mono">{u.riotConnectionId}</span>
+                  </p>
+                  <div className="mt-2 flex flex-col gap-1">
+                    {u.matches.map(m => (
+                      <a
+                        key={`${m.tournamentId}-${m.playerId}`}
+                        href={`/player/${m.tournamentId}/${m.playerId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-[#ff4655] hover:underline"
+                      >
+                        {m.playerName || m.riotId}{m.teamName ? ` · ${m.teamName}` : ''}{m.tournamentName ? ` · ${m.tournamentName}` : ''} ↗
+                      </a>
+                    ))}
+                  </div>
+                </div>
+                <span className={`flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded ${
+                  u.hasClaim
+                    ? 'bg-[#0d1f16] text-[#4ade80] border border-[#1a4a2e]'
+                    : 'bg-[#1f1a0d] text-[#facc15] border border-[#4a3a1a]'
+                }`}>
+                  {u.hasClaim ? 'CLAIMED' : 'CAN CLAIM'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Forced password change ─────────────────────────────────────────────────────
 // Shown after login when profile.must_change_password is set (default-password
 // path). Organizers must set a personal password before reaching the panel.
@@ -1388,7 +1680,7 @@ function SideTab({ icon: Icon, label, active, count, onClick }: {
 
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
-type Tab = 'news' | 'tournaments' | 'settings' | 'requests';
+type Tab = 'news' | 'tournaments' | 'settings' | 'requests' | 'claims';
 
 export function AdminPanel({ onClose, onDataChange }: {
   onClose: () => void;
@@ -1725,8 +2017,8 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
   // Keep organizers off tabs they can't access (e.g. if default 'tournaments'
   // ever changes, or a stale 'settings'/'requests' selection lingers).
   useEffect(() => {
-    if (isOrganizer && (tab === 'settings' || tab === 'requests')) setTab('tournaments');
-    if (!isSuperadmin && tab === 'requests') setTab('tournaments');
+    if (isOrganizer && (tab === 'settings' || tab === 'requests' || tab === 'claims')) setTab('tournaments');
+    if (!isSuperadmin && (tab === 'requests' || tab === 'claims')) setTab('tournaments');
   }, [isOrganizer, isSuperadmin, tab]);
 
   return (
@@ -1782,6 +2074,7 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
               <div className="my-3 border-t border-[#1e2130]" />
               <p className="text-gray-600 text-xs font-semibold uppercase px-4 py-2">Administration</p>
               <SideTab icon={Users} label="Requests" active={tab === 'requests'} onClick={() => setTab('requests')} />
+              <SideTab icon={Users} label="Profile Claims" active={tab === 'claims'} onClick={() => setTab('claims')} />
             </>
           )}
 
@@ -1846,6 +2139,11 @@ function AdminPanelInner({ profile, onClose, onDataChange, onLogout }: {
                 }}
               />
             </div>
+          )}
+
+          {/* ── PROFILE CLAIMS TAB (superadmin) ── */}
+          {isSuperadmin && tab === 'claims' && (
+            <ClaimsPanel showToast={showToast} />
           )}
 
           {/* ── NEWS TAB ── */}

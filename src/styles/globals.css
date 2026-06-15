@@ -4006,11 +4006,13 @@ body {
   font-family: 'Chivo', 'Inter', system-ui, sans-serif;
   font-weight: 700;
   font-size: 1.5rem;
-  color: var(--arena-text-dim);
+  /* Losing score sits over the map splash that backs each row — a readable
+     light grey instead of the slate --arena-text-dim that vanished on it. */
+  color: rgba(255, 255, 255, 0.7);
   flex-shrink: 0;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
 }
-.arena-md-map__score-sep { color: var(--arena-border); font-size: 1rem; }
+.arena-md-map__score-sep { color: rgba(255, 255, 255, 0.55); font-size: 1rem; }
 .arena-md-map__score-win { color: #fff; }
 
 /* ── Series MVP card ──────────────────────────────────────────── */
@@ -4427,9 +4429,15 @@ body {
   font-weight: 700;
   font-size: 2rem;
   color: #fff;
+  /* Sits over a map photo — a soft shadow keeps every digit legible against
+     bright spots in the splash, not just the dark gutter. */
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.7);
 }
-.arena-md-splash__score-sep { color: var(--arena-text-dim); font-size: 1.4rem; }
-.arena-md-splash__score-dim { color: var(--arena-text-dim); }
+.arena-md-splash__score-sep { color: rgba(255, 255, 255, 0.75); font-size: 1.4rem; }
+/* Losing-side score: clearly readable light grey (not the slate --arena-text-dim,
+   which vanished on the map overlay) — dimmer than the white winner but never
+   illegible. */
+.arena-md-splash__score-dim { color: rgba(255, 255, 255, 0.7); }
 
 /* ── Stats table ──────────────────────────────────────────────── */
 .arena-md-stats { display: flex; flex-direction: column; gap: 1rem; }
@@ -5545,6 +5553,54 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   text-transform: uppercase;
   border: none;
 }
+/* "This looks like your profile" suggestion banner — accent-washed call to
+   action shown only when the card matches the viewer's verified Riot ID. */
+.arena-pp-claim-suggest {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid var(--arena-accent);
+  background:
+    radial-gradient(140% 120% at 0% 0%, rgba(255, 70, 85, 0.16), transparent 60%),
+    rgba(255, 70, 85, 0.06);
+}
+.arena-pp-claim-suggest__icon { color: var(--arena-accent); flex-shrink: 0; }
+.arena-pp-claim-suggest__text { flex: 1; min-width: 0; }
+.arena-pp-claim-suggest__title {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+.arena-pp-claim-suggest__sub {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8rem;
+  color: var(--arena-text-secondary, #c8c8c8);
+  margin: 0.15rem 0 0;
+}
+.arena-pp-claim-suggest__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: none;
+  background: var(--arena-accent);
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.arena-pp-claim-suggest__btn:hover:not(:disabled) { filter: brightness(1.1); }
+.arena-pp-claim-suggest__btn:disabled { opacity: 0.65; cursor: default; }
+
 .arena-pp-hero__agents {
   display: flex;
   align-items: center;
@@ -5560,6 +5616,232 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   text-transform: uppercase;
   color: var(--arena-text-dim);
 }
+
+/* Top bar: Back on the left, Share on the right. */
+.arena-pp-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.arena-pp-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--arena-text-primary);
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.arena-pp-share:hover { border-color: var(--arena-accent); color: var(--arena-accent); }
+
+/* Share-card preview modal (opens from the Share button; reuses the dimmed
+   .arena-success-overlay backdrop). Wider than the success modal to fit the
+   1.9:1 card image. */
+.arena-share-modal {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  background: #161616;
+  border: 1px solid var(--arena-border);
+  border-radius: 0.9rem;
+  padding: 1.6rem 1.6rem 1.4rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  animation: arena-success-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.arena-share-modal__close {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--arena-border);
+  color: var(--arena-text-dim);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.arena-share-modal__close:hover { color: var(--arena-accent); border-color: var(--arena-accent-dim); background: rgba(255, 70, 85, 0.08); }
+.arena-share-modal__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 0.3rem;
+}
+.arena-share-modal__sub {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  color: var(--arena-text-dim);
+  margin: 0 0 1.1rem;
+  line-height: 1.5;
+}
+.arena-share-modal__sub strong { color: var(--arena-text-secondary, #e5e2e1); }
+/* Keep the card's 1200×630 aspect; show a subtle skeleton tint while it loads. */
+.arena-share-modal__preview {
+  position: relative;
+  aspect-ratio: 1200 / 630;
+  width: 100%;
+  border-radius: 0.6rem;
+  overflow: hidden;
+  border: 1px solid var(--arena-border);
+  background:
+    linear-gradient(110deg, #161616 30%, #1d1d1d 50%, #161616 70%) #161616;
+  background-size: 200% 100%;
+  animation: arena-share-shimmer 1.4s ease-in-out infinite;
+}
+.arena-share-modal__preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+@keyframes arena-share-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.arena-share-modal__actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+}
+.arena-share-modal__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  flex: 1;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.55rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  color: var(--arena-text-primary);
+  background: var(--arena-surface-elevated);
+  border: 1px solid var(--arena-border);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, filter 0.15s ease;
+}
+.arena-share-modal__btn:hover { border-color: var(--arena-accent); color: var(--arena-accent); }
+.arena-share-modal__btn--primary {
+  color: #fff;
+  background: var(--arena-accent);
+  border-color: var(--arena-accent);
+}
+.arena-share-modal__btn--primary:hover { filter: brightness(1.1); color: #fff; }
+/* Fallback shown when the OG image can't load (e.g. local dev — no /api route).
+   Stop the shimmer and present a calm explanatory panel instead. */
+.arena-share-modal__preview--error { animation: none; background: #131313; }
+.arena-share-modal__fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  padding: 1.5rem;
+}
+.arena-share-modal__fallback svg { color: var(--arena-accent); margin-bottom: 0.2rem; }
+.arena-share-modal__fallback p {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+.arena-share-modal__fallback span {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--arena-text-dim);
+  max-width: 320px;
+  line-height: 1.45;
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────────────
+   Lightweight bottom-center confirmation, on-theme. Auto-dismissed by JS. */
+.arena-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 2rem;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.1rem;
+  background: #1c1c1c;
+  border: 1px solid var(--arena-accent);
+  border-radius: 999px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: arena-toast-in 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.arena-toast svg { color: var(--arena-accent); flex-shrink: 0; }
+@keyframes arena-toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+/* Warn variant (e.g. "no Riot connection found") — amber, allowed to wrap since
+   its guidance is longer than a one-liner. */
+.arena-toast--warn {
+  border-color: #facc15;
+  white-space: normal;
+  max-width: min(440px, calc(100vw - 2rem));
+  text-align: left;
+  align-items: flex-start;
+}
+.arena-toast--warn svg { color: #facc15; margin-top: 1px; }
+
+/* Achievement badges — derived, colour-toned chips in the hero. */
+.arena-pp-hero__badges {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+.arena-pp-hero__badges-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--arena-text-dim);
+  padding-top: 0.35rem;
+  flex-shrink: 0;
+}
+.arena-pp-badges { display: inline-flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.arena-pp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.arena-pp-badge svg { flex-shrink: 0; }
+.arena-pp-badge--gold     { color: #fbbf24; background: rgba(251, 191, 36, 0.1);  border-color: rgba(251, 191, 36, 0.3); }
+.arena-pp-badge--silver   { color: #cbd5e1; background: rgba(203, 213, 225, 0.08); border-color: rgba(203, 213, 225, 0.25); }
+.arena-pp-badge--red      { color: #ff6b78; background: rgba(255, 70, 85, 0.1);   border-color: var(--arena-accent-dim); }
+.arena-pp-badge--green    { color: #4ade80; background: rgba(74, 222, 128, 0.1);  border-color: rgba(74, 222, 128, 0.3); }
+.arena-pp-badge--blue     { color: #60a5fa; background: rgba(96, 165, 250, 0.1);  border-color: rgba(96, 165, 250, 0.3); }
+.arena-pp-badge--verified { color: var(--arena-accent); background: rgba(255, 70, 85, 0.12); border-color: var(--arena-accent); }
 
 /* Agent chips (shared by hero + table) */
 .arena-pp-agents { display: inline-flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
@@ -6296,6 +6578,18 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   .arena-pp-hero__chips, .arena-pp-hero__agents { justify-content: center; }
   .arena-pp-hero__name { font-size: 2.1rem; }
   .arena-pp-name-row { justify-content: center; }
+  /* Center the achievements row + let its label sit above the chips on phones. */
+  .arena-pp-hero__badges { flex-direction: column; align-items: center; gap: 0.5rem; }
+  .arena-pp-hero__badges-label { padding-top: 0; }
+  .arena-pp-badges { justify-content: center; }
+  /* Share-card modal: stack the action buttons full-width on phones. */
+  .arena-share-modal { padding: 1.3rem 1.1rem 1.1rem; }
+  .arena-share-modal__actions { flex-direction: column; }
+  /* Claim suggestion banner: stack text over a full-width button on phones. */
+  .arena-pp-claim-suggest { flex-direction: column; align-items: flex-start; text-align: left; }
+  .arena-pp-claim-suggest__btn { width: 100%; justify-content: center; }
+  /* Toast: allow it to wrap within the viewport on narrow screens. */
+  .arena-toast { max-width: calc(100vw - 2rem); white-space: normal; text-align: center; }
   /* Breakdown cards stack on phones; tighten the column gutters */
   .arena-pp-break { grid-template-columns: 1fr; }
   .arena-pp-break__grid--agent { grid-template-columns: minmax(0, 1fr) 2.6rem 3rem 3rem; gap: 0.55rem; }
@@ -7669,6 +7963,808 @@ a.arena-stats-table__team:hover { color: var(--arena-accent); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   PROFILE SETTINGS — two-column layout (left sidebar + edit form).
+   Mirrors the Player Profile Figma onto the arena theme. Mobile rules
+   live in the responsive layer below. See [[mobile-parity-rule]].
+   ════════════════════════════════════════════════════════════════ */
+.arena-profile {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.arena-profile__heading {
+  margin-bottom: 2rem;
+}
+.arena-profile__heading h1 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 0.4rem;
+  letter-spacing: 0.01em;
+}
+.arena-profile__heading p {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  color: var(--arena-text-dim);
+  margin: 0;
+}
+
+.arena-profile__grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.arena-profile__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Reusable card surface for both columns */
+.arena-profile__card {
+  background: var(--arena-surface);
+  border: 1px solid var(--arena-border);
+  border-radius: 14px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.arena-profile__card--pad {
+  padding: 1.5rem;
+}
+/* Sidebar cards subtly lift on hover so the column feels interactive. */
+.arena-profile__aside > .arena-profile__card {
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+.arena-profile__aside > .arena-profile__card:hover {
+  border-color: var(--arena-border-subtle);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 30px rgba(0, 0, 0, 0.32);
+}
+
+/* Avatar card (sidebar top) */
+.arena-profile__avatar-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+.arena-profile__avatar-btn {
+  position: relative;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.arena-profile__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 2px solid var(--arena-accent);
+  background: #1c1b1b;
+  box-shadow: 0 0 0 4px rgba(255, 70, 85, 0.08), 0 6px 18px rgba(255, 70, 85, 0.18);
+  transition: box-shadow 0.2s ease;
+}
+.arena-profile__avatar-btn:hover .arena-profile__avatar {
+  box-shadow: 0 0 0 4px rgba(255, 70, 85, 0.14), 0 8px 22px rgba(255, 70, 85, 0.28);
+}
+.arena-profile__avatar img { width: 100%; height: 100%; object-fit: cover; }
+.arena-profile__avatar-initials {
+  color: var(--arena-text-muted);
+  font-weight: 700;
+  font-size: 1.5rem;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.arena-profile__avatar-cam {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--arena-accent);
+  color: #fff;
+  border: 2px solid var(--arena-surface);
+}
+.arena-profile__avatar-name {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #fff;
+  margin: 0;
+}
+.arena-profile__verified-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 70, 85, 0.1);
+  border: 1px solid var(--arena-accent-dim);
+  color: var(--arena-accent);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Full-width bordered button used in the sidebar (sign out / link profile) */
+.arena-profile__side-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem;
+  background: none;
+  border: 1px solid var(--arena-border);
+  color: var(--arena-text-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.arena-profile__side-btn:hover {
+  border-color: var(--arena-accent-dim);
+  color: var(--arena-accent);
+}
+
+/* Section label (uppercase mono-ish caps) reused across cards. A short accent
+   tick on the left makes each card header easier to scan in the sidebar. */
+.arena-profile__label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--arena-text-secondary, #c8c8c8);
+  margin: 0 0 0.95rem;
+}
+.arena-profile__label::before {
+  content: '';
+  width: 3px;
+  height: 0.85rem;
+  border-radius: 2px;
+  background: var(--arena-accent);
+  flex-shrink: 0;
+}
+/* The referral / invite header puts an icon inline — drop the tick there so the
+   icon stays the visual anchor. */
+.arena-profile__referral .arena-profile__label::before { display: none; }
+
+/* Account verification rows — each provider sits in its own subtle pill so the
+   linked/unlinked state reads at a glance. */
+.arena-profile__verify-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.arena-profile__verify-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: #161616;
+  border: 1px solid var(--arena-border);
+  border-radius: 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.arena-profile__verify-row.is-linked { border-color: rgba(46, 204, 113, 0.25); }
+.arena-profile__verify-id {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--arena-text-primary);
+}
+.arena-profile__verify-id span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-profile__verify-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #4a4a4a;
+  flex-shrink: 0;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.arena-profile__verify-dot.is-on {
+  background: #2ecc71;
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.18);
+}
+.arena-profile__verify-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.arena-profile__verify-tag.is-linked { color: #2ecc71; }
+.arena-profile__verify-tag.is-muted { color: var(--arena-text-dim); font-weight: 600; }
+.arena-profile__verify-btn {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 70, 85, 0.12);
+  border: 1px solid var(--arena-accent-dim);
+  color: var(--arena-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, filter 0.15s ease;
+}
+.arena-profile__verify-btn:hover:not(:disabled) { background: rgba(255, 70, 85, 0.2); }
+.arena-profile__verify-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* Invite-a-friend / referral card */
+/* Referral card gets a faint accent wash + top hairline so it reads as the
+   "do this to unlock more" call-to-action of the sidebar. */
+.arena-profile__referral {
+  position: relative;
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(255, 70, 85, 0.07), transparent 60%),
+    var(--arena-surface);
+  overflow: hidden;
+}
+.arena-profile__referral::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--arena-accent), transparent 70%);
+}
+.arena-profile__referral .arena-profile__label { color: var(--arena-accent); }
+.arena-profile__referral-blurb {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--arena-text-secondary, #b8b8b8);
+  margin: 0 0 0.85rem;
+}
+.arena-profile__referral-blurb strong { color: var(--arena-text-primary, #fff); }
+.arena-profile__referral-link {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.arena-profile__referral-link input {
+  flex: 1;
+  min-width: 0;
+  background: #0d0f16;
+  border: 1px solid var(--arena-border);
+  color: var(--arena-text-secondary, #c8c8c8);
+  font-size: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
+}
+.arena-profile__referral-link input:focus { outline: none; border-color: var(--arena-accent-dim); }
+.arena-profile__referral-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  background: var(--arena-accent, #ff4655);
+  color: #fff;
+  border: none;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0 0.85rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.arena-profile__referral-copy:hover { filter: brightness(1.1); }
+.arena-profile__referral-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+.arena-profile__referral-progress { display: flex; gap: 0.3rem; flex: 1; }
+.arena-profile__referral-progress span {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: #2a2d3a;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+.arena-profile__referral-progress span.is-on {
+  background: linear-gradient(90deg, #2ecc71, #4ade80);
+  box-shadow: 0 0 8px rgba(46, 204, 113, 0.4);
+}
+.arena-profile__referral-count {
+  font-size: 0.72rem;
+  color: var(--arena-text-secondary, #b8b8b8);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.arena-profile__referral-pending {
+  font-size: 0.7rem;
+  color: var(--arena-text-dim);
+  margin: 0.55rem 0 0;
+}
+
+/* "We found you" match card + connect-Riot nudge (profile sidebar). The match
+   card gets the accent treatment since it's the actionable suggestion. */
+.arena-profile__match {
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(255, 70, 85, 0.08), transparent 60%),
+    var(--arena-surface);
+  border-color: var(--arena-accent-dim);
+}
+.arena-profile__match-blurb {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--arena-text-secondary, #b8b8b8);
+  margin: 0 0 0.85rem;
+}
+.arena-profile__match-blurb strong { color: var(--arena-text-primary, #fff); }
+.arena-profile__match-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.arena-profile__match-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  background: #161616;
+  border: 1px solid var(--arena-border);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.arena-profile__match-row:hover { border-color: var(--arena-accent); background: #191416; }
+.arena-profile__match-id { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.arena-profile__match-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-profile__match-meta {
+  font-size: 0.72rem;
+  color: var(--arena-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-profile__match-chevron { color: var(--arena-accent); flex-shrink: 0; }
+.arena-profile__riot-nudge .arena-profile__side-btn { margin-top: 0.25rem; }
+
+/* Claimed profiles — each row stacks identity over a status/action line so
+   the name, Riot ID, badge and Unclaim button never collide in the narrow
+   sidebar. */
+.arena-profile__claims { display: flex; flex-direction: column; gap: 0.6rem; }
+.arena-profile__claim {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  background: #161616;
+  border: 1px solid var(--arena-border);
+  border-radius: 10px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.arena-profile__claim:hover { border-color: var(--arena-border-subtle); background: #191919; }
+.arena-profile__claim-id {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  text-decoration: none;
+}
+.arena-profile__claim-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-profile__claim-riot {
+  font-size: 0.75rem;
+  color: var(--arena-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.arena-profile__claim-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.arena-profile__claim-status {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Profile completion meter */
+.arena-profile__complete-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.arena-profile__complete-pct {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--arena-accent);
+}
+.arena-profile__meter {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #2b2b2b;
+  overflow: hidden;
+}
+.arena-profile__meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--arena-accent), #ff7a85);
+  box-shadow: 0 0 10px rgba(255, 70, 85, 0.35);
+  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.arena-profile__complete-next {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--arena-text-dim);
+  margin: 0.75rem 0 0;
+}
+.arena-profile__complete-next strong { color: var(--arena-text-secondary); font-weight: 600; }
+
+/* Right column form card — sections split by dividers */
+.arena-profile__section { padding: 1.5rem; }
+.arena-profile__divider { height: 1px; background: var(--arena-border); width: 100%; }
+
+/* Social input with a leading icon */
+.arena-profile__input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #111;
+  border: 1px solid var(--arena-border);
+  padding: 0 0.85rem;
+  transition: border-color 0.2s ease;
+}
+.arena-profile__input-wrap:focus-within { border-color: var(--arena-accent); }
+.arena-profile__input-wrap > svg { flex-shrink: 0; color: var(--arena-text-dim); }
+.arena-profile__input-wrap input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.875rem;
+  padding: 0.8rem 0;
+}
+.arena-profile__input-wrap input::placeholder { color: var(--arena-text-dim); }
+
+/* Save footer */
+.arena-profile__save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+.arena-profile__save-bar p {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--arena-text-dim);
+  margin: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   PICKEMS — per-tournament prediction game (Play + Leaderboard tab).
+   Public-facing, uses the arena theme tokens. Mobile rules in the
+   responsive layer below. See [[mobile-parity-rule]].
+   ════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════
+   PICKEMS — redesigned (Figma "Redesign professional page") mapped to
+   the site's --arena-* tokens. Rounded cards, podium leaderboard,
+   two-line player options. See [[pickems-system]] / [[mobile-parity-rule]].
+   ════════════════════════════════════════════════════════════════ */
+.arena-pickems { display: flex; flex-direction: column; gap: 1rem; }
+
+.arena-pickems__empty {
+  display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+  flex-direction: column; text-align: center;
+  padding: 3rem 1.5rem; color: var(--arena-text-dim);
+  font-family: 'Inter', system-ui, sans-serif; font-size: 0.9rem;
+  border: 1px dashed var(--arena-border); background: var(--arena-surface); border-radius: 12px;
+}
+.arena-pickems__empty svg { color: var(--arena-accent); }
+
+/* Sub-tabs (Play / Leaderboard) — pill toggle */
+.arena-pickems__subtabs { display: flex; gap: 0.5rem; }
+.arena-pickems__subtab {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 1rem; border-radius: 8px; background: var(--arena-surface);
+  border: 1px solid var(--arena-border); color: var(--arena-text-dim);
+  font-family: 'Inter', system-ui, sans-serif; font-size: 0.8125rem; font-weight: 600;
+  cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.arena-pickems__subtab:hover { color: var(--arena-text-secondary); }
+.arena-pickems__subtab.is-active {
+  color: #fff; background: var(--arena-accent); border-color: var(--arena-accent);
+}
+
+/* Gate / quota banners */
+.arena-pickems__gate, .arena-pickems__quota {
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  padding: 0.8rem 1rem; border: 1px solid var(--arena-border); border-radius: 10px;
+  background: var(--arena-surface); color: var(--arena-text-secondary);
+  font-family: 'Inter', system-ui, sans-serif; font-size: 0.85rem; line-height: 1.5;
+}
+.arena-pickems__quota {
+  border-color: var(--arena-accent-dim); background: rgba(255,70,85,0.06);
+}
+.arena-pickems__quota strong { color: var(--arena-accent); }
+.arena-pickems__quota svg, .arena-pickems__gate svg { color: var(--arena-accent); flex-shrink: 0; margin-top: 1px; }
+.arena-pickems__link { color: var(--arena-accent); text-decoration: underline; font-weight: 600; }
+.arena-pickems__link:hover { text-decoration: none; }
+
+/* Referral card */
+.arena-pickems__referral {
+  padding: 1rem 1.1rem; border: 1px solid var(--arena-border); background: var(--arena-surface);
+  border-radius: 12px;
+}
+.arena-pickems__referral-head {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: var(--arena-text-primary); font-weight: 600; font-size: 0.85rem;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.arena-pickems__referral-head svg { color: var(--arena-accent); }
+.arena-pickems__referral-sub {
+  color: var(--arena-text-dim); font-size: 0.78rem; margin: 0.4rem 0 0.75rem; line-height: 1.5;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.arena-pickems__referral-sub strong { color: var(--arena-text-primary); }
+.arena-pickems__referral-link { display: flex; gap: 0.5rem; }
+.arena-pickems__referral-link input {
+  flex: 1; min-width: 0; background: var(--arena-bg); border: 1px solid var(--arena-border);
+  color: var(--arena-text-dim); font-size: 0.75rem; padding: 0.5rem 0.7rem; border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace; outline: none;
+}
+.arena-pickems__referral-link button {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.5rem 0.85rem; background: var(--arena-accent); color: #fff; border: none; border-radius: 8px;
+  font-family: 'Inter', system-ui, sans-serif; font-size: 0.75rem; font-weight: 700;
+  cursor: pointer; transition: filter 0.15s;
+}
+.arena-pickems__referral-link button:hover { filter: brightness(1.1); }
+.arena-pickems__referral-progress { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.75rem; }
+.arena-pickems__referral-progress > span {
+  width: 26px; height: 6px; border-radius: 999px; background: var(--arena-border);
+  transition: background 0.2s;
+}
+.arena-pickems__referral-progress > span.is-on { background: #22c55e; }
+.arena-pickems__referral-progress em {
+  margin-left: 0.4rem; font-style: normal; color: var(--arena-text-dim);
+  font-size: 0.72rem; font-family: 'JetBrains Mono', monospace;
+}
+
+/* Match block — card with a predictions header band */
+.arena-pickems__match {
+  border: 1px solid var(--arena-border); background: var(--arena-surface); border-radius: 12px;
+  overflow: hidden;
+}
+.arena-pickems__match-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.95rem 1.1rem; border-bottom: 1px solid var(--arena-border);
+}
+.arena-pickems__match-headings { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.arena-pickems__match-eyebrow {
+  color: var(--arena-text-dim); font-size: 0.65rem; letter-spacing: 0.12em;
+  text-transform: uppercase; font-family: 'JetBrains Mono', monospace;
+}
+.arena-pickems__match-teams {
+  color: var(--arena-text-primary); font-weight: 700; font-size: 1rem;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.arena-pickems__match-t1 { color: var(--arena-accent); }
+.arena-pickems__vs { color: var(--arena-text-dim); font-weight: 500; margin: 0 0.45rem; }
+.arena-pickems__match-meta {
+  display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+  font-family: 'JetBrains Mono', monospace;
+}
+.arena-pickems__stage {
+  padding: 0.2rem 0.55rem; border-radius: 5px; background: var(--arena-bg);
+  color: var(--arena-text-dim); border: 1px solid var(--arena-border);
+}
+.arena-pickems__chip { padding: 0.2rem 0.55rem; border-radius: 5px; font-weight: 700; display: inline-flex; align-items: center; gap: 0.35rem; }
+.arena-pickems__chip--done { background: rgba(255,255,255,0.06); color: var(--arena-text-secondary); }
+.arena-pickems__chip--live { background: rgba(255,70,85,0.12); color: var(--arena-accent); border: 1px solid var(--arena-accent-dim); }
+.arena-pickems__chip--soon { background: rgba(255,255,255,0.04); color: var(--arena-text-dim); border: 1px solid var(--arena-border); }
+.arena-pickems__live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--arena-accent); animation: arena-pulse 1.4s ease-in-out infinite; }
+@keyframes arena-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.arena-pickems__questions { padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.85rem; }
+
+/* One question — its own card inside the match */
+.arena-pickems__q {
+  background: var(--arena-bg); border: 1px solid var(--arena-border); border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+.arena-pickems__q-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem;
+}
+.arena-pickems__q-prompt {
+  color: var(--arena-text-primary); font-size: 0.9rem; font-weight: 600; line-height: 1.4;
+  font-family: 'Inter', system-ui, sans-serif; flex: 1; min-width: 0;
+}
+.arena-pickems__q-badges { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.arena-pickems__q-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.18rem 0.5rem; border-radius: 5px; font-size: 0.68rem; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace; white-space: nowrap;
+}
+.arena-pickems__q-badge--scored { background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.25); }
+.arena-pickems__q-badge--none { background: rgba(139,139,150,0.1); color: var(--arena-text-dim); }
+.arena-pickems__q-badge--lock { background: rgba(255,255,255,0.04); color: var(--arena-text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+.arena-pickems__q-pts {
+  padding: 0.18rem 0.5rem; border-radius: 5px; background: var(--arena-surface);
+  color: var(--arena-text-dim); font-size: 0.68rem; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace; white-space: nowrap;
+}
+
+.arena-pickems__opts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; }
+.arena-pickems__opts--player { gap: 0.45rem; }
+.arena-pickems__opt {
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.65rem 0.8rem; background: var(--arena-surface); border: 1px solid var(--arena-border);
+  border-radius: 8px; color: var(--arena-text-secondary); font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.82rem; text-align: left; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.arena-pickems__opt:hover:not(:disabled):not(.is-locked) { border-color: var(--arena-accent-dim); }
+.arena-pickems__opt.is-mine { border-color: var(--arena-accent); background: rgba(255,70,85,0.08); }
+.arena-pickems__opt.is-correct { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.08); }
+.arena-pickems__opt.is-correct .arena-pickems__opt-primary { color: #22c55e; }
+.arena-pickems__opt.is-wrong { border-color: rgba(255,70,85,0.4); background: rgba(255,70,85,0.08); }
+.arena-pickems__opt.is-wrong .arena-pickems__opt-primary { color: var(--arena-accent); }
+.arena-pickems__opt.is-locked { cursor: default; }
+.arena-pickems__opt:disabled { cursor: not-allowed; }
+.arena-pickems__opt-bar {
+  position: absolute; inset: 0 auto 0 0; background: rgba(255,255,255,0.05); z-index: 0;
+  transition: width 0.6s ease;
+}
+.arena-pickems__opt-label { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.arena-pickems__opt-primary { color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arena-pickems__opt-secondary { color: var(--arena-text-dim); font-size: 0.68rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arena-pickems__opt-right { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.arena-pickems__opt-pct { color: var(--arena-text-dim); font-size: 0.7rem; font-family: 'JetBrains Mono', monospace; }
+.arena-pickems__opt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--arena-accent); }
+.arena-pickems__opt.is-correct svg { color: #22c55e; }
+.arena-pickems__opt.is-wrong svg { color: var(--arena-accent); }
+
+/* ── Leaderboard ── */
+.arena-pickems__lb-wrap { display: flex; flex-direction: column; gap: 1rem; }
+
+/* Podium (top 3) */
+.arena-pickems__podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; align-items: end; }
+.arena-pickems__podium-slot {
+  display: flex; flex-direction: column; align-items: center; gap: 0.5rem; text-align: center;
+  padding: 1rem 0.75rem; border-radius: 12px; background: var(--arena-surface);
+  border: 1px solid var(--arena-border); margin-top: 16px;
+}
+.arena-pickems__podium-slot.is-empty { visibility: hidden; }
+.arena-pickems__podium-slot.is-p1 { margin-top: 0; background: rgba(234,179,8,0.05); border-color: rgba(234,179,8,0.3); }
+.arena-pickems__podium-slot.is-p2 { border-color: rgba(148,163,184,0.25); }
+.arena-pickems__podium-slot.is-p3 { border-color: rgba(180,83,9,0.25); }
+.arena-pickems__podium-slot.is-me { box-shadow: 0 0 0 1px var(--arena-accent-dim) inset; }
+.arena-pickems__podium-avatar {
+  width: 44px; height: 44px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--arena-bg); border: 2px solid var(--arena-border);
+  color: var(--arena-text-secondary); font-size: 0.78rem; font-weight: 700;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.arena-pickems__podium-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.is-p1 .arena-pickems__podium-avatar { border-color: rgba(234,179,8,0.5); color: #eab308; }
+.is-p2 .arena-pickems__podium-avatar { border-color: rgba(148,163,184,0.45); color: #94a3b8; }
+.is-p3 .arena-pickems__podium-avatar { border-color: rgba(180,83,9,0.45); color: #b45309; }
+.arena-pickems__podium-id { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; max-width: 100%; }
+.arena-pickems__podium-name {
+  color: var(--arena-text-primary); font-size: 0.8rem; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.arena-pickems__podium-rank { font-size: 0.68rem; letter-spacing: 0.06em; font-family: 'JetBrains Mono', monospace; }
+.is-p1 .arena-pickems__podium-rank { color: #eab308; }
+.is-p2 .arena-pickems__podium-rank { color: #94a3b8; }
+.is-p3 .arena-pickems__podium-rank { color: #b45309; }
+.arena-pickems__podium-pts {
+  padding: 0.25rem 0.7rem; border-radius: 8px; font-size: 0.85rem; font-weight: 700;
+  background: var(--arena-bg); border: 1px solid var(--arena-border); color: var(--arena-text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+.is-p1 .arena-pickems__podium-pts { color: #eab308; border-color: rgba(234,179,8,0.3); background: rgba(234,179,8,0.08); }
+.arena-pickems__podium-record { display: flex; align-items: center; gap: 0.6rem; font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; }
+.arena-pickems__podium-record .is-correct { display: inline-flex; align-items: center; gap: 0.2rem; color: #22c55e; }
+.arena-pickems__podium-record .is-wrong { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--arena-accent); }
+
+/* Table (ranks 4+) */
+.arena-pickems__lb { border: 1px solid var(--arena-border); background: var(--arena-surface); border-radius: 12px; overflow: hidden; }
+.arena-pickems__lb-head, .arena-pickems__lb-row {
+  display: grid; grid-template-columns: 36px 1fr 5rem 5rem 5rem; align-items: center;
+  gap: 0.5rem; padding: 0.7rem 1rem;
+}
+.arena-pickems__lb-head {
+  border-bottom: 1px solid var(--arena-border); color: var(--arena-text-dim);
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em;
+  font-family: 'JetBrains Mono', monospace;
+}
+.arena-pickems__lb-row { border-bottom: 1px solid var(--arena-border-subtle); transition: background 0.15s; }
+.arena-pickems__lb-row:last-child { border-bottom: none; }
+.arena-pickems__lb-row:hover { background: rgba(255,255,255,0.02); }
+.arena-pickems__lb-row.is-me { background: rgba(255,70,85,0.06); }
+.arena-pickems__lb-rank { color: var(--arena-text-dim); font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
+.arena-pickems__lb-player { display: flex; align-items: center; gap: 0.55rem; min-width: 0; }
+.arena-pickems__lb-avatar {
+  width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  border: 1px solid var(--arena-border);
+}
+.arena-pickems__lb-avatar--ph {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--arena-bg); color: var(--arena-text-dim); font-size: 0.6rem; font-weight: 700;
+}
+.is-me .arena-pickems__lb-avatar--ph { background: rgba(255,70,85,0.2); color: var(--arena-accent); border-color: var(--arena-accent-dim); }
+.arena-pickems__lb-name {
+  color: var(--arena-text-secondary); font-size: 0.84rem; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.is-me .arena-pickems__lb-name { color: var(--arena-text-primary); }
+.arena-pickems__lb-you { color: var(--arena-accent); font-size: 0.62rem; font-weight: 700; margin-left: 0.4rem; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+.arena-pickems__lb-badge { color: var(--arena-accent); flex-shrink: 0; }
+.arena-pickems__lb-num {
+  color: var(--arena-text-secondary); font-size: 0.82rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+.arena-pickems__lb-correct { display: inline-flex; align-items: center; gap: 0.3rem; color: #22c55e; }
+.arena-pickems__lb-wrong { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--arena-accent); }
+.arena-pickems__lb-pts { color: var(--arena-text-primary); font-weight: 700; }
+
+/* Toast */
+.arena-pickems__toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+  background: var(--arena-surface); border: 1px solid var(--arena-accent); border-radius: 8px;
+  color: #fff; padding: 0.7rem 1.1rem; font-size: 0.82rem; z-index: 9999;
+  font-family: 'Inter', system-ui, sans-serif; max-width: 90vw;
+  animation: arena-toast-in 0.25s ease;
+}
+
 @media (max-width: 600px) {
   .arena-contact__card { padding: 1.5rem 1.25rem; }
   .arena-contact__row { grid-template-columns: 1fr; }
@@ -7750,10 +8846,37 @@ html, body { overflow-x: clip; max-width: 100%; }
   .arena-md-lineup__grid .arena-md-player:first-child:nth-last-child(4) ~ .arena-md-player {
     flex-basis: calc(50% - 0.5px);
   }
+
+  /* Profile settings: collapse the sidebar + form into a single column. */
+  .arena-profile__grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
   :root { --arena-gutter: 16px; --arena-section-gap: 2.75rem; }
+
+  /* Profile settings: tighter padding + stack the save bar so the button
+     goes full-width instead of crowding the helper text. */
+  .arena-profile__card--pad,
+  .arena-profile__section,
+  .arena-profile__save-bar { padding: 1.25rem; }
+  .arena-profile__save-bar { flex-direction: column; align-items: stretch; }
+  .arena-profile__save-bar .arena-btn { width: 100%; }
+
+  /* Pickems: binary options stack to one column (player grid stays 2-col so the
+     10-name list isn't a tall single column); match header stacks; leaderboard
+     drops to rank + player + points (correct/wrong columns hidden) for phones. */
+  .arena-pickems__opts { grid-template-columns: 1fr; }
+  .arena-pickems__opts--player { grid-template-columns: 1fr 1fr; }
+  .arena-pickems__match-head { flex-direction: column; align-items: flex-start; gap: 0.6rem; }
+  .arena-pickems__match-meta { flex-wrap: wrap; }
+  .arena-pickems__q-head { flex-direction: column; gap: 0.5rem; }
+  .arena-pickems__q-badges { justify-content: flex-start; }
+  .arena-pickems__lb-head, .arena-pickems__lb-row { grid-template-columns: 28px 1fr 60px; }
+  .arena-pickems__lb-num.arena-pickems__lb--hide { display: none; }
+  .arena-pickems__podium { gap: 0.5rem; }
+  .arena-pickems__podium-slot { padding: 0.8rem 0.4rem; }
+  .arena-pickems__referral-link input { font-size: 0.7rem; }
+  .arena-profile__referral-link input { font-size: 0.7rem; }
 
   /* min-height + top padding so the headline never clips off the top of the
      hero on a narrow screen (it grows downward as the title wraps instead). */
