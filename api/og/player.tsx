@@ -300,6 +300,9 @@ export default async function handler(req: Request) {
   const kd = career ? career.kd.toFixed(2) : '—';
   const hs = career ? `${Math.round(career.hsPercent)}%` : '—';
   const maps = career ? career.mapsPlayed.toString() : '—';
+  // The player's signature agents (most-played first) — a strong identity cue
+  // for the share card. Cap at 3 so the line stays on one row.
+  const topAgents = (career?.agents ?? []).slice(0, 3);
 
   const card = (
       <div
@@ -357,6 +360,30 @@ export default async function handler(req: Request) {
             <div style={{ fontSize: 78, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{name}</div>
             {team ? (
               <div style={{ fontSize: 30, color: '#bdbdbd', marginTop: 14 }}>{team}</div>
+            ) : null}
+            {topAgents.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+                <span style={{ fontSize: 20, color: '#7a7a7a', letterSpacing: 2, textTransform: 'uppercase' }}>
+                  Agents
+                </span>
+                {topAgents.map(a => (
+                  <span
+                    key={a}
+                    style={{
+                      display: 'flex',
+                      fontSize: 24,
+                      fontWeight: 700,
+                      color: '#fff',
+                      background: 'rgba(255,70,85,0.12)',
+                      border: `1px solid ${ACCENT}`,
+                      borderRadius: 999,
+                      padding: '4px 16px',
+                    }}
+                  >
+                    {a}
+                  </span>
+                ))}
+              </div>
             ) : null}
           </div>
         </div>
