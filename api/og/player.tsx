@@ -283,15 +283,12 @@ function Stat({ value, label, accent }: { value: string; label: string; accent?:
 export default async function handler(req: Request) {
   const { searchParams } = new URL(req.url);
   const pid = searchParams.get('pid') ?? '';
-  const debug = searchParams.get('debug') === '1';
 
   let career: Career | null = null;
-  let careerErr = '';
   try {
     if (pid) career = deriveCareer(await fetchTournaments(), pid);
-  } catch (e) {
+  } catch {
     career = null;
-    careerErr = String((e as Error)?.message ?? e);
   }
 
   const font = await loadFont();
@@ -417,27 +414,6 @@ export default async function handler(req: Request) {
   const fonts = font
     ? [{ name: 'Inter', data: font, weight: 700 as const, style: 'normal' as const }]
     : undefined;
-
-  // ── Diagnostic mode: /api/og/player?...&debug=1 renders the REAL card and
-  // materializes the body so a Satori layout failure surfaces as readable text
-  // instead of a silent empty PNG. Remove once the card renders.
-  if (debug) {
-    let renderErr = '';
-    let bytes = -1;
-    try {
-      const probe = new ImageResponse(card, { width: 1200, height: 630, fonts });
-      bytes = (await probe.arrayBuffer()).byteLength;
-    } catch (e) {
-      renderErr = String((e as Error)?.stack ?? (e as Error)?.message ?? e);
-    }
-    return new Response(
-      JSON.stringify(
-        { pid, fontLoaded: !!font, careerFound: !!career, careerErr, renderedBytes: bytes, renderErr },
-        null, 2,
-      ),
-      { headers: { 'Content-Type': 'application/json' } },
-    );
-  }
 
   return new ImageResponse(card, {
     width: 1200,
