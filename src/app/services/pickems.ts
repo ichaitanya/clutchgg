@@ -145,12 +145,14 @@ export async function getMyReferralStats(): Promise<ReferralStats | null> {
   const stored = getStoredSession();
   if (!stored || stored.accessTokenExpired) return null;
   const auth = `Bearer ${stored.access_token}`;
-  const [{ data: acct }, { data: refs }] = await Promise.all([
-    dbClient.from('player_accounts').select('referral_code').eq('id', stored.user.id).maybeSingle()
-      .setHeader('Authorization', auth),
+  // referral_code is column-REVOKEd from clients (migration 016) — read it via
+  // the own-row SECURITY DEFINER RPC instead of selecting it off the table.
+  const [{ data: acctRow }, { data: refs }] = await Promise.all([
+    dbClient.rpc('get_my_player_account').setHeader('Authorization', auth),
     dbClient.from('referrals').select('status').eq('referrer_id', stored.user.id)
       .setHeader('Authorization', auth),
   ]);
+  const acct = Array.isArray(acctRow) ? acctRow[0] : acctRow;
   if (!acct?.referral_code) return null;
   const list = (refs ?? []) as { status: string }[];
   return {

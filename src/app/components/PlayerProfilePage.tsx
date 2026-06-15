@@ -26,7 +26,7 @@ import {
   signOut,
   unclaimProfile,
   upsertPlayerAccount,
-  uploadAvatar,
+  updateProfile,
   verifyRiotConnection,
   findMyPlayerProfiles,
   captureRiotId,
@@ -35,6 +35,7 @@ import {
   type ProfileMatch,
 } from '../services/supabase';
 import { getMyReferralStats, type ReferralStats } from '../services/pickems';
+import { optimizeAvatar, AvatarError } from '../utils/avatarImage';
 
 // Social platforms shown on the profile editor, stored in socials jsonb.
 const SOCIAL_FIELDS: { key: string; label: string; placeholder: string; icon: LucideIcon }[] = [
@@ -44,7 +45,9 @@ const SOCIAL_FIELDS: { key: string; label: string; placeholder: string; icon: Lu
   { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/yourhandle', icon: Instagram },
 ];
 
-const BIO_LIMIT = 500;
+// Product bio limit is 250 (the DB CHECK stays at 500 so no existing longer bio
+// is invalidated; the edge function and this UI enforce 250 going forward).
+const BIO_LIMIT = 250;
 const NAME_LIMIT = 30;
 
 export function PlayerProfilePage() {
@@ -60,6 +63,8 @@ export function PlayerProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [linkPending, setLinkPending] = useState<OAuthProvider | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  // Optimistic local preview (object URL) shown while the new photo uploads.
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [myClaims, setMyClaims] = useState<PlayerClaim[]>([]);
   const [unclaiming, setUnclaiming] = useState<string | null>(null);
   const [referral, setReferral] = useState<ReferralStats | null>(null);
@@ -202,17 +207,33 @@ export function PlayerProfilePage() {
       setError('Display name cannot be empty.');
       return;
     }
+    const trimmedBio = bio.trim();
+    if (trimmedBio.length > BIO_LIMIT) {
+      setError(`Bio must be ${BIO_LIMIT} characters or fewer.`);
+      return;
+    }
     setError(null);
     setSaving(true);
     try {
       const cleanSocials = Object.fromEntries(
         Object.entries(socials).filter(([, v]) => v.trim() !== '')
       );
+      // Name + socials are client-writable; bio is frozen against direct writes
+      // (migration 017) and must go through the moderated edge function. Only
+      // send the bio if it actually changed, so a name/socials edit doesn't burn
+      // a bio rate-limit slot or re-run moderation needlessly.
+      const bioChanged = trimmedBio !== (playerAccount?.bio ?? '').trim();
       await upsertPlayerAccount({
         display_name: displayName.trim().slice(0, NAME_LIMIT),
-        bio: bio.trim().slice(0, BIO_LIMIT) || null,
         socials: cleanSocials,
       });
+      if (bioChanged) {
+        const res = await updateProfile({ bio: trimmedBio || null });
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+      }
       await refresh();
       setSavedToast(true);
       setTimeout(() => setSavedToast(false), 2500);
@@ -226,19 +247,35 @@ export function PlayerProfilePage() {
   const handleAvatarPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Photo must be under 2 MB.');
-      return;
-    }
     setError(null);
     setUploadingAvatar(true);
+    let localPreview: string | null = null;
     try {
-      const url = await uploadAvatar(file);
-      await upsertPlayerAccount({ avatar_url: url });
+      // 1. Validate + optimize in the browser → 512x512 WEBP (also strips EXIF).
+      //    Format/size/animated rejections surface here as AvatarError messages.
+      const optimized = await optimizeAvatar(file);
+      // 2. Optimistic preview from the optimized blob (what will actually save).
+      localPreview = URL.createObjectURL(optimized.blob);
+      setAvatarPreview(localPreview);
+      // 3. Secure write: edge function re-validates bytes, moderates, stores.
+      const res = await updateProfile({ avatarBase64: optimized.base64 });
+      if (res.error) {
+        setError(res.error);
+        setAvatarPreview(null);
+        return;
+      }
       await refresh();
     } catch (err: any) {
-      setError(err?.message || 'Could not upload the photo. Please try again.');
+      // AvatarError carries a user-friendly message; anything else gets a generic.
+      setError(
+        err instanceof AvatarError
+          ? err.message
+          : err?.message || 'Could not upload the photo. Please try again.'
+      );
+      setAvatarPreview(null);
     } finally {
+      // Revoke the optimistic object URL once the real (or failed) state settles.
+      if (localPreview) { try { URL.revokeObjectURL(localPreview); } catch { /* */ } }
       setUploadingAvatar(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -360,7 +397,7 @@ export function PlayerProfilePage() {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp"
           onChange={handleAvatarPick}
           style={{ display: 'none' }}
         />
@@ -384,8 +421,12 @@ export function PlayerProfilePage() {
                   className="arena-profile__avatar-btn"
                 >
                   <span className="arena-profile__avatar">
-                    {playerAccount.avatar_url ? (
-                      <img src={playerAccount.avatar_url} alt={playerAccount.display_name} />
+                    {avatarPreview || playerAccount.avatar_url ? (
+                      <img
+                        src={avatarPreview ?? playerAccount.avatar_url!}
+                        alt={playerAccount.display_name}
+                        style={uploadingAvatar ? { opacity: 0.6 } : undefined}
+                      />
                     ) : (
                       <span className="arena-profile__avatar-initials">{initials}</span>
                     )}

@@ -112,8 +112,14 @@ Deno.serve(async (req) => {
 
   const connRes = await fetch(`${DISCORD_API}/users/@me/connections`, { headers: discordHeaders });
   if (!connRes.ok) {
-    await clearConnection();
-    return json({ status: "no_riot_connection", reason: "connections_scope_missing" });
+    // 403/401 → the token genuinely lacks the connections scope: clear, since we
+    // can't see a connection. 5xx/429 → transient Discord error: do NOT clear a
+    // previously-good connection over a blip; just report and leave it intact.
+    if (connRes.status === 401 || connRes.status === 403) {
+      await clearConnection();
+      return json({ status: "no_riot_connection", reason: "connections_scope_missing" });
+    }
+    return json({ status: "error", reason: `discord_connections_${connRes.status}` }, 502);
   }
   const connections: Array<{ type: string; name: string; verified: boolean }> = await connRes.json();
   const riot = (connections ?? []).find((c) => c.type === "riotgames");

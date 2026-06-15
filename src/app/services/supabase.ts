@@ -361,6 +361,10 @@ export interface PlayerAccount {
   is_verified: boolean;
   riot_id?: string | null;
   riot_id_verified: boolean;
+  // Public "edited" metadata (migration 017). Rate-limit counters are NOT exposed
+  // to clients — only the edge function reads them.
+  avatar_updated_at?: string | null;
+  bio_updated_at?: string | null;
   // Captured Discord→Riot connection (set by capture-riot-id) — drives the
   // background profile-match suggestions. Distinct from riot_id_verified, which
   // means an admin-approved claim.
@@ -426,20 +430,33 @@ export async function getLinkedProviders(): Promise<string[]> {
   return (data.user.identities ?? []).map(i => i.provider);
 }
 
-// Read the signed-in user's own player account. Token-first via dbClient (no
-// GoTrue lock), same pattern as getCurrentProfile.
+// Read the signed-in user's own player account — including the sensitive fields
+// (riot/discord ids, referral) that are column-REVOKEd from clients. Goes
+// through get_my_player_account() (SECURITY DEFINER, returns only auth.uid()'s
+// row). Token-first via dbClient (no GoTrue lock), same pattern as before.
 export async function getPlayerAccount(userId: string, accessToken?: string): Promise<PlayerAccount | null> {
   const client = accessToken ? dbClient : supabase;
-  const q = client.from('player_accounts').select('*').eq('id', userId).maybeSingle();
+  const q = client.rpc('get_my_player_account');
   const { data, error } = accessToken ? await q.setHeader('Authorization', `Bearer ${accessToken}`) : await q;
   if (error) return null;
-  return (data as PlayerAccount) ?? null;
+  // rpc returning a composite row comes back as the object (or null).
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as PlayerAccount) ?? null;
 }
 
+// Columns safe to expose to ANY visitor viewing someone else's profile. The
+// sensitive identifiers (riot_id, riot_connection_id, discord_id,
+// discord_username, referral_*) are column-REVOKEd from clients (migration 016)
+// and intentionally NOT selected here — selecting them would error.
+const PUBLIC_ACCOUNT_COLUMNS =
+  'id, display_name, avatar_url, bio, socials, google_linked, discord_linked, is_verified';
+
 // Public read of any player account (other visitors viewing a profile) —
-// always through the anonymous client so it can never stall on auth.
+// always through the anonymous client so it can never stall on auth. Returns a
+// partial PlayerAccount (safe columns only); sensitive fields are undefined.
 export async function getPublicPlayerAccount(userId: string): Promise<PlayerAccount | null> {
-  const { data, error } = await dbClient.from('player_accounts').select('*').eq('id', userId).maybeSingle();
+  const { data, error } = await dbClient
+    .from('player_accounts').select(PUBLIC_ACCOUNT_COLUMNS).eq('id', userId).maybeSingle();
   if (error) return null;
   return (data as PlayerAccount) ?? null;
 }
@@ -448,8 +465,14 @@ export async function getPublicPlayerAccount(userId: string): Promise<PlayerAcco
 // trigger overwrites google_linked/discord_linked/discord_* from
 // auth.identities on every write, so calling this after a login or a link is
 // what refreshes the verified badge.
+//
+// NOTE: avatar_url and bio are intentionally NOT accepted here. They are frozen
+// against direct client writes by the guard_player_profile_columns trigger
+// (migration 017) and can ONLY be changed through updateProfile() (the moderated
+// edge function). Passing them here would silently no-op, so the type excludes
+// them to make that a compile error instead of a confusing runtime surprise.
 export async function upsertPlayerAccount(
-  patch: Partial<Pick<PlayerAccount, 'display_name' | 'avatar_url' | 'bio' | 'socials' | 'riot_id'>>
+  patch: Partial<Pick<PlayerAccount, 'display_name' | 'socials' | 'riot_id'>>
 ): Promise<PlayerAccount | null> {
   const session = await getSession();
   if (!session) throw new Error('Not signed in');
@@ -459,19 +482,19 @@ export async function upsertPlayerAccount(
   const row = {
     id: session.user.id,
     display_name: patch.display_name ?? fallbackName,
-    ...(patch.avatar_url !== undefined ? { avatar_url: patch.avatar_url } : {}),
-    ...(patch.bio !== undefined ? { bio: patch.bio } : {}),
     ...(patch.socials !== undefined ? { socials: patch.socials } : {}),
     ...(patch.riot_id !== undefined ? { riot_id: patch.riot_id } : {}),
   };
   const client = bearerClient(session.access_token);
-  const { data, error } = await client
+  // RETURNING only safe columns (sensitive ones are column-REVOKEd). Re-read the
+  // full row via the own-row RPC for the return value.
+  const { error } = await client
     .from('player_accounts')
     .upsert(row, { onConflict: 'id' })
-    .select()
+    .select(PUBLIC_ACCOUNT_COLUMNS)
     .single();
   if (error) throw error;
-  return data as PlayerAccount;
+  return await getPlayerAccount(session.user.id, session.access_token);
 }
 
 // Outcome of ensurePlayerAccount. `duplicate_email` means this OAuth sign-in
@@ -493,19 +516,22 @@ export async function ensurePlayerAccount(): Promise<EnsureAccountResult> {
   const existing = await getPlayerAccount(session.user.id, session.access_token);
   if (existing) {
     // Touch the row so the trigger refreshes linked flags from auth.identities
-    // (e.g. right after linkIdentity returned).
+    // (e.g. right after linkIdentity returned). RETURNING only safe columns —
+    // the sensitive ones are column-REVOKEd, so a bare .select() would 403 on
+    // the RETURNING clause. Re-read the full row via the own-row RPC after.
     const client = bearerClient(session.access_token);
-    const { data, error } = await client
+    const { error } = await client
       .from('player_accounts')
       .update({ display_name: existing.display_name })
       .eq('id', session.user.id)
-      .select()
+      .select(PUBLIC_ACCOUNT_COLUMNS)
       .single();
-    return { status: 'ok', account: (error ? existing : (data as PlayerAccount)), created: false };
+    const account = (await getPlayerAccount(session.user.id, session.access_token)) ?? existing;
+    return { status: 'ok', account: (error ? existing : account), created: false };
   }
   const meta = (session.user.user_metadata ?? {}) as Record<string, any>;
   const client = bearerClient(session.access_token);
-  const { data, error } = await client
+  const { error } = await client
     .from('player_accounts')
     .insert({
       id: session.user.id,
@@ -513,7 +539,7 @@ export async function ensurePlayerAccount(): Promise<EnsureAccountResult> {
         meta.full_name || meta.name || meta.preferred_username || session.user.email?.split('@')[0] || 'Player',
       avatar_url: meta.avatar_url || meta.picture || null,
     })
-    .select()
+    .select(PUBLIC_ACCOUNT_COLUMNS)
     .single();
   if (error) {
     // The 007 guard raises with message 'duplicate_player_email'.
@@ -522,7 +548,10 @@ export async function ensurePlayerAccount(): Promise<EnsureAccountResult> {
     }
     return { status: 'error' };
   }
-  return { status: 'ok', account: data as PlayerAccount, created: true };
+  // Full row (incl. referral_code for a fresh referral capture) via the RPC.
+  const account = await getPlayerAccount(session.user.id, session.access_token);
+  if (!account) return { status: 'error' };
+  return { status: 'ok', account, created: true };
 }
 
 // ─── Profile claims (tournament player cards) ───────────────────────────────
@@ -862,20 +891,53 @@ export async function decideClaim(claimId: string, decision: 'approved' | 'rejec
   if (!data || data.error) throw new Error(data?.error || 'Decision failed');
 }
 
-// Upload a profile photo to the avatars bucket (path prefix = uid, enforced by
-// storage RLS) and return its public URL.
-export async function uploadAvatar(file: File): Promise<string> {
-  const session = await getSession();
-  if (!session) throw new Error('Not signed in');
-  const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
-  const path = `${session.user.id}/avatar-${Date.now()}.${ext}`;
-  const client = bearerClient(session.access_token);
-  const { error } = await client.storage
-    .from('avatars')
-    .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600' });
-  if (error) throw error;
-  const { data } = client.storage.from('avatars').getPublicUrl(path);
-  return data.publicUrl;
+// ─── Secure avatar + bio updates (edge function) ────────────────────────────
+// avatar_url and bio are frozen against direct client writes (migration 017
+// guard trigger). The ONLY write path is the `update-profile` edge function,
+// which re-validates the image bytes, runs moderation on image + text, and
+// enforces per-user daily rate limits. The browser pre-optimizes the avatar to
+// a 512x512 WEBP (utils/avatarImage) purely for upload size + instant preview.
+
+export interface UpdateProfileResult {
+  ok?: boolean;
+  avatar_url?: string;
+  bio?: string | null;
+  reason?:
+    | 'no_account' | 'rate_limited' | 'invalid_image' | 'too_large' | 'animated'
+    | 'bad_dimensions' | 'moderation_unavailable' | 'image_rejected'
+    | 'too_long' | 'profanity' | 'bio_rejected';
+  categories?: string[];
+  error?: string;
+}
+
+// Call the update-profile edge function. `avatarBase64` is the bare base64 of an
+// already-optimized WEBP; `bio` is the raw text (null/'' clears it). Either or
+// both may be provided. Surfaces the server's reason codes so the UI can show a
+// precise message (rate limit, moderation rejection, etc.).
+export async function updateProfile(
+  patch: { avatarBase64?: string; bio?: string | null }
+): Promise<UpdateProfileResult> {
+  const invoke = supabase.functions.invoke('update-profile', { body: patch });
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('update-profile timed out')), 30_000)
+  );
+  try {
+    const { data, error } = await Promise.race([invoke, timeout]) as any;
+    if (error) {
+      // functions.invoke returns the JSON body in error.context for non-2xx.
+      try {
+        const res = error?.context;
+        if (res && typeof res.json === 'function') {
+          const body = await res.json();
+          if (body) return body as UpdateProfileResult;
+        }
+      } catch { /* ignore */ }
+      return { error: 'Could not save your profile. Please try again.' };
+    }
+    return (data ?? { error: 'Could not save your profile. Please try again.' }) as UpdateProfileResult;
+  } catch (e: any) {
+    return { error: e?.message || 'Could not save your profile. Please try again.' };
+  }
 }
 
 // Change the signed-in user's password and clear the must_change_password flag.
